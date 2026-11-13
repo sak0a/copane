@@ -1,7 +1,7 @@
 {
-  "name": "vscode-agent-bridge",
-  "displayName": "Agent Bridge: Browser & Terminal for Claude Code",
-  "description": "Gives Claude Code (and other MCP agents) first-class access to VS Code's integrated browser tabs and integrated terminals, per window and per agent session.",
+  "name": "copane",
+  "displayName": "Copane",
+  "description": "Shares your VS Code window with Claude Code and other MCP agents: its integrated browser tabs and terminals, per window and per agent session, with you able to step in.",
   "publisher": "sak0a",
   "version": "0.1.0",
   "license": "MIT",
@@ -20,7 +20,8 @@
     "browser",
     "terminal",
     "agent",
-    "codex"
+    "codex",
+    "ai"
   ],
   "extensionKind": [
     "workspace"
@@ -37,181 +38,181 @@
   "contributes": {
     "commands": [
       {
-        "command": "agentBridge.showLog",
+        "command": "copane.showLog",
         "title": "Show Log",
-        "category": "Agent Bridge"
+        "category": "Copane"
       },
       {
-        "command": "agentBridge.browser.pauseTab",
+        "command": "copane.browser.pauseTab",
         "title": "Pause Agent Access to Browser Tab",
         "shortTitle": "Take Over",
-        "category": "Agent Bridge",
+        "category": "Copane",
         "icon": "$(debug-pause)"
       },
       {
-        "command": "agentBridge.browser.resumeTab",
+        "command": "copane.browser.resumeTab",
         "title": "Resume Agent Access to Browser Tab",
         "shortTitle": "Resume Agent",
-        "category": "Agent Bridge",
+        "category": "Copane",
         "icon": "$(debug-continue)"
       },
       {
-        "command": "agentBridge.browser.releaseTab",
+        "command": "copane.browser.releaseTab",
         "title": "End Agent Control of Browser Tab",
-        "category": "Agent Bridge"
+        "category": "Copane"
       },
       {
-        "command": "agentBridge.browser.revealTab",
+        "command": "copane.browser.revealTab",
         "title": "Show Browser Tab",
-        "category": "Agent Bridge"
+        "category": "Copane"
       },
       {
-        "command": "agentBridge.browser.shareTab",
+        "command": "copane.browser.shareTab",
         "title": "Share Browser Tab with Agent Session…",
-        "category": "Agent Bridge"
+        "category": "Copane"
       },
       {
-        "command": "agentBridge.browser.resetPermissions",
+        "command": "copane.browser.resetPermissions",
         "title": "Reset Browser Tab Permissions",
-        "category": "Agent Bridge"
+        "category": "Copane"
       },
       {
-        "command": "agentBridge.repair",
+        "command": "copane.repair",
         "title": "Check and Repair Setup",
-        "category": "Agent Bridge",
+        "category": "Copane",
         "icon": "$(tools)"
       },
       {
-        "command": "agentBridge.registerAgents",
+        "command": "copane.registerAgents",
         "title": "Turn On (Register with Claude Code and Codex)",
-        "category": "Agent Bridge"
+        "category": "Copane"
       },
       {
-        "command": "agentBridge.unregisterAgents",
+        "command": "copane.unregisterAgents",
         "title": "Turn Off (Unregister from Claude Code and Codex)",
-        "category": "Agent Bridge"
+        "category": "Copane"
       },
       {
-        "command": "agentBridge.enableBrowser",
+        "command": "copane.enableBrowser",
         "title": "Enable Integrated Browser",
-        "category": "Agent Bridge"
+        "category": "Copane"
       },
       {
-        "command": "agentBridge.showStatus",
+        "command": "copane.showStatus",
         "title": "Show Status",
-        "category": "Agent Bridge"
+        "category": "Copane"
       },
       {
-        "command": "agentBridge.copyStatus",
+        "command": "copane.copyStatus",
         "title": "Copy Status Report",
-        "category": "Agent Bridge",
+        "category": "Copane",
         "icon": "$(copy)"
       },
       {
-        "command": "agentBridge.terminal.finishRequest",
+        "command": "copane.terminal.finishRequest",
         "title": "Done: Hand Terminal Back to Agent",
-        "category": "Agent Bridge",
+        "category": "Copane",
         "icon": "$(check)"
       },
       {
-        "command": "agentBridge.terminal.declineRequest",
+        "command": "copane.terminal.declineRequest",
         "title": "Won't Do: Decline Agent's Terminal Request",
-        "category": "Agent Bridge",
+        "category": "Copane",
         "icon": "$(close)"
       },
       {
-        "command": "agentBridge.ui.showAttention",
+        "command": "copane.ui.showAttention",
         "title": "Go to What Needs You",
-        "category": "Agent Bridge",
+        "category": "Copane",
         "icon": "$(bell)"
       },
       {
-        "command": "agentBridge.ui.revealTab",
+        "command": "copane.ui.revealTab",
         "title": "Show Browser Tab",
-        "category": "Agent Bridge",
+        "category": "Copane",
         "icon": "$(go-to-file)"
       },
       {
-        "command": "agentBridge.ui.pauseTab",
+        "command": "copane.ui.pauseTab",
         "title": "Pause Agents on Browser Tab",
-        "category": "Agent Bridge",
+        "category": "Copane",
         "icon": "$(debug-pause)"
       },
       {
-        "command": "agentBridge.ui.resumeTab",
+        "command": "copane.ui.resumeTab",
         "title": "Resume Agents on Browser Tab",
-        "category": "Agent Bridge",
+        "category": "Copane",
         "icon": "$(debug-continue)"
       },
       {
-        "command": "agentBridge.ui.releaseTab",
+        "command": "copane.ui.releaseTab",
         "title": "Release Browser Tab from Agent",
-        "category": "Agent Bridge",
+        "category": "Copane",
         "icon": "$(debug-disconnect)"
       },
       {
-        "command": "agentBridge.ui.closeTab",
+        "command": "copane.ui.closeTab",
         "title": "Close Browser Tab",
-        "category": "Agent Bridge",
+        "category": "Copane",
         "icon": "$(close)"
       },
       {
-        "command": "agentBridge.ui.revealTerminal",
+        "command": "copane.ui.revealTerminal",
         "title": "Show Agent Terminal",
-        "category": "Agent Bridge",
+        "category": "Copane",
         "icon": "$(terminal)"
       },
       {
-        "command": "agentBridge.ui.interruptTerminal",
+        "command": "copane.ui.interruptTerminal",
         "title": "Interrupt Terminal Command (Ctrl+C)",
-        "category": "Agent Bridge",
+        "category": "Copane",
         "icon": "$(debug-stop)"
       },
       {
-        "command": "agentBridge.ui.closeTerminal",
+        "command": "copane.ui.closeTerminal",
         "title": "Close Agent Terminal",
-        "category": "Agent Bridge",
+        "category": "Copane",
         "icon": "$(trash)"
       },
       {
-        "command": "agentBridge.ui.endSession",
+        "command": "copane.ui.endSession",
         "title": "End Agent Session...",
-        "category": "Agent Bridge",
+        "category": "Copane",
         "icon": "$(close)"
       },
       {
-        "command": "agentBridge.ui.pauseSessionTabs",
+        "command": "copane.ui.pauseSessionTabs",
         "title": "Pause Agent on All Its Tabs",
-        "category": "Agent Bridge",
+        "category": "Copane",
         "icon": "$(debug-pause)"
       },
       {
-        "command": "agentBridge.ui.resumeSessionTabs",
+        "command": "copane.ui.resumeSessionTabs",
         "title": "Resume Agent on All Its Tabs",
-        "category": "Agent Bridge",
+        "category": "Copane",
         "icon": "$(debug-continue)"
       },
       {
-        "command": "agentBridge.ui.showSession",
+        "command": "copane.ui.showSession",
         "title": "Show Agent Session",
         "icon": "$(robot)"
       },
       {
-        "command": "agentBridge.ui.showSessionInView",
+        "command": "copane.ui.showSessionInView",
         "title": "Show Agent Session in Sessions View",
         "icon": "$(list-tree)"
       }
     ],
     "configuration": {
-      "title": "Agent Bridge",
+      "title": "Copane",
       "properties": {
-        "agentBridge.sessionGraceSeconds": {
+        "copane.sessionGraceSeconds": {
           "type": "number",
           "default": 20,
           "minimum": 0,
           "description": "How long a disconnected agent session keeps its tabs and terminals before they are released. Lets an agent reconnect after a window reload."
         },
-        "agentBridge.browser.userTabs": {
+        "copane.browser.userTabs": {
           "type": "string",
           "enum": [
             "ask",
@@ -226,18 +227,18 @@
           "default": "ask",
           "description": "Whether agent sessions may use integrated-browser tabs that you opened. Tabs an agent opened itself are always available to it."
         },
-        "agentBridge.browser.leaseIdleSeconds": {
+        "copane.browser.leaseIdleSeconds": {
           "type": "number",
           "default": 120,
           "minimum": 5,
           "description": "How long an agent session keeps control of a browser tab without acting in it. After that the tab's indicator disappears and another session may take control."
         },
-        "agentBridge.browser.pageIndicator": {
+        "copane.browser.pageIndicator": {
           "type": "boolean",
           "default": true,
           "description": "Show a small indicator in the page (and a thin frame in the session's color) while an agent session controls a browser tab, with a button to take over."
         },
-        "agentBridge.browser.certificateErrors": {
+        "copane.browser.certificateErrors": {
           "type": "string",
           "enum": [
             "ask",
@@ -250,7 +251,7 @@
           "default": "ask",
           "description": "What happens when a browser tab an agent session is driving hits a certificate error (self-signed, company authority, wrong host name)."
         },
-        "agentBridge.browser.trustedCertificateHosts": {
+        "copane.browser.trustedCertificateHosts": {
           "type": "array",
           "items": {
             "type": "string"
@@ -259,7 +260,7 @@
           "scope": "machine",
           "markdownDescription": "Hosts whose certificate errors are accepted without asking in tabs an agent session is driving, for local and company servers with self-signed or internally issued certificates. Exact host names (`localhost`, `build.corp.example`) or `*.corp.example` for a domain and all its subdomains. Choosing **Always Trust** in the prompt adds a host here."
         },
-        "agentBridge.registration.mode": {
+        "copane.registration.mode": {
           "type": "string",
           "enum": [
             "ask",
@@ -267,27 +268,27 @@
             "manual"
           ],
           "enumDescriptions": [
-            "Ask once before adding the \"vscode\" MCP server to Claude Code's and Codex's user configuration. Afterwards Agent Bridge keeps its own entry present and up to date (it re-adds it if something removes it) until you run \"Agent Bridge: Turn Off\".",
-            "Add and keep the \"vscode\" MCP server in Claude Code's and Codex's user configuration without asking.",
-            "Never change agent configuration on its own; only report problems. Use \"Agent Bridge: Turn On\", \"Agent Bridge: Turn Off\" and \"Agent Bridge: Check and Repair Setup\"."
+            "Ask once before adding the \"copane\" MCP server to Claude Code's and Codex's user configuration. Afterwards Copane keeps its own entry present and up to date (it re-adds it if something removes it) until you run \"Copane: Turn Off\".",
+            "Add and keep the \"copane\" MCP server in Claude Code's and Codex's user configuration without asking.",
+            "Never change agent configuration on its own; only report problems. Use \"Copane: Turn On\", \"Copane: Turn Off\" and \"Copane: Check and Repair Setup\"."
           ],
           "default": "ask",
           "scope": "machine",
-          "markdownDescription": "How Agent Bridge makes its tools available to agents. It adds an MCP server named `vscode` to the user configuration of Claude Code (`~/.claude.json`) and Codex (`~/.codex/config.toml`), and never changes or removes a `vscode` server it did not add."
+          "markdownDescription": "How Copane makes its tools available to agents. It adds an MCP server named `copane` to the user configuration of Claude Code (`~/.claude.json`) and Codex (`~/.codex/config.toml`), and never changes or removes a `copane` server it did not add."
         },
-        "agentBridge.registration.claudeCode": {
+        "copane.registration.claudeCode": {
           "type": "boolean",
           "default": true,
           "scope": "machine",
-          "markdownDescription": "Register the `vscode` MCP server with Claude Code (the `claude` CLI and the Claude Code VS Code extension)."
+          "markdownDescription": "Register the `copane` MCP server with Claude Code (the `claude` CLI and the Claude Code VS Code extension)."
         },
-        "agentBridge.registration.codex": {
+        "copane.registration.codex": {
           "type": "boolean",
           "default": true,
           "scope": "machine",
-          "markdownDescription": "Register the `vscode` MCP server with Codex, when Codex is installed."
+          "markdownDescription": "Register the `copane` MCP server with Codex, when Codex is installed."
         },
-        "agentBridge.terminal.userTerminals": {
+        "copane.terminal.userTerminals": {
           "type": "string",
           "enum": [
             "ask",
@@ -302,7 +303,7 @@
           "default": "ask",
           "description": "Whether agent sessions may read and type in terminals you opened yourself."
         },
-        "agentBridge.terminal.onSessionEnd": {
+        "copane.terminal.onSessionEnd": {
           "type": "string",
           "enum": [
             "keep",
@@ -322,263 +323,263 @@
     "menus": {
       "editor/title": [
         {
-          "command": "agentBridge.browser.pauseTab",
-          "when": "activeEditor == workbench.editor.browser && agentBridge.browser.activeTabControlled && !agentBridge.browser.activeTabPaused",
+          "command": "copane.browser.pauseTab",
+          "when": "activeEditor == workbench.editor.browser && copane.browser.activeTabControlled && !copane.browser.activeTabPaused",
           "group": "navigation@-10"
         },
         {
-          "command": "agentBridge.browser.resumeTab",
-          "when": "activeEditor == workbench.editor.browser && agentBridge.browser.activeTabPaused",
+          "command": "copane.browser.resumeTab",
+          "when": "activeEditor == workbench.editor.browser && copane.browser.activeTabPaused",
           "group": "navigation@-10"
         },
         {
-          "command": "agentBridge.copyStatus",
-          "when": "resourceScheme == agent-bridge-status",
+          "command": "copane.copyStatus",
+          "when": "resourceScheme == copane-status",
           "group": "navigation"
         }
       ],
       "view/title": [
         {
-          "command": "agentBridge.terminal.finishRequest",
-          "when": "view == terminal && agentBridge.terminal.waitingForUser",
+          "command": "copane.terminal.finishRequest",
+          "when": "view == terminal && copane.terminal.waitingForUser",
           "group": "navigation@0"
         },
         {
-          "command": "agentBridge.terminal.declineRequest",
-          "when": "view == terminal && agentBridge.terminal.waitingForUser",
-          "group": "1_agentBridge"
+          "command": "copane.terminal.declineRequest",
+          "when": "view == terminal && copane.terminal.waitingForUser",
+          "group": "1_copane"
         },
         {
-          "command": "agentBridge.registerAgents",
-          "when": "view == agentBridge.sessions",
+          "command": "copane.registerAgents",
+          "when": "view == copane.sessions",
           "group": "8_setup@1"
         },
         {
-          "command": "agentBridge.unregisterAgents",
-          "when": "view == agentBridge.sessions",
+          "command": "copane.unregisterAgents",
+          "when": "view == copane.sessions",
           "group": "8_setup@2"
         },
         {
-          "command": "agentBridge.repair",
-          "when": "view == agentBridge.sessions",
+          "command": "copane.repair",
+          "when": "view == copane.sessions",
           "group": "9_diagnostics@0"
         },
         {
-          "command": "agentBridge.showStatus",
-          "when": "view == agentBridge.sessions",
+          "command": "copane.showStatus",
+          "when": "view == copane.sessions",
           "group": "9_diagnostics@1"
         },
         {
-          "command": "agentBridge.showLog",
-          "when": "view == agentBridge.sessions",
+          "command": "copane.showLog",
+          "when": "view == copane.sessions",
           "group": "9_diagnostics@2"
         }
       ],
       "commandPalette": [
         {
-          "command": "agentBridge.terminal.finishRequest",
-          "when": "agentBridge.terminal.waitingForUser"
+          "command": "copane.terminal.finishRequest",
+          "when": "copane.terminal.waitingForUser"
         },
         {
-          "command": "agentBridge.terminal.declineRequest",
-          "when": "agentBridge.terminal.waitingForUser"
+          "command": "copane.terminal.declineRequest",
+          "when": "copane.terminal.waitingForUser"
         },
         {
-          "command": "agentBridge.ui.showAttention",
-          "when": "agentBridge.ui.hasSessions"
+          "command": "copane.ui.showAttention",
+          "when": "copane.ui.hasSessions"
         },
         {
-          "command": "agentBridge.ui.revealTab",
-          "when": "agentBridge.ui.hasSessions && !agentBridge.ui.browserUnavailable"
+          "command": "copane.ui.revealTab",
+          "when": "copane.ui.hasSessions && !copane.ui.browserUnavailable"
         },
         {
-          "command": "agentBridge.ui.pauseTab",
-          "when": "agentBridge.ui.hasSessions && !agentBridge.ui.browserUnavailable"
+          "command": "copane.ui.pauseTab",
+          "when": "copane.ui.hasSessions && !copane.ui.browserUnavailable"
         },
         {
-          "command": "agentBridge.ui.resumeTab",
-          "when": "agentBridge.ui.hasSessions && !agentBridge.ui.browserUnavailable"
+          "command": "copane.ui.resumeTab",
+          "when": "copane.ui.hasSessions && !copane.ui.browserUnavailable"
         },
         {
-          "command": "agentBridge.ui.releaseTab",
-          "when": "agentBridge.ui.hasSessions && !agentBridge.ui.browserUnavailable"
+          "command": "copane.ui.releaseTab",
+          "when": "copane.ui.hasSessions && !copane.ui.browserUnavailable"
         },
         {
-          "command": "agentBridge.ui.closeTab",
-          "when": "agentBridge.ui.hasSessions && !agentBridge.ui.browserUnavailable"
+          "command": "copane.ui.closeTab",
+          "when": "copane.ui.hasSessions && !copane.ui.browserUnavailable"
         },
         {
-          "command": "agentBridge.ui.revealTerminal",
-          "when": "agentBridge.ui.hasSessions"
+          "command": "copane.ui.revealTerminal",
+          "when": "copane.ui.hasSessions"
         },
         {
-          "command": "agentBridge.ui.interruptTerminal",
-          "when": "agentBridge.ui.hasSessions"
+          "command": "copane.ui.interruptTerminal",
+          "when": "copane.ui.hasSessions"
         },
         {
-          "command": "agentBridge.ui.closeTerminal",
-          "when": "agentBridge.ui.hasSessions"
+          "command": "copane.ui.closeTerminal",
+          "when": "copane.ui.hasSessions"
         },
         {
-          "command": "agentBridge.ui.endSession",
-          "when": "agentBridge.ui.hasSessions"
+          "command": "copane.ui.endSession",
+          "when": "copane.ui.hasSessions"
         },
         {
-          "command": "agentBridge.ui.pauseSessionTabs",
-          "when": "agentBridge.ui.hasSessions && !agentBridge.ui.browserUnavailable"
+          "command": "copane.ui.pauseSessionTabs",
+          "when": "copane.ui.hasSessions && !copane.ui.browserUnavailable"
         },
         {
-          "command": "agentBridge.ui.resumeSessionTabs",
-          "when": "agentBridge.ui.hasSessions && !agentBridge.ui.browserUnavailable"
+          "command": "copane.ui.resumeSessionTabs",
+          "when": "copane.ui.hasSessions && !copane.ui.browserUnavailable"
         },
         {
-          "command": "agentBridge.ui.showSession",
-          "when": "agentBridge.ui.hasSessions"
+          "command": "copane.ui.showSession",
+          "when": "copane.ui.hasSessions"
         },
         {
-          "command": "agentBridge.ui.showSessionInView",
-          "when": "agentBridge.ui.hasSessions"
+          "command": "copane.ui.showSessionInView",
+          "when": "copane.ui.hasSessions"
         }
       ],
       "view/item/context": [
         {
-          "command": "agentBridge.ui.releaseTab",
-          "when": "view == agentBridge.sessions && viewItem =~ /\\btab\\b/ && viewItem =~ /\\breleasable\\b/",
+          "command": "copane.ui.releaseTab",
+          "when": "view == copane.sessions && viewItem =~ /\\btab\\b/ && viewItem =~ /\\breleasable\\b/",
           "group": "inline@1"
         },
         {
-          "command": "agentBridge.ui.pauseTab",
-          "when": "view == agentBridge.sessions && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bnotPaused\\b/",
+          "command": "copane.ui.pauseTab",
+          "when": "view == copane.sessions && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bnotPaused\\b/",
           "group": "inline@2"
         },
         {
-          "command": "agentBridge.ui.resumeTab",
-          "when": "view == agentBridge.sessions && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bpaused\\b/",
+          "command": "copane.ui.resumeTab",
+          "when": "view == copane.sessions && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bpaused\\b/",
           "group": "inline@2"
         },
         {
-          "command": "agentBridge.ui.revealTab",
-          "when": "view == agentBridge.sessions && viewItem =~ /\\btab\\b/",
+          "command": "copane.ui.revealTab",
+          "when": "view == copane.sessions && viewItem =~ /\\btab\\b/",
           "group": "1_show@1"
         },
         {
-          "command": "agentBridge.ui.pauseTab",
-          "when": "view == agentBridge.sessions && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bnotPaused\\b/",
+          "command": "copane.ui.pauseTab",
+          "when": "view == copane.sessions && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bnotPaused\\b/",
           "group": "2_control@1"
         },
         {
-          "command": "agentBridge.ui.resumeTab",
-          "when": "view == agentBridge.sessions && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bpaused\\b/",
+          "command": "copane.ui.resumeTab",
+          "when": "view == copane.sessions && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bpaused\\b/",
           "group": "2_control@1"
         },
         {
-          "command": "agentBridge.ui.releaseTab",
-          "when": "view == agentBridge.sessions && viewItem =~ /\\btab\\b/ && viewItem =~ /\\breleasable\\b/",
+          "command": "copane.ui.releaseTab",
+          "when": "view == copane.sessions && viewItem =~ /\\btab\\b/ && viewItem =~ /\\breleasable\\b/",
           "group": "2_control@2"
         },
         {
-          "command": "agentBridge.ui.closeTab",
-          "when": "view == agentBridge.sessions && viewItem =~ /\\btab\\b/",
+          "command": "copane.ui.closeTab",
+          "when": "view == copane.sessions && viewItem =~ /\\btab\\b/",
           "group": "3_close@1"
         },
         {
-          "command": "agentBridge.ui.interruptTerminal",
-          "when": "view == agentBridge.sessions && viewItem =~ /\\bterminal\\b/ && viewItem =~ /\\binterruptible\\b/",
+          "command": "copane.ui.interruptTerminal",
+          "when": "view == copane.sessions && viewItem =~ /\\bterminal\\b/ && viewItem =~ /\\binterruptible\\b/",
           "group": "inline@1"
         },
         {
-          "command": "agentBridge.ui.revealTerminal",
-          "when": "view == agentBridge.sessions && viewItem =~ /\\bterminal\\b/ && viewItem =~ /\\bopen\\b/",
+          "command": "copane.ui.revealTerminal",
+          "when": "view == copane.sessions && viewItem =~ /\\bterminal\\b/ && viewItem =~ /\\bopen\\b/",
           "group": "1_show@1"
         },
         {
-          "command": "agentBridge.ui.interruptTerminal",
-          "when": "view == agentBridge.sessions && viewItem =~ /\\bterminal\\b/ && viewItem =~ /\\binterruptible\\b/",
+          "command": "copane.ui.interruptTerminal",
+          "when": "view == copane.sessions && viewItem =~ /\\bterminal\\b/ && viewItem =~ /\\binterruptible\\b/",
           "group": "2_control@1"
         },
         {
-          "command": "agentBridge.ui.closeTerminal",
-          "when": "view == agentBridge.sessions && viewItem =~ /\\bterminal\\b/ && viewItem =~ /\\bopen\\b/",
+          "command": "copane.ui.closeTerminal",
+          "when": "view == copane.sessions && viewItem =~ /\\bterminal\\b/ && viewItem =~ /\\bopen\\b/",
           "group": "3_close@1"
         },
         {
-          "command": "agentBridge.ui.endSession",
-          "when": "view == agentBridge.sessions && viewItem =~ /\\bsession\\b/",
+          "command": "copane.ui.endSession",
+          "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/",
           "group": "inline@9"
         },
         {
-          "command": "agentBridge.ui.pauseSessionTabs",
-          "when": "view == agentBridge.sessions && viewItem =~ /\\bsession\\b/ && viewItem =~ /\\bhasUnpausedTabs\\b/",
+          "command": "copane.ui.pauseSessionTabs",
+          "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/ && viewItem =~ /\\bhasUnpausedTabs\\b/",
           "group": "2_control@1"
         },
         {
-          "command": "agentBridge.ui.resumeSessionTabs",
-          "when": "view == agentBridge.sessions && viewItem =~ /\\bsession\\b/ && viewItem =~ /\\bhasPausedTabs\\b/",
+          "command": "copane.ui.resumeSessionTabs",
+          "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/ && viewItem =~ /\\bhasPausedTabs\\b/",
           "group": "2_control@2"
         },
         {
-          "command": "agentBridge.ui.endSession",
-          "when": "view == agentBridge.sessions && viewItem =~ /\\bsession\\b/",
+          "command": "copane.ui.endSession",
+          "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/",
           "group": "9_end@1"
         },
         {
-          "command": "agentBridge.ui.showSession",
-          "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/",
+          "command": "copane.ui.showSession",
+          "when": "view == copane.tabs && viewItem =~ /\\btab\\b/",
           "group": "inline@1"
         },
         {
-          "command": "agentBridge.ui.pauseTab",
-          "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bnotPaused\\b/",
+          "command": "copane.ui.pauseTab",
+          "when": "view == copane.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bnotPaused\\b/",
           "group": "inline@2"
         },
         {
-          "command": "agentBridge.ui.resumeTab",
-          "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bpaused\\b/",
+          "command": "copane.ui.resumeTab",
+          "when": "view == copane.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bpaused\\b/",
           "group": "inline@2"
         },
         {
-          "command": "agentBridge.ui.releaseTab",
-          "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\breleasable\\b/",
+          "command": "copane.ui.releaseTab",
+          "when": "view == copane.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\breleasable\\b/",
           "group": "inline@3"
         },
         {
-          "command": "agentBridge.ui.closeTab",
-          "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/",
+          "command": "copane.ui.closeTab",
+          "when": "view == copane.tabs && viewItem =~ /\\btab\\b/",
           "group": "inline@4"
         },
         {
-          "command": "agentBridge.ui.revealTab",
-          "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/",
+          "command": "copane.ui.revealTab",
+          "when": "view == copane.tabs && viewItem =~ /\\btab\\b/",
           "group": "1_show@1"
         },
         {
-          "command": "agentBridge.ui.showSession",
-          "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/",
+          "command": "copane.ui.showSession",
+          "when": "view == copane.tabs && viewItem =~ /\\btab\\b/",
           "group": "1_show@2"
         },
         {
-          "command": "agentBridge.ui.showSessionInView",
-          "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/",
+          "command": "copane.ui.showSessionInView",
+          "when": "view == copane.tabs && viewItem =~ /\\btab\\b/",
           "group": "1_show@3"
         },
         {
-          "command": "agentBridge.ui.pauseTab",
-          "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bnotPaused\\b/",
+          "command": "copane.ui.pauseTab",
+          "when": "view == copane.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bnotPaused\\b/",
           "group": "2_control@1"
         },
         {
-          "command": "agentBridge.ui.resumeTab",
-          "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bpaused\\b/",
+          "command": "copane.ui.resumeTab",
+          "when": "view == copane.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bpaused\\b/",
           "group": "2_control@1"
         },
         {
-          "command": "agentBridge.ui.releaseTab",
-          "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\breleasable\\b/",
+          "command": "copane.ui.releaseTab",
+          "when": "view == copane.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\breleasable\\b/",
           "group": "2_control@2"
         },
         {
-          "command": "agentBridge.ui.closeTab",
-          "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/",
+          "command": "copane.ui.closeTab",
+          "when": "view == copane.tabs && viewItem =~ /\\btab\\b/",
           "group": "3_close@1"
         }
       ]
@@ -586,32 +587,32 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "agentBridge",
-          "title": "Agent Bridge",
-          "icon": "media/agent-bridge.svg"
+          "id": "copane",
+          "title": "Copane",
+          "icon": "media/copane.svg"
         }
       ],
       "panel": [
         {
-          "id": "agentBridgeTabs",
+          "id": "copaneTabs",
           "title": "Agent Tabs",
           "icon": "media/agent-tabs.svg"
         }
       ]
     },
     "views": {
-      "agentBridge": [
+      "copane": [
         {
-          "id": "agentBridge.sessions",
+          "id": "copane.sessions",
           "name": "Sessions",
           "type": "tree",
-          "icon": "media/agent-bridge.svg",
-          "contextualTitle": "Agent Bridge"
+          "icon": "media/copane.svg",
+          "contextualTitle": "Copane"
         }
       ],
-      "agentBridgeTabs": [
+      "copaneTabs": [
         {
-          "id": "agentBridge.tabs",
+          "id": "copane.tabs",
           "name": "Agent Tabs",
           "type": "tree",
           "icon": "media/agent-tabs.svg",
@@ -621,23 +622,23 @@
     },
     "viewsWelcome": [
       {
-        "view": "agentBridge.sessions",
-        "contents": "No agent is connected to this window yet.\nStart Claude Code in this window, in its panel or by running claude in a terminal. Each session appears here with the browser tabs and terminals it uses, and you can pause it or step in at any time.\n[Set Up Agents](command:agentBridge.registerAgents)\nAlready set up? [Show Status](command:agentBridge.showStatus) explains why nothing is connected."
+        "view": "copane.sessions",
+        "contents": "No agent is connected to this window yet.\nStart Claude Code in this window, in its panel or by running claude in a terminal. Each session appears here with the browser tabs and terminals it uses, and you can pause it or step in at any time.\n[Set Up Agents](command:copane.registerAgents)\nAlready set up? [Show Status](command:copane.showStatus) explains why nothing is connected."
       },
       {
-        "view": "agentBridge.sessions",
-        "when": "agentBridge.ui.browserUnavailable",
-        "contents": "The integrated browser is not enabled for Agent Bridge, so agents can use terminals but no browser tabs.\n[Enable Integrated Browser](command:agentBridge.enableBrowser)\nVS Code restarts once to turn it on."
+        "view": "copane.sessions",
+        "when": "copane.ui.browserUnavailable",
+        "contents": "The integrated browser is not enabled for Copane, so agents can use terminals but no browser tabs.\n[Enable Integrated Browser](command:copane.enableBrowser)\nVS Code restarts once to turn it on."
       },
       {
-        "view": "agentBridge.tabs",
-        "when": "!agentBridge.ui.browserUnavailable",
+        "view": "copane.tabs",
+        "when": "!copane.ui.browserUnavailable",
         "contents": "No agent session is using a browser tab in this window.\nTabs that agents open or control are listed here in the color of their session. Click one to bring it to the front."
       },
       {
-        "view": "agentBridge.tabs",
-        "when": "agentBridge.ui.browserUnavailable",
-        "contents": "The integrated browser is not enabled, so agents cannot open or use browser tabs.\n[Enable Integrated Browser](command:agentBridge.enableBrowser)"
+        "view": "copane.tabs",
+        "when": "copane.ui.browserUnavailable",
+        "contents": "The integrated browser is not enabled, so agents cannot open or use browser tabs.\n[Enable Integrated Browser](command:copane.enableBrowser)"
       }
     ]
   },
@@ -665,5 +666,6 @@
     "@xterm/headless": "^6.0.0",
     "jsonc-parser": "^3.3.1",
     "zod": "^4.6.7"
-  }
+  },
+  "icon": "media/icon.png"
 }

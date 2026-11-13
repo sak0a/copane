@@ -1,4 +1,4 @@
-# Agent Bridge (VS Code extension)
+# Copane (VS Code extension)
 
 Gives Claude Code and other MCP agents the VS Code window they run in: its integrated browser tabs
 and integrated terminals, shared with the user, per window and per agent session.
@@ -27,8 +27,8 @@ After changing extension code, restart the dev host (`--stop`, then start) to lo
 ## Rules
 
 - **Never touch the user's real setup.** No writes to `~/.claude.json`, `~/.claude/`, `~/.codex/`,
-  `~/.vscode/` or `~/.vscode-agent-bridge/`, and never start, stop or reconfigure their own VS Code.
-  Dev hosts are fully isolated under `/tmp/agent-bridge-dev/<name>/`; use a `--name` unique to your
+  `~/.vscode/` or `~/.copane/`, and never start, stop or reconfigure their own VS Code.
+  Dev hosts are fully isolated under `/tmp/copane-dev/<name>/`; use a `--name` unique to your
   task, and never `pkill` by a pattern that could match another dev host or the user's VS Code.
   Code that edits user config is tested against a temporary directory.
 - The user is working on this machine. Open as few windows as you need, stop your dev hosts when you

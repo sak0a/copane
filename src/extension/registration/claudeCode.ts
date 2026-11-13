@@ -1,4 +1,4 @@
-// Registration with Claude Code: a user-scope MCP server named "vscode" in Claude Code's global
+// Registration with Claude Code: a user-scope MCP server named "copane" in Claude Code's global
 // config file (`~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json`). User scope is what both the
 // `claude` CLI and the Claude Code VS Code extension load in every project: the extension starts its
 // sessions with `settingSources: ["user", "project", "local"]` and no `--strict-mcp-config`.
@@ -7,7 +7,7 @@
 // (`<file>.lock`, proper-lockfile). Adding and removing go through Claude Code's own
 // `claude mcp add-json/remove --scope user` when a `claude` executable can be found, which takes
 // the lock and merges with the current file. Without one, the file is edited directly under the
-// same lock, atomically, touching only `mcpServers.vscode`. Reading is always direct.
+// same lock, atomically, touching only `mcpServers.copane`. Reading is always direct.
 //
 // Updating an existing entry is always one atomic edit of the file, never `remove` + `add`: the CLI
 // has no "replace", and a remove that succeeds followed by an add that fails (timeout, lock held by a
@@ -97,7 +97,7 @@ export type EntryState =
   /** No server of that name. */
   | { kind: 'absent' }
   /**
-   * Registered by Agent Bridge; `current` when it starts the server the way it should now, otherwise
+   * Registered by Copane; `current` when it starts the server the way it should now, otherwise
    * `reason` says what is out of date. `entry` is what is registered.
    */
   | { kind: 'ours'; current: boolean; command: string; reason?: string; entry?: RegisteredCommand }
@@ -116,16 +116,16 @@ export interface RegisteredCommand {
 export interface ClaudeInspection {
   configExists: boolean;
   state: EntryState;
-  /** Projects whose local-scope config has its own "vscode" server, which wins over user scope there. */
+  /** Projects whose local-scope config has its own "copane" server, which wins over user scope there. */
   overriddenIn: Array<{ project: string; ours: boolean }>;
   /** Projects in which the user turned the server off (Claude Code's `/mcp` → disable). */
   disabledIn: string[];
 }
 
-/** Recognises a registration made by Agent Bridge, from any version or bridge home. */
+/** Recognises a registration made by Copane, from any version or bridge home. */
 export function isOurEntry(entry: { command?: unknown; args?: unknown }): boolean {
   const parts = [entry.command, ...(Array.isArray(entry.args) ? entry.args : [])].filter(p => typeof p === 'string').join(' ');
-  return /agent-bridge/i.test(parts) && /mcp-server/i.test(parts);
+  return /copane/i.test(parts) && /mcp-server/i.test(parts);
 }
 
 export function entryFor(spec: ServerSpec): ClaudeEntry {
@@ -195,7 +195,34 @@ export type ChangeOutcome =
  * `claude mcp add-json` (or the file), an existing one is replaced by a single atomic edit of the file.
  * When that fails the file is unchanged, so the previous entry is still there.
  */
+/** Name and marker of the entry this extension registered before it was renamed to Copane. */
+const LEGACY_SERVER_NAME = 'vscode';
+const LEGACY_MARKER = '.vscode-agent-bridge';
+
+/**
+ * Removes the entry an earlier version registered under its old name, so the agent does not end up
+ * with two servers. Only an entry that points into the old bridge home is touched. Best effort.
+ */
+export async function removeLegacyClaudeEntry(target: ClaudeTarget): Promise<boolean> {
+  try {
+    const legacy = (text: string) => {
+      const entry = parse(text, [], { allowTrailingComma: true })?.mcpServers?.[LEGACY_SERVER_NAME];
+      return entry && JSON.stringify(entry).includes(LEGACY_MARKER);
+    };
+    if (!fs.existsSync(target.configFile) || !legacy(fs.readFileSync(target.configFile, 'utf8'))) return false;
+    let removed = false;
+    await editConfig(target, text => {
+      removed = !!legacy(text);
+      return removed ? modify(text, ['mcpServers', LEGACY_SERVER_NAME], undefined, FORMAT) : [];
+    });
+    return removed;
+  } catch {
+    return false;
+  }
+}
+
 export async function registerClaude(target: ClaudeTarget, spec: ServerSpec, options: { replaceForeign?: boolean } = {}): Promise<ChangeOutcome> {
+  await removeLegacyClaudeEntry(target);
   const before = inspectClaude(target.configFile, spec).state;
   if (before.kind === 'unreadable') return { kind: 'failed', detail: before.error };
   if (before.kind === 'ours' && before.current) return { kind: 'unchanged', detail: 'already registered' };
@@ -236,12 +263,12 @@ export async function registerClaude(target: ClaudeTarget, spec: ServerSpec, opt
 
 class ConflictError extends Error {}
 
-/** Removes the server if it is Agent Bridge's. Never removes someone else's server of that name. */
+/** Removes the server if it is Copane's. Never removes someone else's server of that name. */
 export async function unregisterClaude(target: ClaudeTarget, spec: ServerSpec): Promise<ChangeOutcome> {
   const before = inspectClaude(target.configFile, spec).state;
   if (before.kind === 'unreadable') return { kind: 'failed', detail: before.error };
   if (before.kind === 'absent') return { kind: 'unchanged', detail: 'not registered' };
-  if (before.kind === 'foreign') return { kind: 'conflict', detail: `the "${MCP_SERVER_NAME}" server there is not Agent Bridge's (${before.command}); left it alone` };
+  if (before.kind === 'foreign') return { kind: 'conflict', detail: `the "${MCP_SERVER_NAME}" server there is not Copane's (${before.command}); left it alone` };
   let via: 'cli' | 'file' = 'file';
   if (target.cli) {
     try {

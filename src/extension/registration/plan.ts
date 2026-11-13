@@ -51,13 +51,13 @@ export interface CommandTitles {
 }
 
 export const DEFAULT_TITLES: CommandTitles = {
-  product: 'Agent Bridge',
-  turnOn: 'Agent Bridge: Turn On',
-  turnOff: 'Agent Bridge: Turn Off',
-  repair: 'Agent Bridge: Check and Repair Setup',
-  status: 'Agent Bridge: Show Status',
-  copy: 'Agent Bridge: Copy Status Report',
-  log: 'Agent Bridge: Show Log',
+  product: 'Copane',
+  turnOn: 'Copane: Turn On',
+  turnOff: 'Copane: Turn Off',
+  repair: 'Copane: Check and Repair Setup',
+  status: 'Copane: Show Status',
+  copy: 'Copane: Copy Status Report',
+  log: 'Copane: Show Log',
 };
 
 export function planAgent(input: PlanInput, trigger: 'startup' | 'repair', titles: CommandTitles = DEFAULT_TITLES): Plan {

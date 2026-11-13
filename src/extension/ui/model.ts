@@ -10,7 +10,7 @@ export interface UiInput {
   tabs: readonly BrowserTabInfo[];
   terminals: readonly TerminalInfo[];
   browserAvailable: boolean;
-  /** `agentBridge.sessionGraceSeconds`, for explaining what "disconnected" means. */
+  /** `copane.sessionGraceSeconds`, for explaining what "disconnected" means. */
   graceSeconds: number;
 }
 
@@ -161,7 +161,7 @@ function browserNotice(): ViewNode {
     label: 'Integrated browser not enabled',
     description: 'agents can use terminals only',
     tooltip:
-      "Agent Bridge cannot use VS Code's integrated browser yet, so agents cannot open or control browser tabs.\n\nClick to enable it (VS Code restarts once).",
+      "Copane cannot use VS Code's integrated browser yet, so agents cannot open or control browser tabs.\n\nClick to enable it (VS Code restarts once).",
     icon: { id: 'warning', color: WARNING },
     contextValue: 'notice browserNotice',
     accessibilityLabel: 'Integrated browser not enabled. Agents can use terminals only. Activate to enable it.',
@@ -418,7 +418,7 @@ function buildStatus(
   const connected = input.sessions.filter(s => s.connected).length;
   const disconnected = total - connected;
   if (total === 0) {
-    return { visible: false, text: '$(robot) 0', tooltip: '**Agent Bridge**\n\nNo agent session is connected to this window.', accessibilityLabel: 'Agent Bridge: no agent sessions', warning: false };
+    return { visible: false, text: '$(robot) 0', tooltip: '**Copane**\n\nNo agent session is connected to this window.', accessibilityLabel: 'Copane: no agent sessions', warning: false };
   }
 
   let text: string;
@@ -450,7 +450,7 @@ function buildStatus(
     attention.length ? `[Go to What Needs You](command:${Cmd.showAttention})` : undefined,
   ].filter(isString);
   const tooltip = [
-    `**Agent Bridge** · ${plural(connected, 'session')} connected${disconnected ? `, ${disconnected} reconnecting` : ''}`,
+    `**Copane** · ${plural(connected, 'session')} connected${disconnected ? `, ${disconnected} reconnecting` : ''}`,
     sessionLines.join('  \n'),
     attentionLines.length ? attentionLines.join('  \n') : undefined,
     links.join(' · '),
@@ -459,7 +459,7 @@ function buildStatus(
     .join('\n\n');
 
   const accessibilityLabel = [
-    `Agent Bridge: ${plural(connected, 'agent session')} connected`,
+    `Copane: ${plural(connected, 'agent session')} connected`,
     disconnected ? `${disconnected} reconnecting` : undefined,
     waiting ? `${plural(waiting, 'terminal')} waiting for you` : undefined,
     paused ? `${plural(paused, 'tab')} paused` : undefined,

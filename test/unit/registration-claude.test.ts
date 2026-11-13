@@ -18,7 +18,7 @@ import { serverSpec, type ServerSpec } from '../../src/extension/registration/la
 
 let dir: string;
 let file: string;
-const spec: ServerSpec = { command: '/home/u/.vscode-agent-bridge/bin/mcp-server', args: [], env: {} };
+const spec: ServerSpec = { command: '/home/u/.copane/bin/mcp-server', args: [], env: {} };
 const direct = (): ClaudeTarget => ({ configFile: file, configDir: dir, cli: undefined });
 
 const existing = {
@@ -57,9 +57,9 @@ describe('locating Claude Code', () => {
 
 describe('recognising entries', () => {
   it('knows its own entries from any bridge home or version', () => {
-    expect(isOurEntry({ command: '/Users/x/.vscode-agent-bridge/bin/mcp-server' })).toBe(true);
-    expect(isOurEntry({ command: 'C:\\Code.exe', args: ['C:\\Users\\x\\.vscode-agent-bridge\\bin\\mcp-server.js'] })).toBe(true);
-    expect(isOurEntry({ command: '/tmp/agent-bridge-dev/r/home/bin/mcp-server' })).toBe(true);
+    expect(isOurEntry({ command: '/Users/x/.copane/bin/mcp-server' })).toBe(true);
+    expect(isOurEntry({ command: 'C:\\Code.exe', args: ['C:\\Users\\x\\.copane\\bin\\mcp-server.js'] })).toBe(true);
+    expect(isOurEntry({ command: '/tmp/copane-dev/r/home/bin/mcp-server' })).toBe(true);
     expect(isOurEntry({ command: 'npx', args: ['some-vscode-mcp'] })).toBe(false);
   });
 });
@@ -70,7 +70,7 @@ describe('registerClaude (direct edit, no CLI)', () => {
     const result = await registerClaude(direct(), spec);
     expect(result).toMatchObject({ kind: 'changed', via: 'file' });
     const config = read();
-    expect(config.mcpServers.vscode).toEqual({ type: 'stdio', command: spec.command, args: [], env: {} });
+    expect(config.mcpServers.copane).toEqual({ type: 'stdio', command: spec.command, args: [], env: {} });
     expect(config.mcpServers.github).toEqual(existing.mcpServers.github);
     expect(config.numStartups).toBe(42);
     expect(config.projects).toEqual(existing.projects);
@@ -80,11 +80,11 @@ describe('registerClaude (direct edit, no CLI)', () => {
   it('creates the file when Claude Code has not written one yet', async () => {
     expect(inspectClaude(file, spec)).toMatchObject({ configExists: false, state: { kind: 'absent' } });
     expect(await registerClaude(direct(), spec)).toMatchObject({ kind: 'changed' });
-    expect(read().mcpServers.vscode.command).toBe(spec.command);
+    expect(read().mcpServers.copane.command).toBe(spec.command);
   });
 
   it('is idempotent and updates its own outdated entry', async () => {
-    fs.writeFileSync(file, JSON.stringify({ mcpServers: { vscode: { type: 'stdio', command: '/old/.vscode-agent-bridge/bin/mcp-server', args: [] } } }));
+    fs.writeFileSync(file, JSON.stringify({ mcpServers: { copane: { type: 'stdio', command: '/old/.copane/bin/mcp-server', args: [] } } }));
     expect(inspectClaude(file, spec).state).toMatchObject({ kind: 'ours', current: false });
     expect(await registerClaude(direct(), spec)).toMatchObject({ kind: 'changed', detail: 'updated' });
     const text = fs.readFileSync(file, 'utf8');
@@ -94,13 +94,13 @@ describe('registerClaude (direct edit, no CLI)', () => {
 
   it('never replaces a different server of the same name unless told to', async () => {
     const theirs = { type: 'stdio', command: 'npx', args: ['their-vscode-server'] };
-    fs.writeFileSync(file, JSON.stringify({ mcpServers: { vscode: theirs } }));
+    fs.writeFileSync(file, JSON.stringify({ mcpServers: { copane: theirs } }));
     expect(await registerClaude(direct(), spec)).toMatchObject({ kind: 'conflict' });
-    expect(read().mcpServers.vscode).toEqual(theirs);
+    expect(read().mcpServers.copane).toEqual(theirs);
     expect(await unregisterClaude(direct(), spec)).toMatchObject({ kind: 'conflict' });
-    expect(read().mcpServers.vscode).toEqual(theirs);
+    expect(read().mcpServers.copane).toEqual(theirs);
     expect(await registerClaude(direct(), spec, { replaceForeign: true })).toMatchObject({ kind: 'changed' });
-    expect(read().mcpServers.vscode.command).toBe(spec.command);
+    expect(read().mcpServers.copane.command).toBe(spec.command);
   });
 
   it('unregisters only its own entry and leaves the rest', async () => {
@@ -130,11 +130,11 @@ describe('registerClaude (direct edit, no CLI)', () => {
     expect(await registerClaude(direct(), spec)).toMatchObject({ kind: 'changed' });
     expect(released).toBe(true);
     // ...and our change is made on top of its write, not on a stale copy.
-    expect(read()).toMatchObject({ numStartups: 43, mcpServers: { vscode: { command: spec.command } } });
+    expect(read()).toMatchObject({ numStartups: 43, mcpServers: { copane: { command: spec.command } } });
   });
 
-  it('reports projects whose local-scope "vscode" server wins over the user-scope one', () => {
-    fs.writeFileSync(file, JSON.stringify({ projects: { '/p': { mcpServers: { vscode: { command: 'x' } } }, '/q': {} } }));
+  it('reports projects whose local-scope "copane" server wins over the user-scope one', () => {
+    fs.writeFileSync(file, JSON.stringify({ projects: { '/p': { mcpServers: { copane: { command: 'x' } } }, '/q': {} } }));
     expect(inspectClaude(file, spec).overriddenIn).toEqual([{ project: '/p', ours: false }]);
   });
 });
@@ -152,7 +152,7 @@ describe('an update can never lose the entry (the Windows "it got removed" repor
       `const fs = require('fs'); const [cmd, sub, ...rest] = process.argv.slice(2);
        fs.appendFileSync(${JSON.stringify(calls)}, [cmd, sub].join(' ') + '\\n');
        const file = ${JSON.stringify(file)};
-       if (sub === 'remove') { const c = JSON.parse(fs.readFileSync(file, 'utf8')); delete c.mcpServers.vscode; fs.writeFileSync(file, JSON.stringify(c)); process.exit(0); }
+       if (sub === 'remove') { const c = JSON.parse(fs.readFileSync(file, 'utf8')); delete c.mcpServers.copane; fs.writeFileSync(file, JSON.stringify(c)); process.exit(0); }
        process.stderr.write('Error: Lock file is already being held\\n'); process.exit(1);`,
     );
     const cli = path.join(dir, 'claude');
@@ -169,8 +169,8 @@ describe('an update can never lose the entry (the Windows "it got removed" repor
   };
 
   it.skipIf(process.platform === 'win32')('a failed update leaves the previous entry in place and never calls `claude mcp remove`', async () => {
-    const old = { type: 'stdio', command: 'C:\\Old VS Code\\Code.exe', args: ['C:\\Users\\u\\.vscode-agent-bridge\\bin\\mcp-server.js'], env: { ELECTRON_RUN_AS_NODE: '1' } };
-    fs.writeFileSync(file, JSON.stringify({ ...existing, mcpServers: { ...existing.mcpServers, vscode: old } }));
+    const old = { type: 'stdio', command: 'C:\\Old VS Code\\Code.exe', args: ['C:\\Users\\u\\.copane\\bin\\mcp-server.js'], env: { ELECTRON_RUN_AS_NODE: '1' } };
+    fs.writeFileSync(file, JSON.stringify({ ...existing, mcpServers: { ...existing.mcpServers, copane: old } }));
     const { cli, calls } = fakeCli();
     const release = holdLock();
     try {
@@ -180,11 +180,11 @@ describe('an update can never lose the entry (the Windows "it got removed" repor
     } finally {
       release();
     }
-    expect(read().mcpServers.vscode).toEqual(old);
+    expect(read().mcpServers.copane).toEqual(old);
     expect(calls()).toEqual([]);
     // Once the lock is free, the same update goes through in one step.
     expect(await registerClaude({ configFile: file, configDir: dir, cli }, spec)).toMatchObject({ kind: 'changed', detail: 'updated', via: 'file' });
-    expect(read().mcpServers.vscode.command).toBe(spec.command);
+    expect(read().mcpServers.copane.command).toBe(spec.command);
     expect(calls()).toEqual([]);
   });
 
@@ -195,14 +195,14 @@ describe('an update can never lose the entry (the Windows "it got removed" repor
     expect(result).toMatchObject({ kind: 'changed', via: 'file' });
     expect(result.detail).toMatch(/Lock file is already being held/);
     expect(calls()).toEqual(['mcp add-json']);
-    expect(read().mcpServers.vscode.command).toBe(spec.command);
+    expect(read().mcpServers.copane.command).toBe(spec.command);
   });
 });
 
 describe('Windows entries (simulated: win32 paths, case-insensitive)', () => {
   const stable = 'C:\\Users\\u\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe';
   const insiders = 'C:\\Users\\u\\AppData\\Local\\Programs\\Microsoft VS Code Insiders\\Code - Insiders.exe';
-  const binDir = 'C:\\Users\\u\\.vscode-agent-bridge\\bin';
+  const binDir = 'C:\\Users\\u\\.copane\\bin';
   const installed = new Set([stable, insiders]);
   const exists = (f: string) => installed.has(f);
   const specOf = (runtime: string) => serverSpec({ binDir, runtime, platform: 'win32', knownRuntimes: [stable, insiders], exists });
@@ -226,7 +226,7 @@ describe('Windows entries (simulated: win32 paths, case-insensitive)', () => {
       expect(state).toMatchObject({ kind: 'ours', current: false });
       expect(state.kind === 'ours' && state.reason).toMatch(/runtime it starts no longer exists/);
       expect(await registerClaude(direct(), spec)).toMatchObject({ kind: 'changed', detail: 'updated' });
-      expect(read().mcpServers.vscode.command).toBe(insiders);
+      expect(read().mcpServers.copane.command).toBe(insiders);
     } finally {
       installed.add(stable);
     }
@@ -234,7 +234,7 @@ describe('Windows entries (simulated: win32 paths, case-insensitive)', () => {
 
   it('ignores case and slash differences in Windows paths', () => {
     const lower = { type: 'stdio', command: stable.toLowerCase(), args: [specOf(stable).args[0]!.replace(/\\\\/g, '/')], env: { ELECTRON_RUN_AS_NODE: '1' } };
-    fs.writeFileSync(file, JSON.stringify({ mcpServers: { vscode: lower } }));
+    fs.writeFileSync(file, JSON.stringify({ mcpServers: { copane: lower } }));
     expect(inspectClaude(file, specOf(stable)).state).toMatchObject({ kind: 'ours', current: true });
   });
 
@@ -253,7 +253,7 @@ describe('Windows entries (simulated: win32 paths, case-insensitive)', () => {
 
 describe('Claude Code turned the server off in a project', () => {
   it('is reported', () => {
-    fs.writeFileSync(file, JSON.stringify({ projects: { '/p': { disabledMcpServers: ['vscode'] }, '/q': { disabledMcpServers: ['x'] } } }));
+    fs.writeFileSync(file, JSON.stringify({ projects: { '/p': { disabledMcpServers: ['copane'] }, '/q': { disabledMcpServers: ['x'] } } }));
     expect(inspectClaude(file, spec).disabledIn).toEqual(['/p']);
   });
 });
@@ -265,10 +265,10 @@ describe.skipIf(!cli)('registerClaude with the real claude CLI (temporary CLAUDE
 
   it('registers, updates and unregisters through `claude mcp`, which Claude Code then lists', async () => {
     fs.writeFileSync(file, JSON.stringify(existing, null, 2), { mode: 0o600 });
-    const withEnv: ServerSpec = { ...spec, env: { AGENT_BRIDGE_HOME: '/tmp/x' } };
+    const withEnv: ServerSpec = { ...spec, env: { COPANE_HOME: '/tmp/x' } };
     expect(await registerClaude(target(), withEnv)).toMatchObject({ kind: 'changed', via: 'cli' });
     expect(read().mcpServers.github).toEqual(existing.mcpServers.github);
-    const listed = execFileSync(cli!, ['mcp', 'get', 'vscode'], { env: { ...process.env, CLAUDE_CONFIG_DIR: dir }, encoding: 'utf8', cwd: dir });
+    const listed = execFileSync(cli!, ['mcp', 'get', 'copane'], { env: { ...process.env, CLAUDE_CONFIG_DIR: dir }, encoding: 'utf8', cwd: dir });
     expect(listed).toMatch(/Scope: User config/);
     expect(listed).toContain(spec.command);
     expect(await registerClaude(target(), withEnv)).toMatchObject({ kind: 'unchanged' });
@@ -277,4 +277,22 @@ describe.skipIf(!cli)('registerClaude with the real claude CLI (temporary CLAUDE
     expect(await unregisterClaude(target(), spec)).toMatchObject({ kind: 'changed', via: 'cli' });
     expect(read().mcpServers).toEqual(existing.mcpServers);
   }, 60_000);
+});
+
+describe('upgrade from the pre-Copane name', () => {
+  it('removes the old "vscode" entry it registered, and leaves someone else\'s "vscode" server alone', async () => {
+    const { removeLegacyClaudeEntry } = await import('../../src/extension/registration/claudeCode');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ab-legacy-'));
+    const file = path.join(dir, '.claude.json');
+    const ours = { type: 'stdio', command: '/Users/u/.vscode-agent-bridge/bin/mcp-server', args: [] };
+    fs.writeFileSync(file, JSON.stringify({ numStartups: 1, mcpServers: { vscode: ours, github: { command: 'gh' } } }));
+    expect(await removeLegacyClaudeEntry({ configFile: file, configDir: dir, cli: undefined })).toBe(true);
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ numStartups: 1, mcpServers: { github: { command: 'gh' } } });
+
+    const theirs = { type: 'stdio', command: 'npx', args: ['some-vscode-mcp'] };
+    fs.writeFileSync(file, JSON.stringify({ mcpServers: { vscode: theirs } }));
+    expect(await removeLegacyClaudeEntry({ configFile: file, configDir: dir, cli: undefined })).toBe(false);
+    expect(JSON.parse(fs.readFileSync(file, 'utf8')).mcpServers.vscode).toEqual(theirs);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
 });

@@ -28,7 +28,7 @@ const VERSION = typeof __VERSION__ === 'string' ? __VERSION__ : '0.0.0-dev';
 for (const method of ['log', 'info', 'debug', 'warn'] as const) console[method] = console.error;
 
 function log(message: string): void {
-  process.stderr.write(`[agent-bridge] ${message}\n`);
+  process.stderr.write(`[copane] ${message}\n`);
 }
 
 // The agent drops a server whose process exits, so a stray rejection must not end the session.

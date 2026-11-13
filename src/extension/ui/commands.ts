@@ -64,7 +64,7 @@ export function registerUiCommands(services: BridgeServices, state: UiState, tre
 
   async function pickTab(filter: (t: BrowserTabInfo) => boolean, placeHolder: string, none: string): Promise<string | undefined> {
     if (!sources.browserAvailable) {
-      void vscode.window.showInformationMessage('The integrated browser is not enabled for Agent Bridge, so there are no tabs to act on.');
+      void vscode.window.showInformationMessage('The integrated browser is not enabled for Copane, so there are no tabs to act on.');
       return undefined;
     }
     const candidates = tabs().filter(filter);

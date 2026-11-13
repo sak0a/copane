@@ -19,7 +19,7 @@ const queue = (a, answers) => a.ok('debug_answer_prompts', { answers, clear: tru
 const unique = () => `/?t=${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
 test('a declined certificate fails with the reason and is not asked again right away', async () => {
-  await setSettings({ 'agentBridge.browser.trustedCertificateHosts': [] });
+  await setSettings({ 'copane.browser.trustedCertificateHosts': [] });
   const a = await agent({ session: `certs-decline-${Date.now()}` });
   try {
     await queue(a, ['Cancel']);
@@ -42,7 +42,7 @@ test('a declined certificate fails with the reason and is not asked again right 
 });
 
 test('"Always Trust" loads the page, saves the host, and later sessions are not asked', async () => {
-  await setSettings({ 'agentBridge.browser.trustedCertificateHosts': [] });
+  await setSettings({ 'copane.browser.trustedCertificateHosts': [] });
   const a = await agent({ session: `certs-always-${Date.now()}` });
   const b = await agent({ session: `certs-later-${Date.now()}` });
   try {
@@ -50,7 +50,7 @@ test('"Always Trust" loads the page, saves the host, and later sessions are not 
     await a.ok('browser_open', { url: 'about:blank' });
     assert.match(await a.ok('browser_navigate', { url: server.url('localhost', unique()) }), /Self-signed fixture/);
     await sleep(1000);
-    assert.deepEqual(JSON.parse(readFileSync(settingsFile, 'utf8'))['agentBridge.browser.trustedCertificateHosts'], ['localhost']);
+    assert.deepEqual(JSON.parse(readFileSync(settingsFile, 'utf8'))['copane.browser.trustedCertificateHosts'], ['localhost']);
     const before = (await shown(a)).length;
     await b.ok('browser_open', { url: 'about:blank' });
     assert.match(await b.ok('browser_navigate', { url: server.url('localhost', unique()) }), /Self-signed fixture/);
@@ -66,7 +66,7 @@ test('"Always Trust" loads the page, saves the host, and later sessions are not 
 test('the "block" setting refuses without asking, even for a host in the trusted list', async () => {
   const a = await agent({ session: `certs-settings-${Date.now()}` });
   try {
-    await setSettings({ 'agentBridge.browser.trustedCertificateHosts': ['127.0.0.1'], 'agentBridge.browser.certificateErrors': 'block' });
+    await setSettings({ 'copane.browser.trustedCertificateHosts': ['127.0.0.1'], 'copane.browser.certificateErrors': 'block' });
     await queue(a, []);
     await a.ok('browser_open', { url: 'about:blank' });
     const before = (await shown(a)).length;

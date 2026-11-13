@@ -29,7 +29,7 @@ describe('serverSpec', () => {
     expect(serverSpec({ binDir: '/h/bin', runtime: '/rt', platform: 'linux', bridgeHomeOverride: '/h' })).toEqual({
       command: '/h/bin/mcp-server',
       args: [],
-      env: { AGENT_BRIDGE_HOME: '/h' },
+      env: { COPANE_HOME: '/h' },
     });
     const win = serverSpec({ binDir: 'C:\\h\\bin', runtime: 'C:\\VS Code\\Code.exe', platform: 'win32' });
     expect(win.command).toBe('C:\\VS Code\\Code.exe');
@@ -41,7 +41,7 @@ describe('serverSpec', () => {
 describe('Windows registrations (simulated)', () => {
   const stable = 'C:\\Program Files\\Microsoft VS Code\\Code.exe';
   const insiders = 'C:\\Users\\u\\AppData\\Local\\Programs\\Microsoft VS Code Insiders\\Code - Insiders.exe';
-  const binDir = 'C:\\Users\\u\\.vscode-agent-bridge\\bin';
+  const binDir = 'C:\\Users\\u\\.copane\\bin';
   const entry = (command: string) => ({ type: 'stdio', command, args: [`${binDir}\\mcp-server.js`], env: { ELECTRON_RUN_AS_NODE: '1' } });
 
   it('accepts the runtime of another installed VS Code build, so two builds do not rewrite each other', () => {

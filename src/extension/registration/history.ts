@@ -1,4 +1,4 @@
-// A short, persistent record of every change Agent Bridge made (or tried to make) to an agent's
+// A short, persistent record of every change Copane made (or tried to make) to an agent's
 // configuration, with the reason: `<bridge home>/registration-history.json`. Shared by all windows and
 // VS Code builds using the bridge home, shown in the status report, and kept to the last few entries.
 import * as fs from 'node:fs';

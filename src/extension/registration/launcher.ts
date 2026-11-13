@@ -28,7 +28,7 @@ export interface ServerSpec {
   env: Record<string, string>;
   /**
    * Other commands an existing registration may name and still be current: on Windows, the runtimes
-   * of other VS Code builds on this machine that ran Agent Bridge and are still installed.
+   * of other VS Code builds on this machine that ran Copane and are still installed.
    */
   alternativeCommands?: string[];
   /** Compare paths ignoring case and slash direction, as Windows does. */
@@ -82,7 +82,7 @@ export interface LauncherOptions {
   /** `process.execPath` of the extension host. */
   runtime: string;
   platform: NodeJS.Platform;
-  /** `AGENT_BRIDGE_HOME` when it is set (dev hosts, tests): agents must use the same bridge home. */
+  /** `COPANE_HOME` when it is set (dev hosts, tests): agents must use the same bridge home. */
   bridgeHomeOverride?: string;
 }
 
@@ -110,7 +110,7 @@ export interface SpecOptions extends Pick<LauncherOptions, 'binDir' | 'runtime' 
 
 /** The command agents are registered with. */
 export function serverSpec(options: SpecOptions): ServerSpec {
-  const env: Record<string, string> = options.bridgeHomeOverride ? { AGENT_BRIDGE_HOME: options.bridgeHomeOverride } : {};
+  const env: Record<string, string> = options.bridgeHomeOverride ? { COPANE_HOME: options.bridgeHomeOverride } : {};
   if (options.platform === 'win32') {
     // Agents on Windows start commands without a shell, which cannot run a .cmd file. Register the
     // runtime itself; an entry naming another installed build's runtime stays as it is.
@@ -182,15 +182,15 @@ function shellQuote(value: string): string {
 export function unixLauncher(runtimes: string[], script: string): string {
   return [
     '#!/bin/sh',
-    '# Starts the Agent Bridge MCP server (stdio). Written by the Agent Bridge VS Code extension and',
+    '# Starts the Copane MCP server (stdio). Written by the Copane VS Code extension and',
     '# refreshed each time it starts; edits are overwritten. Remove the agent registrations with the',
-    '# VS Code command "Agent Bridge: Unregister from Claude Code and Codex".',
+    '# VS Code command "Copane: Unregister from Claude Code and Codex".',
     `script=${shellQuote(script)}`,
     `for runtime in ${runtimes.map(shellQuote).join(' ')}; do`,
     '  if [ -x "$runtime" ]; then ELECTRON_RUN_AS_NODE=1 exec "$runtime" "$script" "$@"; fi',
     'done',
     'if command -v node >/dev/null 2>&1; then exec node "$script" "$@"; fi',
-    'echo "Agent Bridge: cannot start the MCP server: the VS Code runtime it used is gone and node is not on the PATH. Open VS Code once with the Agent Bridge extension to repair this." >&2',
+    'echo "Copane: cannot start the MCP server: the VS Code runtime it used is gone and node is not on the PATH. Open VS Code once with the Copane extension to repair this." >&2',
     'exit 1',
     '',
   ].join('\n');
@@ -198,7 +198,7 @@ export function unixLauncher(runtimes: string[], script: string): string {
 
 /** For people running the server by hand on Windows; agents are registered with the runtime directly. */
 export function windowsLauncher(runtimes: string[], script: string): string {
-  const lines = ['@echo off', 'rem Starts the Agent Bridge MCP server (stdio). Written by the Agent Bridge VS Code extension.', 'setlocal'];
+  const lines = ['@echo off', 'rem Starts the Copane MCP server (stdio). Written by the Copane VS Code extension.', 'setlocal'];
   for (const runtime of runtimes) {
     // `exit /b` without a number keeps the runtime's exit code; `%ERRORLEVEL%` inside the block
     // would be expanded before the runtime runs.

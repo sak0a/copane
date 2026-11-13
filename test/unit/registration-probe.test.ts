@@ -22,7 +22,7 @@ const rl = require('readline').createInterface({ input: process.stdin });
 const send = m => process.stdout.write(JSON.stringify(m) + '\\n');
 rl.on('line', line => {
   const m = JSON.parse(line);
-  if (m.method === 'initialize') send({ jsonrpc: '2.0', id: m.id, result: { protocolVersion: m.params.protocolVersion, capabilities: {}, serverInfo: { name: 'vscode', version: '9.9.9' } } });
+  if (m.method === 'initialize') send({ jsonrpc: '2.0', id: m.id, result: { protocolVersion: m.params.protocolVersion, capabilities: {}, serverInfo: { name: 'copane', version: '9.9.9' } } });
   if (m.method === 'tools/list') send({ jsonrpc: '2.0', id: m.id, result: { tools: [{ name: 'window_status' }, { name: 'window_select' }], noConnect: process.argv.includes('--no-connect') } });
 });
 `;
@@ -32,7 +32,7 @@ const options = () => ({ baseEnv: process.env, cwd: dir, timeoutMs: 8000 });
 describe('handshake', () => {
   it('passes for a server that answers and ends when its input closes', async () => {
     const result = await handshake(server('good', `${MCP}\nprocess.stdin.on('end', () => process.exit(0));`), options());
-    expect(result).toMatchObject({ ok: true, server: 'vscode 9.9.9', tools: ['window_status', 'window_select'], exitCode: 0 });
+    expect(result).toMatchObject({ ok: true, server: 'copane 9.9.9', tools: ['window_status', 'window_select'], exitCode: 0 });
     expect(result.text).toMatch(/ended when its input closed/);
   });
 
@@ -90,8 +90,8 @@ describe('diagnose', () => {
 
 describe('the environment an agent gives the server', () => {
   it('drops the extension host\'s own variables and adds the registration\'s', () => {
-    const env = childEnv({ command: 'x', args: [], env: { ELECTRON_RUN_AS_NODE: '1', AGENT_BRIDGE_HOME: '/h' } }, { PATH: '/bin', ELECTRON_RUN_AS_NODE: '1', AGENT_BRIDGE_INSTANCE: '7' });
-    expect(env).toEqual({ PATH: '/bin', ELECTRON_RUN_AS_NODE: '1', AGENT_BRIDGE_HOME: '/h' });
+    const env = childEnv({ command: 'x', args: [], env: { ELECTRON_RUN_AS_NODE: '1', COPANE_HOME: '/h' } }, { PATH: '/bin', ELECTRON_RUN_AS_NODE: '1', COPANE_INSTANCE: '7' });
+    expect(env).toEqual({ PATH: '/bin', ELECTRON_RUN_AS_NODE: '1', COPANE_HOME: '/h' });
     expect(childEnv({ command: 'x', args: [], env: {} }, { ELECTRON_RUN_AS_NODE: '1' })).toEqual({});
   });
 });

@@ -46,7 +46,7 @@ async function domFacts(call: PageCall): Promise<DomFacts | undefined> {
     });
     for (let i = 0; i < backend.length; i++) {
       const attrs = attributes?.[i];
-      if (attrs) for (let k = 0; k < attrs.length; k += 2) if (strings[attrs[k]!] === 'data-agent-bridge-ui') facts.hidden.add(backend[i]!);
+      if (attrs) for (let k = 0; k < attrs.length; k += 2) if (strings[attrs[k]!] === 'data-copane-ui') facts.hidden.add(backend[i]!);
       if (cursor.get(i) === 'pointer' && cursor.get(parent[i]!) !== 'pointer') facts.pointer.add(backend[i]!);
     }
     const cdi = nodes.contentDocumentIndex;

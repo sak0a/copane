@@ -44,7 +44,7 @@ export function decideAccess(input: AccessInput): AccessDecision {
   return { kind: 'ask' };
 }
 
-const SHARE_COMMAND = '"Agent Bridge: Share Browser Tab with Agent Session"';
+const SHARE_COMMAND = '"Copane: Share Browser Tab with Agent Session"';
 
 /** The error text for a refused decision, written for the agent. */
 export function deniedMessage(decision: Exclude<AccessDecision, { kind: 'ok' } | { kind: 'ask' }>, tabId: string): string {
@@ -53,7 +53,7 @@ export function deniedMessage(decision: Exclude<AccessDecision, { kind: 'ok' } |
   }
   switch (decision.why) {
     case 'setting':
-      return `The user's settings do not allow agents to use browser tabs the user opened (agentBridge.browser.userTabs = "deny"), so ${tabId} is off limits. Open your own tab with browser_open instead.`;
+      return `The user's settings do not allow agents to use browser tabs the user opened (copane.browser.userTabs = "deny"), so ${tabId} is off limits. Open your own tab with browser_open instead.`;
     case 'declined':
       return `The user declined to let you use ${tabId}. Do not ask again or retry. Open your own tab with browser_open, or explain in chat why you need this one; the user can share it with the command ${SHARE_COMMAND}.`;
     case 'dismissed': {

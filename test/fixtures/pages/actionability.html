@@ -1,9 +1,9 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Actionability fixture</title>
 <style>body{font:14px sans-serif;margin:16px} #overlay{position:fixed;inset:0;background:rgba(0,0,0,.4)} #mover{position:relative;transition:left 1s linear;left:0}
-[data-agent-bridge-ui]{position:fixed;top:0;right:0;background:#f00;color:#fff;padding:4px;z-index:99999;pointer-events:none}</style></head>
+[data-copane-ui]{position:fixed;top:0;right:0;background:#f00;color:#fff;padding:4px;z-index:99999;pointer-events:none}</style></head>
 <body>
-<div data-agent-bridge-ui="indicator">AGENT INDICATOR <button>Indicator button</button></div>
+<div data-copane-ui="indicator">AGENT INDICATOR <button>Indicator button</button></div>
 <h1>Actionability</h1>
 <button id="covered" onclick="out('covered clicked')">Covered button</button>
 <button id="enabled-later" disabled onclick="out('enabled clicked')">Enabled later</button>
@@ -20,6 +20,6 @@
   requestAnimationFrame(() => (document.getElementById('mover').style.left = '200px'));
   // Records visibility changes of the bridge indicator, so the e2e test can verify screenshots hide it.
   window.indicatorLog = [];
-  new MutationObserver(() => indicatorLog.push(getComputedStyle(document.querySelector('[data-agent-bridge-ui]')).visibility)).observe(document.querySelector('[data-agent-bridge-ui]'), { attributes: true });
+  new MutationObserver(() => indicatorLog.push(getComputedStyle(document.querySelector('[data-copane-ui]')).visibility)).observe(document.querySelector('[data-copane-ui]'), { attributes: true });
 </script>
 </body></html>

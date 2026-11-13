@@ -1,4 +1,4 @@
-// The user-facing side of Agent Bridge: the Sessions view (its own activity bar container), the
+// The user-facing side of Copane: the Sessions view (its own activity bar container), the
 // Agent Tabs view (its own container in the bottom panel), the status bar item, and the commands to step in (show, pause / resume, release, interrupt, close, end).
 // Logic lives in model.ts (pure, unit-tested); this file only wires it to VS Code.
 import * as vscode from 'vscode';

@@ -30,7 +30,7 @@ describe('renderStatus', () => {
     expect(text).toContain('43: blog — /w/blog [wsl]');
     expect(text).toMatch(/enabled in argv\.json, but VS Code has not been restarted/);
     expect(text).toMatch(/### Claude Code[\s\S]*registered ✓/);
-    expect(text).toMatch(/### Codex[\s\S]*another server named "vscode" is configured, not Agent Bridge's: npx other/);
+    expect(text).toMatch(/### Codex[\s\S]*another server named "copane" is configured, not Copane's: npx other/);
     expect(text).toContain('Self-test (started the way an agent would, from this window): ok ✓');
     expect(text).toContain('Claude 1 · checkout — claude-code 2.1.323, connected; found this window: started by an extension in this window');
   });
@@ -51,7 +51,7 @@ describe('renderStatus', () => {
 
   it('has what is needed to diagnose a Windows failure remotely', () => {
     const win = 'C:\\Users\\u\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe';
-    const script = 'C:\\Users\\u\\.vscode-agent-bridge\\bin\\mcp-server.js';
+    const script = 'C:\\Users\\u\\.copane\\bin\\mcp-server.js';
     const text = renderStatus(
       data({
         vscode: { appName: 'Visual Studio Code', version: '1.146.0', remoteName: null, platform: 'win32', arch: 'x64' },
@@ -74,7 +74,7 @@ describe('renderStatus', () => {
             detectedBy: 'config file',
             configFile: 'C:\\Users\\u\\.claude.json',
             state: { kind: 'ours', current: false, command: `C:\\old\\Code.exe ${script}`, reason: 'the runtime it starts no longer exists (C:\\old\\Code.exe)' },
-            notes: ['PROBLEM: Claude Code has the "vscode" server turned off in the project C:\\w.'],
+            notes: ['PROBLEM: Claude Code has the "copane" server turned off in the project C:\\w.'],
             registered: { command: 'C:\\old\\Code.exe', args: [script], env: { ELECTRON_RUN_AS_NODE: '1' }, commandExists: false, scriptExists: true },
           },
         ],
@@ -100,7 +100,7 @@ describe('renderStatus', () => {
     expect(text).toContain('script exists ✓');
     expect(text).toContain('Registered env: ELECTRON_RUN_AS_NODE=1');
     expect(text).toContain('Out of date because the runtime it starts no longer exists');
-    expect(text).toContain('PROBLEM: Claude Code has the "vscode" server turned off');
+    expect(text).toContain('PROBLEM: Claude Code has the "copane" server turned off');
     expect(text).toMatch(/Start test \(MCP handshake[^)]*\): FAILED\n  the server exited before answering/);
     expect(text).toContain('  Error: EPERM: operation not permitted');
     expect(text).toContain('## Recent registration changes');

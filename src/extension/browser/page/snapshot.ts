@@ -24,7 +24,7 @@ export interface SnapshotInput {
   frameOwners: Map<number, string>;
   /** Elements that look clickable (cursor: pointer, click listeners) although their role does not say so. */
   pointer: Set<number>;
-  /** Elements to leave out entirely (the bridge's own UI, marked `data-agent-bridge-ui`). */
+  /** Elements to leave out entirely (the bridge's own UI, marked `data-copane-ui`). */
   hidden: Set<number>;
   /** Render only the subtree of this element. */
   root?: number;

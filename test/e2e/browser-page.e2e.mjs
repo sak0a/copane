@@ -270,17 +270,17 @@ test('drag: HTML5 drag and drop, and pointer dragging', async () => {
 test('upload: file input, hidden input behind a button, label, and missing files', async () => {
   await open('/upload.html');
   const dir = tmpdir();
-  const f1 = join(dir, 'agent-bridge-e2e-a.txt');
-  const f2 = join(dir, 'agent-bridge-e2e-b.txt');
+  const f1 = join(dir, 'copane-e2e-a.txt');
+  const f2 = join(dir, 'copane-e2e-b.txt');
   writeFileSync(f1, 'hello upload\n');
   writeFileSync(f2, 'second');
-  assert.match(await a.ok('browser_upload_file', { selector: '#docs', paths: [f1, f2] }), /Set 2 files on .*agent-bridge-e2e-a\.txt, agent-bridge-e2e-b\.txt/);
-  assert.match(await a.ok('browser_upload_file', { selector: '#pick', paths: [f1] }), /chose agent-bridge-e2e-a\.txt in the file chooser/);
-  assert.match(await evaluate("document.getElementById('chosen').textContent"), /agent-bridge-e2e-a\.txt \(13 B\), agent-bridge-e2e-b\.txt \(6 B\), agent-bridge-e2e-a\.txt \(13 B\)/);
+  assert.match(await a.ok('browser_upload_file', { selector: '#docs', paths: [f1, f2] }), /Set 2 files on .*copane-e2e-a\.txt, copane-e2e-b\.txt/);
+  assert.match(await a.ok('browser_upload_file', { selector: '#pick', paths: [f1] }), /chose copane-e2e-a\.txt in the file chooser/);
+  assert.match(await evaluate("document.getElementById('chosen').textContent"), /copane-e2e-a\.txt \(13 B\), copane-e2e-b\.txt \(6 B\), copane-e2e-a\.txt \(13 B\)/);
   await fails('browser_upload_file', { selector: '#pick', paths: [f1, f2] }, /accepts one file/);
   await fails('browser_upload_file', { selector: '#docs', paths: [join(dir, 'does-not-exist.txt')] }, /There is no file at/);
   assert.match(await a.ok('browser_click', { selector: 'button[type=submit]' }), /Navigated to .*\/upload — "Uploaded"/);
-  assert.match(await a.ok('browser_snapshot'), /agent-bridge-e2e-a\.txt, agent-bridge-e2e-b\.txt, agent-bridge-e2e-a\.txt/);
+  assert.match(await a.ok('browser_snapshot'), /copane-e2e-a\.txt, copane-e2e-b\.txt, copane-e2e-a\.txt/);
 });
 
 // ---------------------------------------------------------------- waiting

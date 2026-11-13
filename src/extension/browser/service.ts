@@ -46,7 +46,7 @@ interface PendingPopup {
   at: number;
 }
 
-const STATE_KEY = 'agentBridge.browser.state';
+const STATE_KEY = 'copane.browser.state';
 /** How long a tool call waits for the user to answer a consent prompt before it returns. */
 const CONSENT_WAIT_MS = 120_000;
 /** A tab that appears this long after a controlled page called window.open counts as that page's popup. */
@@ -55,7 +55,7 @@ const IDENTIFY_TIMEOUT_MS = 5_000;
 const NEUTRAL_COLOR = '#8a8a8a';
 
 export const NOT_ENABLED =
-  "The integrated browser is not enabled for this extension in the user's VS Code yet. Ask the user to run the command \"Agent Bridge: Enable Integrated Browser\" and restart VS Code, then try again.";
+  "The integrated browser is not enabled for this extension in the user's VS Code yet. Ask the user to run the command \"Copane: Enable Integrated Browser\" and restart VS Code, then try again.";
 
 export function browserApiAvailable(): boolean {
   try {
@@ -65,7 +65,7 @@ export function browserApiAvailable(): boolean {
   }
 }
 
-const config = () => vscode.workspace.getConfiguration('agentBridge.browser');
+const config = () => vscode.workspace.getConfiguration('copane.browser');
 
 export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
   readonly available = browserApiAvailable();
@@ -135,7 +135,7 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
         this.changeEmitter.fire();
       }),
       vscode.workspace.onDidChangeConfiguration(e => {
-        if (e.affectsConfiguration('agentBridge.browser.pageIndicator')) this.refreshMarking(...this.allRecords());
+        if (e.affectsConfiguration('copane.browser.pageIndicator')) this.refreshMarking(...this.allRecords());
       }),
     );
     this.updateContextKeys();
@@ -698,8 +698,8 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
     const active = vscode.window.activeBrowserTab;
     const record = active ? this.records.get(active) : undefined;
     const controlled = !!record?.id && !!this.services.tabLeases.holder(record.id);
-    void vscode.commands.executeCommand('setContext', 'agentBridge.browser.activeTabControlled', controlled);
-    void vscode.commands.executeCommand('setContext', 'agentBridge.browser.activeTabPaused', !!record?.paused);
+    void vscode.commands.executeCommand('setContext', 'copane.browser.activeTabControlled', controlled);
+    void vscode.commands.executeCommand('setContext', 'copane.browser.activeTabPaused', !!record?.paused);
   }
 
   private columnOf(record: TabRecord): vscode.ViewColumn | undefined {

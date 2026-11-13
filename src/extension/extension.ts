@@ -18,16 +18,16 @@ import { activateTerminals } from './terminal';
 import { activateUi } from './ui';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-  const channel = vscode.window.createOutputChannel('Agent Bridge', { log: true });
+  const channel = vscode.window.createOutputChannel('Copane', { log: true });
   const log: Logger = {
     debug: (m, ...a) => channel.debug(m, ...a),
     info: (m, ...a) => channel.info(m, ...a),
     warn: (m, ...a) => channel.warn(m, ...a),
     error: (m, ...a) => channel.error(m, ...a),
   };
-  context.subscriptions.push(channel, vscode.commands.registerCommand('agentBridge.showLog', () => channel.show()));
+  context.subscriptions.push(channel, vscode.commands.registerCommand('copane.showLog', () => channel.show()));
 
-  const config = () => vscode.workspace.getConfiguration('agentBridge');
+  const config = () => vscode.workspace.getConfiguration('copane');
   const sessions = new SessionManager({ graceMs: () => Math.max(0, config().get<number>('sessionGraceSeconds', 20)) * 1000 });
   const tools = new ToolRegistry();
   // Idle timeout of tab control: the browser module's setting (contributes/browser.json).
@@ -85,7 +85,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     log.info(`listening on ${instance.info.socketPath} (window ${instance.info.id}, browser API ${services.browser.available ? 'available' : 'not enabled'})`);
   } catch (err) {
     log.error('could not start the bridge server', err);
-    void vscode.window.showErrorMessage(`Agent Bridge could not start: ${err instanceof Error ? err.message : String(err)}`);
+    void vscode.window.showErrorMessage(`Copane could not start: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 

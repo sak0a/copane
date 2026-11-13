@@ -42,7 +42,7 @@ export async function openPage(hostDir, url) {
     const hosts = [];
     const visit = (node, inside) => {
       const attrs = node.attributes ?? [];
-      const isHost = attrs.includes('data-agent-bridge-ui');
+      const isHost = attrs.includes('data-copane-ui');
       if (isHost) hosts.push(node);
       for (const child of [...(node.children ?? []), ...(node.shadowRoots ?? [])]) visit(child, inside || isHost);
     };

@@ -115,7 +115,7 @@ export class Tracked {
   }
 }
 
-const STATE_KEY = 'agentBridge.terminals.v1';
+const STATE_KEY = 'copane.terminals.v1';
 const SHELL_INTEGRATION_WAIT_MS = 12_000;
 
 export class TerminalManager implements TerminalService, vscode.Disposable {
@@ -272,7 +272,7 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
 
   /** Whether the session may use the terminal right now, must ask, or is refused. */
   access(session: AgentSession, t: Tracked): AccessDecision {
-    const policy = parsePolicy(vscode.workspace.getConfiguration('agentBridge.terminal').get('userTerminals'));
+    const policy = parsePolicy(vscode.workspace.getConfiguration('copane.terminal').get('userTerminals'));
     return decideAccess({ origin: t.origin, ownerKey: t.ownerKey, ownerAlive: this.ownerAlive(t), granted: t.granted, refusedUntil: t.refusedUntil }, session.id, policy, Date.now());
   }
 
@@ -282,7 +282,7 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
     if (decision.kind === 'allowed') return;
     if (decision.kind === 'denied') {
       if (decision.reason === 'policy') {
-        throw new ToolError('access_denied', `${t.id} ("${t.name}") is the user's own terminal, and the setting agentBridge.terminal.userTerminals is "deny", so agents cannot read or type in it. Use your own terminal instead (terminal_run creates one).`);
+        throw new ToolError('access_denied', `${t.id} ("${t.name}") is the user's own terminal, and the setting copane.terminal.userTerminals is "deny", so agents cannot read or type in it. Use your own terminal instead (terminal_run creates one).`);
       }
       throw new ToolError('access_denied', `The user declined to let you use ${t.id} ("${t.name}") a moment ago. Do not ask again right away; use your own terminal, or ask the user in chat if you really need this one.`);
     }
@@ -702,7 +702,7 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
   }
 
   private onSessionEnded(session: AgentSession): void {
-    const policy = parseSessionEndPolicy(vscode.workspace.getConfiguration('agentBridge.terminal').get('onSessionEnd'));
+    const policy = parseSessionEndPolicy(vscode.workspace.getConfiguration('copane.terminal').get('onSessionEnd'));
     for (const t of this.all()) {
       t.granted.delete(session.id);
       t.marks.delete(session.id);
@@ -732,7 +732,7 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
     this.changeQueued = true;
     queueMicrotask(() => {
       this.changeQueued = false;
-      void vscode.commands.executeCommand('setContext', 'agentBridge.terminal.waitingForUser', this.pendingHandoffs().length > 0);
+      void vscode.commands.executeCommand('setContext', 'copane.terminal.waitingForUser', this.pendingHandoffs().length > 0);
       this.changeEmitter.fire();
     });
   }

@@ -46,23 +46,23 @@ export function registerBrowserCommands(services: BridgeServices, browser: Brows
   };
 
   services.context.subscriptions.push(
-    vscode.commands.registerCommand('agentBridge.browser.pauseTab', async (arg?: unknown) => {
+    vscode.commands.registerCommand('copane.browser.pauseTab', async (arg?: unknown) => {
       const id = await pickTab(arg, 'Pause agent access to which tab?', t => !t.paused);
       if (id) browser.setPaused(id, true);
     }),
-    vscode.commands.registerCommand('agentBridge.browser.resumeTab', async (arg?: unknown) => {
+    vscode.commands.registerCommand('copane.browser.resumeTab', async (arg?: unknown) => {
       const id = await pickTab(arg, 'Resume agent access to which tab?', t => t.paused);
       if (id) browser.setPaused(id, false);
     }),
-    vscode.commands.registerCommand('agentBridge.browser.releaseTab', async (arg?: unknown) => {
+    vscode.commands.registerCommand('copane.browser.releaseTab', async (arg?: unknown) => {
       const id = await pickTab(arg, 'End agent control of which tab?', t => !!t.controlledBy);
       if (id) tabLeases.release(id);
     }),
-    vscode.commands.registerCommand('agentBridge.browser.revealTab', async (arg?: unknown) => {
+    vscode.commands.registerCommand('copane.browser.revealTab', async (arg?: unknown) => {
       const id = await pickTab(arg, 'Show which tab?');
       if (id) await browser.revealTab(id);
     }),
-    vscode.commands.registerCommand('agentBridge.browser.shareTab', async (arg?: unknown, sessionArg?: unknown) => {
+    vscode.commands.registerCommand('copane.browser.shareTab', async (arg?: unknown, sessionArg?: unknown) => {
       const id = await pickTab(arg, 'Share which tab with an agent session?', t => t.origin === 'user');
       if (!id) return;
       let sessionId = typeof sessionArg === 'string' && sessions.get(sessionArg) ? sessionArg : undefined;
@@ -80,7 +80,7 @@ export function registerBrowserCommands(services: BridgeServices, browser: Brows
       }
       if (sessionId) browser.grantAccess(id, sessionId);
     }),
-    vscode.commands.registerCommand('agentBridge.browser.resetPermissions', () => {
+    vscode.commands.registerCommand('copane.browser.resetPermissions', () => {
       browser.resetConsent();
       void vscode.window.showInformationMessage('Agent sessions will ask again before using your browser tabs.');
     }),

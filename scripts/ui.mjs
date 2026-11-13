@@ -23,7 +23,7 @@ for (let i = 0; i < argv.length; i++) {
   else positional.push(argv[i]);
 }
 const name = options.name ?? 'dev';
-const base = join(process.platform === 'win32' ? process.env.TEMP : '/tmp', 'agent-bridge-dev', name);
+const base = join(process.platform === 'win32' ? process.env.TEMP : '/tmp', 'copane-dev', name);
 let port;
 try {
   port = Number(readFileSync(join(base, 'ui-port'), 'utf8'));

@@ -1,4 +1,4 @@
-// The "Agent Bridge: Show Status" report: one place that answers "why doesn't Claude see the tools?".
+// The "Copane: Show Status" report: one place that answers "why doesn't Claude see the tools?".
 // Rendered from plain data so the wording is testable without VS Code.
 import type { InstanceMatch } from '../../shared/protocol';
 import type { ArgvState } from './argv';
@@ -105,7 +105,7 @@ function stateText(state: EntryState): string {
     case 'ours':
       return state.current ? 'registered ✓' : `registered, but outdated (${state.command})`;
     case 'foreign':
-      return `another server named "vscode" is configured, not Agent Bridge's: ${state.command}`;
+      return `another server named "copane" is configured, not Copane's: ${state.command}`;
     case 'unreadable':
       return `cannot read the config: ${state.error}`;
   }
@@ -114,14 +114,14 @@ function stateText(state: EntryState): string {
 function argvText(d: StatusData['browser']): string {
   if (d.available) return 'available ✓';
   const s = d.argvState;
-  if (d.remote && !d.argvPath) return 'not enabled. This is a remote window: argv.json is on your local machine; run "Agent Bridge: Enable Integrated Browser".';
+  if (d.remote && !d.argvPath) return 'not enabled. This is a remote window: argv.json is on your local machine; run "Copane: Enable Integrated Browser".';
   if (!s) return 'not enabled';
   switch (s.kind) {
     case 'enabled':
       return 'enabled in argv.json, but VS Code has not been restarted since. Quit VS Code completely and start it again (reloading the window is not enough).';
     case 'not-enabled':
     case 'missing':
-      return 'not enabled. Run "Agent Bridge: Enable Integrated Browser" (one-time; needs a VS Code restart).';
+      return 'not enabled. Run "Copane: Enable Integrated Browser" (one-time; needs a VS Code restart).';
     case 'invalid':
       return `not enabled, and argv.json cannot be parsed (${s.error}); fix it with "Preferences: Configure Runtime Arguments".`;
   }
@@ -141,10 +141,10 @@ function check(line: (s?: string) => void, title: string, result: CheckResult): 
 export function renderStatus(d: StatusData): string {
   const out: string[] = [];
   const line = (s = '') => out.push(s);
-  line('# Agent Bridge status');
+  line('# Copane status');
   line();
   line(
-    `${d.generatedAt.toISOString()} · Agent Bridge ${d.extensionVersion} · ${d.vscode.appName} ${d.vscode.version} · ${d.vscode.platform}-${d.vscode.arch}` +
+    `${d.generatedAt.toISOString()} · Copane ${d.extensionVersion} · ${d.vscode.appName} ${d.vscode.version} · ${d.vscode.platform}-${d.vscode.arch}` +
       (d.vscode.remoteName ? ` · remote window (${d.vscode.remoteName}; this report describes the remote side)` : ' · local window'),
   );
   line();
@@ -162,14 +162,14 @@ export function renderStatus(d: StatusData): string {
   line('## This window');
   line(`- Window id: ${d.window.id} (extension host process)`);
   line(`- Workspace: ${d.window.workspaceName ?? '(none)'}${d.window.folders.length ? ` — ${d.window.folders.join(', ')}` : ''}`);
-  line(`- Bridge socket: ${d.window.socketPath} — ${d.window.listening ? 'listening ✓' : 'NOT listening (see "Agent Bridge: Show Log")'}`);
+  line(`- Bridge socket: ${d.window.socketPath} — ${d.window.listening ? 'listening ✓' : 'NOT listening (see "Copane: Show Log")'}`);
   line(`- Instance file: ${d.window.instanceFile} — ${d.window.instanceFilePresent ? 'present ✓' : 'MISSING: agents cannot find this window'}`);
   line(`- Bridge home: ${d.bridgeHome}`);
   if (d.otherWindows.length) {
-    line(`- Other windows with Agent Bridge: ${d.otherWindows.length}`);
+    line(`- Other windows with Copane: ${d.otherWindows.length}`);
     for (const w of d.otherWindows) line(`  - ${w.id}: ${w.workspaceName ?? '(no folder)'}${w.folders.length ? ` — ${w.folders.join(', ')}` : ''}${w.remoteName ? ` [${w.remoteName}]` : ''}`);
   } else {
-    line('- Other windows with Agent Bridge: none');
+    line('- Other windows with Copane: none');
   }
   line();
 
@@ -179,7 +179,7 @@ export function renderStatus(d: StatusData): string {
   line();
 
   line('## Agents');
-  line(`- Registration mode: ${d.registrationMode} (setting agentBridge.registration.mode); consent: ${d.consent}`);
+  line(`- Registration mode: ${d.registrationMode} (setting copane.registration.mode); consent: ${d.consent}`);
   for (const agent of d.agents) {
     line(`### ${agent.name}`);
     if (!agent.enabled) {
@@ -188,7 +188,7 @@ export function renderStatus(d: StatusData): string {
     }
     line(`- Installed: ${agent.detected ? `yes (${agent.detectedBy})` : 'not found'}`);
     line(`- Config: ${agent.configFile}`);
-    line(`- MCP server "vscode": ${stateText(agent.state)}`);
+    line(`- MCP server "copane": ${stateText(agent.state)}`);
     if (agent.state.kind === 'ours' && !agent.state.current && agent.state.reason) line(`- Out of date because ${agent.state.reason}`);
     if (agent.registered) {
       const r = agent.registered;
@@ -229,7 +229,7 @@ export function renderStatus(d: StatusData): string {
   line();
 
   line('## If an agent does not see the tools');
-  line('1. The agent must be started after registering: start a new Claude Code chat, or restart `claude` / `codex`. In Claude Code, `/mcp` lists the "vscode" server and its state.');
+  line('1. The agent must be started after registering: start a new Claude Code chat, or restart `claude` / `codex`. In Claude Code, `/mcp` lists the "copane" server and its state.');
   line('2. The agent sees `window_status` and `window_select` even when it cannot reach a window; ask it to call `window_status`, which says why.');
   line('3. Several VS Code windows and an agent started outside any of them: the agent asks which window to use (window_select).');
   const t = d.titles ?? DEFAULT_TITLES;

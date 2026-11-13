@@ -12,7 +12,7 @@ export function buildInstructions(services: BridgeServices): string {
     'Terminals: run commands with terminal_run in your own terminal, which the user can watch. For servers and watchers pass a short timeout_seconds (5-10): the command keeps running, and terminal_wait with for_text tells you when it is ready. When a command shows a prompt, answer it with terminal_send only if you know the answer. For a password, token, 2FA code or browser login, call terminal_request_user_input on that terminal and never ask for the secret in chat. The user\'s terminals and other sessions\' terminals ask the user first.',
   ];
   if (!services.browser.available) {
-    lines.push('The integrated browser is not enabled in this VS Code yet, so browser_* tools fail until the user enables it (command "Agent Bridge: Enable Integrated Browser", then a restart). Terminal tools work.');
+    lines.push('The integrated browser is not enabled in this VS Code yet, so browser_* tools fail until the user enables it (command "Copane: Enable Integrated Browser", then a restart). Terminal tools work.');
   }
   return lines.join('\n');
 }

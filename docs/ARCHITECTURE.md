@@ -16,7 +16,7 @@ session is using what, and can take over at any moment.
 - **MCP server** (`src/mcp/`): spawned by the agent, one per agent session. Finds its window
   (`discovery.ts`: terminal env var → extension-host ancestor → cwd inside a workspace folder → only
   window), connects to that window's socket, sends `hello`, then forwards `tools/list` and `tools/call`.
-  Registered with agents under the name `vscode`, so tools appear as `mcp__vscode__browser_click`.
+  Registered with agents under the name `copane`, so tools appear as `mcp__copane__browser_click`.
 - **Bridge server** (`core/bridgeServer.ts`): one per window, in the extension host. Authenticates by a
   token from the instance file (`<bridge home>/instances/<pid>.json`, mode 0600). One connection = one
   agent session.
@@ -46,7 +46,7 @@ agent and its MCP server also run; the browser itself stays on the UI side and V
   or `origin: user`.
 - **Consent**: a session may use its own tabs and tabs of sessions that have ended freely. Reading or
   controlling a user tab needs the user's permission for that session (setting
-  `agentBridge.browser.userTabs`: `ask` (default) / `allow` / `deny`).
+  `copane.browser.userTabs`: `ask` (default) / `allow` / `deny`).
 - **Leases**: mutating actions take the tab's control lease (`core/leases.ts`, `services.tabLeases`).
   A second session gets a `busy` error naming the holder, unless the lease is idle. Reads are never
   blocked by a lease. Leases end on release, idle timeout or session end.
@@ -69,7 +69,7 @@ agent and its MCP server also run; the browser itself stays on the UI side and V
   (login, password, 2FA); the agent never sees what the user types beyond the terminal's own output,
   and resumes when the command finishes or the user says they are done.
 - Terminals the user created are listed but need permission before an agent reads or writes them
-  (`agentBridge.terminal.userTerminals`: `ask` / `allow` / `deny`).
+  (`copane.terminal.userTerminals`: `ask` / `allow` / `deny`).
 
 ## Layout
 

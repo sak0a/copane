@@ -8,8 +8,8 @@
 /** Bumped only for breaking changes to the messages below. */
 export const PROTOCOL_VERSION = 1;
 
-/** Name under which the MCP server is registered with agents. Tools show up as `mcp__vscode__<tool>`. */
-export const MCP_SERVER_NAME = 'vscode';
+/** Name under which the MCP server is registered with agents. Tools show up as `mcp__copane__<tool>`. */
+export const MCP_SERVER_NAME = 'copane';
 
 export const Methods = {
   /** MCP server → bridge. Must be the first request on a connection. */
@@ -53,7 +53,7 @@ export interface HelloParams {
 
 /**
  * - `ancestor`: an ancestor process is the window's extension host (an extension started the agent).
- * - `env`: `AGENT_BRIDGE_INSTANCE` from an integrated terminal of the window.
+ * - `env`: `COPANE_INSTANCE` from an integrated terminal of the window.
  * - `reconnect`: the window this server was connected to was reloaded; same workspace folders.
  * - `cwd`: the working directory is inside one of the window's workspace folders.
  * - `single`: the only open window.
@@ -147,12 +147,12 @@ export interface InstanceInfo {
 
 /** Environment variables understood by the MCP server and the extension. */
 export const Env = {
-  /** Overrides the bridge home directory (default `~/.vscode-agent-bridge`). Used by tests and dev hosts. */
-  home: 'AGENT_BRIDGE_HOME',
+  /** Overrides the bridge home directory (default `~/.copane`). Used by tests and dev hosts. */
+  home: 'COPANE_HOME',
   /** Instance id to connect to. Set by the extension in every integrated terminal of its window. */
-  instance: 'AGENT_BRIDGE_INSTANCE',
+  instance: 'COPANE_INSTANCE',
   /** Explicit session key, instead of the agent's own session id or a random one. */
-  sessionKey: 'AGENT_BRIDGE_SESSION',
+  sessionKey: 'COPANE_SESSION',
 } as const;
 
 export const ErrorCodes = {

@@ -2,10 +2,10 @@
 // installs the MCP server launcher, registers it with Claude Code and Codex (after asking once),
 // enables the integrated browser API, checks and repairs all of it, and reports its state in one place.
 //
-// Commands: agentBridge.registerAgents (Turn On), agentBridge.unregisterAgents (Turn Off),
-// agentBridge.repair (Check and Repair Setup), agentBridge.enableBrowser, agentBridge.showStatus,
-// agentBridge.copyStatus (the UI module links to some of these ids), and
-// agentBridge.registration.runStartupCheck (internal: the startup check, which development hosts do
+// Commands: copane.registerAgents (Turn On), copane.unregisterAgents (Turn Off),
+// copane.repair (Check and Repair Setup), copane.enableBrowser, copane.showStatus,
+// copane.copyStatus (the UI module links to some of these ids), and
+// copane.registration.runStartupCheck (internal: the startup check, which development hosts do
 // not run on their own).
 //
 // Every change to an agent's configuration goes through `applyChange`, which logs it with its reason
@@ -87,9 +87,9 @@ export interface RepairReport {
   lines: CheckLine[];
 }
 
-const STATUS_SCHEME = 'agent-bridge-status';
-const BROWSER_NOTICE_KEY = 'agentBridge.browserNoticeShown';
-const WARNED_KEY = 'agentBridge.registration.warned';
+const STATUS_SCHEME = 'copane-status';
+const BROWSER_NOTICE_KEY = 'copane.browserNoticeShown';
+const WARNED_KEY = 'copane.registration.warned';
 const SNOOZE_MS = 7 * 24 * 3600_000;
 const PROBE_EVERY_MS = 24 * 3600_000;
 
@@ -100,21 +100,21 @@ export function activateRegistration(services: BridgeServices): void {
   context.subscriptions.push(
     vscode.workspace.registerTextDocumentContentProvider(STATUS_SCHEME, statusProvider),
     statusProvider,
-    vscode.commands.registerCommand('agentBridge.registerAgents', () => registration.registerAgents()),
-    vscode.commands.registerCommand('agentBridge.unregisterAgents', () => registration.unregisterAgents()),
-    vscode.commands.registerCommand('agentBridge.repair', (options?: { quiet?: boolean }) => registration.repair(options)),
+    vscode.commands.registerCommand('copane.registerAgents', () => registration.registerAgents()),
+    vscode.commands.registerCommand('copane.unregisterAgents', () => registration.unregisterAgents()),
+    vscode.commands.registerCommand('copane.repair', (options?: { quiet?: boolean }) => registration.repair(options)),
     // The options are for tests: edit argv.json even though the API is already on (dev hosts start
     // with it enabled), and go through an editor as in a remote window.
-    vscode.commands.registerCommand('agentBridge.enableBrowser', (options?: { evenIfAvailable?: boolean; viaEditor?: boolean }) =>
+    vscode.commands.registerCommand('copane.enableBrowser', (options?: { evenIfAvailable?: boolean; viaEditor?: boolean }) =>
       registration.enableBrowser(options),
     ),
-    vscode.commands.registerCommand('agentBridge.showStatus', async (options?: { show?: boolean }) => {
+    vscode.commands.registerCommand('copane.showStatus', async (options?: { show?: boolean }) => {
       const text = await registration.statusReport();
       if (options?.show !== false) await statusProvider.show(text);
       return text;
     }),
     // `toClipboard: false` is for tests: a dev host shares the clipboard of the person using the machine.
-    vscode.commands.registerCommand('agentBridge.copyStatus', async (options?: { quiet?: boolean; toClipboard?: boolean }) => {
+    vscode.commands.registerCommand('copane.copyStatus', async (options?: { quiet?: boolean; toClipboard?: boolean }) => {
       // From the status document's title bar: copy what is shown; from the palette: a fresh report.
       const text = statusProvider.isActive() ? statusProvider.current : await registration.statusReport();
       if (options?.toClipboard === false) return text;
@@ -122,7 +122,7 @@ export function activateRegistration(services: BridgeServices): void {
       if (!options?.quiet) void services.prompts.ask({ message: `${registration.titles.product}: the status report is on the clipboard (${text.split('\n').length} lines).`, choices: [] });
       return text;
     }),
-    vscode.commands.registerCommand('agentBridge.registration.runStartupCheck', () => registration.startup({ probe: 'wait' })),
+    vscode.commands.registerCommand('copane.registration.runStartupCheck', () => registration.startup({ probe: 'wait' })),
   );
 
   registration.installServerSafely();
@@ -132,7 +132,7 @@ export function activateRegistration(services: BridgeServices): void {
   setTimeout(() => void registration.startup().catch(err => registration.log.error('startup check failed', err)), 1500);
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration(e => {
-      if (e.affectsConfiguration('agentBridge.registration')) void registration.startup({ browserNotice: false, trigger: 'settings' });
+      if (e.affectsConfiguration('copane.registration')) void registration.startup({ browserNotice: false, trigger: 'settings' });
     }),
   );
 }
@@ -175,13 +175,13 @@ class Registration {
       return c ? `${c.category ? `${c.category}: ` : ''}${c.title}` : fallback;
     };
     return {
-      product: commands.find(c => c.command === 'agentBridge.repair')?.category ?? DEFAULT_TITLES.product,
-      turnOn: title('agentBridge.registerAgents', DEFAULT_TITLES.turnOn),
-      turnOff: title('agentBridge.unregisterAgents', DEFAULT_TITLES.turnOff),
-      repair: title('agentBridge.repair', DEFAULT_TITLES.repair),
-      status: title('agentBridge.showStatus', DEFAULT_TITLES.status),
-      copy: title('agentBridge.copyStatus', DEFAULT_TITLES.copy),
-      log: title('agentBridge.showLog', DEFAULT_TITLES.log),
+      product: commands.find(c => c.command === 'copane.repair')?.category ?? DEFAULT_TITLES.product,
+      turnOn: title('copane.registerAgents', DEFAULT_TITLES.turnOn),
+      turnOff: title('copane.unregisterAgents', DEFAULT_TITLES.turnOff),
+      repair: title('copane.repair', DEFAULT_TITLES.repair),
+      status: title('copane.showStatus', DEFAULT_TITLES.status),
+      copy: title('copane.copyStatus', DEFAULT_TITLES.copy),
+      log: title('copane.showLog', DEFAULT_TITLES.log),
     };
   }
 
@@ -196,7 +196,7 @@ class Registration {
   }
 
   private mode(): Mode {
-    const value = vscode.workspace.getConfiguration('agentBridge.registration').get<string>('mode', 'ask');
+    const value = vscode.workspace.getConfiguration('copane.registration').get<string>('mode', 'ask');
     return value === 'automatic' || value === 'manual' ? value : 'ask';
   }
 
@@ -230,7 +230,7 @@ class Registration {
 
   /**
    * In a development host every config path must point into the host's throwaway folder
-   * (scripts/dev-host.mjs sets CLAUDE_CONFIG_DIR, CODEX_HOME and AGENT_BRIDGE_ARGV_JSON there), so a
+   * (scripts/dev-host.mjs sets CLAUDE_CONFIG_DIR, CODEX_HOME and COPANE_ARGV_JSON there), so a
    * dev host can never change the real configuration of the machine it runs on.
    */
   private guard(file: string, variable: string): string | undefined {
@@ -270,8 +270,8 @@ class Registration {
         inspect: () => {
           const result = inspectClaude(claude.configFile, spec());
           const problems = [
-            ...result.overriddenIn.filter(o => !o.ours).map(o => `The project ${o.project} has its own "vscode" MCP server (local scope), which Claude Code uses there instead of Agent Bridge's.`),
-            ...result.disabledIn.map(p => `Claude Code has the "vscode" server turned off in the project ${p}: in a Claude Code session there, run /mcp and enable it.`),
+            ...result.overriddenIn.filter(o => !o.ours).map(o => `The project ${o.project} has its own "copane" MCP server (local scope), which Claude Code uses there instead of Copane's.`),
+            ...result.disabledIn.map(p => `Claude Code has the "copane" server turned off in the project ${p}: in a Claude Code session there, run /mcp and enable it.`),
           ];
           const notes: string[] = [];
           const { cli: found, shims } = located();
@@ -311,7 +311,7 @@ class Registration {
   }
 
   private enabledAgents(): Agent[] {
-    const config = vscode.workspace.getConfiguration('agentBridge.registration');
+    const config = vscode.workspace.getConfiguration('copane.registration');
     return this.agents().filter(a => config.get<boolean>(a.setting, true));
   }
 
@@ -377,9 +377,9 @@ class Registration {
   // ------------------------------------------------------------------ startup
 
   /**
-   * Runs at startup, quietly: keeps Agent Bridge's own registrations present and current (re-adds a
+   * Runs at startup, quietly: keeps Copane's own registrations present and current (re-adds a
    * missing one the user agreed to, updates an outdated one in one step), asks once (mode "ask")
-   * before adding one, never touches another server named "vscode", and tests that the registered
+   * before adding one, never touches another server named "copane", and tests that the registered
    * command starts. Says something only when something is wrong that it could not fix.
    */
   async startup(options: { browserNotice?: boolean; trigger?: Trigger; probe?: 'background' | 'wait' } = {}): Promise<AgentResult[]> {
@@ -433,7 +433,7 @@ class Registration {
     this.log.error(`start test FAILED: ${result.text}${result.stderr ? `\nstderr:\n${result.stderr}` : ''}`);
     this.warnOnce(
       `probe:${key}`,
-      `${this.titles.product}: the MCP server that agents start does not work on this machine: ${result.text}. Agents will show the "vscode" server as failed.`,
+      `${this.titles.product}: the MCP server that agents start does not work on this machine: ${result.text}. Agents will show the "copane" server as failed.`,
     );
   }
 
@@ -452,8 +452,8 @@ class Registration {
     if (warned.includes(key)) return;
     void memento.update(WARNED_KEY, [...warned, key].slice(-20));
     void this.services.prompts.ask({ message, choices: ['Check and Repair', 'Show Status'] }).then(choice => {
-      if (choice === 'Check and Repair') void vscode.commands.executeCommand('agentBridge.repair');
-      if (choice === 'Show Status') void vscode.commands.executeCommand('agentBridge.showStatus');
+      if (choice === 'Check and Repair') void vscode.commands.executeCommand('copane.repair');
+      if (choice === 'Show Status') void vscode.commands.executeCommand('copane.showStatus');
     });
   }
 
@@ -476,7 +476,7 @@ class Registration {
       const names = agents.map(a => a.name).join(' and ');
       const files = agents.map(a => tildify(a.configFile, this.home)).join(', ');
       const answer = await this.services.prompts.ask({
-        message: `${this.titles.product}: let ${names} use this VS Code's browser tabs and terminals? This adds an MCP server named "vscode" to ${files}.`,
+        message: `${this.titles.product}: let ${names} use this VS Code's browser tabs and terminals? This adds an MCP server named "copane" to ${files}.`,
         choices: ['Register', 'Not Now', 'Never'],
       });
       if (answer === 'Register') {
@@ -519,12 +519,12 @@ class Registration {
       if (result.outcome.kind === 'conflict') {
         const { state } = agent.inspect();
         const answer = await this.services.prompts.ask({
-          message: `${agent.name} already has an MCP server named "vscode" that ${this.titles.product} did not add${state.kind === 'foreign' ? ` (${state.command})` : ''}. Replace it with ${this.titles.product}'s?`,
+          message: `${agent.name} already has an MCP server named "copane" that ${this.titles.product} did not add${state.kind === 'foreign' ? ` (${state.command})` : ''}. Replace it with ${this.titles.product}'s?`,
           detail: `It is in ${agent.configFile}. Keeping it means ${agent.name} does not get ${this.titles.product}'s tools.`,
           choices: ['Replace', 'Keep It'],
           modal: true,
         });
-        if (answer === 'Replace') result = await this.withRegistrationLock(() => this.applyChange(agent, 'replace', 'the user chose to replace the other "vscode" server', 'turn-on'));
+        if (answer === 'Replace') result = await this.withRegistrationLock(() => this.applyChange(agent, 'replace', 'the user chose to replace the other "copane" server', 'turn-on'));
       }
       if (result.outcome.kind === 'changed' || result.outcome.kind === 'unchanged') registered.push(agent);
       results.push(result);
@@ -532,14 +532,14 @@ class Registration {
     if (registered.length > 0) this.recordConsent('granted', registered);
     const setup = this.readState();
     if (setup.modeChangedByTurnOff && this.mode() === 'manual') {
-      await vscode.workspace.getConfiguration('agentBridge.registration').update('mode', 'automatic', vscode.ConfigurationTarget.Global);
+      await vscode.workspace.getConfiguration('copane.registration').update('mode', 'automatic', vscode.ConfigurationTarget.Global);
       this.writeState({ ...this.readState(), modeChangedByTurnOff: false });
     }
     this.reportResults(results);
     return results;
   }
 
-  /** Turn Off: removes Agent Bridge's entries from every agent and keeps them off until Turn On. */
+  /** Turn Off: removes Copane's entries from every agent and keeps them off until Turn On. */
   async unregisterAgents(): Promise<AgentResult[]> {
     const results: AgentResult[] = [];
     const agents = this.agents(); // All of them, also those turned off in settings.
@@ -555,19 +555,19 @@ class Registration {
     // Do not put it back on the next start.
     this.recordConsent('declined', agents);
     if (this.mode() === 'automatic') {
-      await vscode.workspace.getConfiguration('agentBridge.registration').update('mode', 'manual', vscode.ConfigurationTarget.Global);
+      await vscode.workspace.getConfiguration('copane.registration').update('mode', 'manual', vscode.ConfigurationTarget.Global);
       this.writeState({ ...this.readState(), modeChangedByTurnOff: true });
     }
     const lines = results.map(r => `${r.agent}: ${r.outcome.kind === 'changed' ? 'removed' : r.outcome.detail}`);
     void this.services.prompts.ask({
       message: `${this.titles.product}: ${lines.join('; ')}. Running agent sessions keep the tools until they restart. "${this.titles.turnOn}" adds them back.`,
       choices: ['Show Status'],
-    }).then(choice => choice && vscode.commands.executeCommand('agentBridge.showStatus'));
+    }).then(choice => choice && vscode.commands.executeCommand('copane.showStatus'));
     return results;
   }
 
   /**
-   * Check and Repair: checks everything an agent needs, end to end, fixes what belongs to Agent Bridge
+   * Check and Repair: checks everything an agent needs, end to end, fixes what belongs to Copane
    * and says in plain words what was wrong and what it did. Respects Turn Off.
    */
   async repair(options: { quiet?: boolean } = {}): Promise<RepairReport> {
@@ -586,10 +586,10 @@ class Registration {
     else problem(`Agents would start it with ${this.spec.command}, which does not exist.`);
 
     // 2. Each agent's registration.
-    const config = vscode.workspace.getConfiguration('agentBridge.registration');
+    const config = vscode.workspace.getConfiguration('copane.registration');
     for (const agent of this.agents()) {
       if (!config.get<boolean>(agent.setting, true)) {
-        ok(`${agent.name}: turned off in settings (agentBridge.registration.${agent.setting}); not checked.`);
+        ok(`${agent.name}: turned off in settings (copane.registration.${agent.setting}); not checked.`);
         continue;
       }
       const plan = this.plan(agent, 'repair');
@@ -605,17 +605,17 @@ class Registration {
         else problem(`${agent.name}: ${plan.reason}, and fixing it failed: ${result.outcome.detail}`);
       } else if (plan.action === 'ask-replace') {
         const answer = await this.services.prompts.ask({
-          message: `${agent.name} has an MCP server named "vscode" that ${this.titles.product} did not add (${plan.command}). Replace it with ${this.titles.product}'s?`,
+          message: `${agent.name} has an MCP server named "copane" that ${this.titles.product} did not add (${plan.command}). Replace it with ${this.titles.product}'s?`,
           detail: `It is in ${agent.configFile}. Keeping it means ${agent.name} does not get ${this.titles.product}'s tools.`,
           choices: ['Replace', 'Keep It'],
           modal: true,
         });
         if (answer === 'Replace') {
-          const result = await this.withRegistrationLock(() => this.applyChange(agent, 'replace', 'the user chose to replace the other "vscode" server', 'repair'));
-          if (result.outcome.kind === 'changed') fixed(`${agent.name}: replaced the other "vscode" server (${plan.command}) with ${this.titles.product}'s.`);
-          else problem(`${agent.name}: replacing the other "vscode" server failed: ${result.outcome.detail}`);
+          const result = await this.withRegistrationLock(() => this.applyChange(agent, 'replace', 'the user chose to replace the other "copane" server', 'repair'));
+          if (result.outcome.kind === 'changed') fixed(`${agent.name}: replaced the other "copane" server (${plan.command}) with ${this.titles.product}'s.`);
+          else problem(`${agent.name}: replacing the other "copane" server failed: ${result.outcome.detail}`);
         } else {
-          problem(`${agent.name}: another MCP server named "vscode" is configured (${plan.command}); kept it, so ${agent.name} does not get ${this.titles.product}'s tools.`);
+          problem(`${agent.name}: another MCP server named "copane" is configured (${plan.command}); kept it, so ${agent.name} does not get ${this.titles.product}'s tools.`);
         }
       } else if (plan.action === 'report') {
         problem(`${agent.name}: ${plan.problem}.`);
@@ -654,8 +654,8 @@ class Registration {
           ? `fixed ${fixes.length} thing${fixes.length > 1 ? 's' : ''}: ${fixes.map(f => f.text).join(' ')} Everything else is fine.`
           : 'everything is fine: registrations are current, the server starts and answers, and this window is reachable.';
       void this.services.prompts.ask({ message: `${this.titles.product}: ${summary}`, choices: ['Show Status', 'Copy Report'] }).then(async choice => {
-        if (choice === 'Show Status') await vscode.commands.executeCommand('agentBridge.showStatus');
-        if (choice === 'Copy Report') await vscode.commands.executeCommand('agentBridge.copyStatus');
+        if (choice === 'Show Status') await vscode.commands.executeCommand('copane.showStatus');
+        if (choice === 'Copy Report') await vscode.commands.executeCommand('copane.copyStatus');
       });
     }
     return report;
@@ -675,15 +675,15 @@ class Registration {
     const message = none
       ? `${this.titles.product}: neither Claude Code nor Codex was found. Install one, then run "${this.titles.turnOn}".`
       : `${this.titles.product}: ${parts.join('; ')}.${anyRegistered ? ' New agent sessions get the tools; restart sessions that are already running.' : ''}`;
-    void this.services.prompts.ask({ message, choices: ['Show Status'] }).then(choice => choice && vscode.commands.executeCommand('agentBridge.showStatus'));
+    void this.services.prompts.ask({ message, choices: ['Show Status'] }).then(choice => choice && vscode.commands.executeCommand('copane.showStatus'));
   }
 
   // ------------------------------------------------------------------ browser
 
   private argvTarget(): { file: string | undefined; blocked: string | undefined; viaEditor: boolean } {
-    const override = this.env.AGENT_BRIDGE_ARGV_JSON;
-    if (override) return { file: override, blocked: this.guard(override, 'AGENT_BRIDGE_ARGV_JSON'), viaEditor: this.env.AGENT_BRIDGE_ARGV_VIA_EDITOR === '1' };
-    if (this.isDev) return { file: undefined, blocked: 'this is an extension development host without AGENT_BRIDGE_ARGV_JSON (scripts/dev-host.mjs sets it)', viaEditor: false };
+    const override = this.env.COPANE_ARGV_JSON;
+    if (override) return { file: override, blocked: this.guard(override, 'COPANE_ARGV_JSON'), viaEditor: this.env.COPANE_ARGV_VIA_EDITOR === '1' };
+    if (this.isDev) return { file: undefined, blocked: 'this is an extension development host without COPANE_ARGV_JSON (scripts/dev-host.mjs sets it)', viaEditor: false };
     // In a remote window this code runs on the remote side; argv.json is on the machine running the UI.
     if (vscode.env.remoteName) return { file: undefined, blocked: undefined, viaEditor: true };
     return { file: argvJsonPath({ appRoot: vscode.env.appRoot, home: this.home, env: this.env }), blocked: undefined, viaEditor: false };
@@ -691,12 +691,12 @@ class Registration {
 
   async enableBrowser(options: { evenIfAvailable?: boolean; viaEditor?: boolean } = {}): Promise<{ state: string; file?: string; changed?: boolean; error?: string }> {
     if (this.services.browser.available && !options.evenIfAvailable) {
-      void this.services.prompts.ask({ message: 'Agent Bridge: the integrated browser is already enabled.', choices: [] });
+      void this.services.prompts.ask({ message: 'Copane: the integrated browser is already enabled.', choices: [] });
       return { state: 'available' };
     }
     const target = this.argvTarget();
     if (target.blocked) {
-      void this.services.prompts.ask({ message: `Agent Bridge: not changing argv.json: ${target.blocked}.`, choices: [] });
+      void this.services.prompts.ask({ message: `Copane: not changing argv.json: ${target.blocked}.`, choices: [] });
       return { state: 'blocked', error: target.blocked };
     }
     try {
@@ -755,7 +755,7 @@ class Registration {
 
   private async offerRestart(changed: boolean, file: string): Promise<void> {
     const answer = await this.services.prompts.ask({
-      message: `Agent Bridge: the integrated browser is ${changed ? 'now enabled' : 'already enabled'} in argv.json. VS Code reads it only at startup: quit VS Code completely and start it again (reloading the window is not enough).`,
+      message: `Copane: the integrated browser is ${changed ? 'now enabled' : 'already enabled'} in argv.json. VS Code reads it only at startup: quit VS Code completely and start it again (reloading the window is not enough).`,
       choices: ['Quit VS Code', 'Show argv.json', 'Later'],
     });
     if (answer === 'Quit VS Code') await vscode.commands.executeCommand('workbench.action.quit');
@@ -768,7 +768,7 @@ class Registration {
   private async manualBrowserInstructions(reason: string): Promise<void> {
     const snippet = `"enable-proposed-api": ["${this.extensionId}"]`;
     const answer = await this.services.prompts.ask({
-      message: `Agent Bridge could not change argv.json (${reason}). Add ${snippet} to it by hand: run "Preferences: Configure Runtime Arguments", add the line, save, and restart VS Code.`,
+      message: `Copane could not change argv.json (${reason}). Add ${snippet} to it by hand: run "Preferences: Configure Runtime Arguments", add the line, save, and restart VS Code.`,
       choices: ['Copy Line and Open argv.json'],
     });
     if (answer) {
@@ -790,7 +790,7 @@ class Registration {
     }
     const answer = await this.services.prompts.ask({
       message:
-        'Agent Bridge: agents can use the integrated browser once it is enabled for this extension. That is a one-time change to VS Code\'s argv.json ("enable-proposed-api") and a restart of VS Code.',
+        'Copane: agents can use the integrated browser once it is enabled for this extension. That is a one-time change to VS Code\'s argv.json ("enable-proposed-api") and a restart of VS Code.',
       choices: ['Enable', 'Not Now'],
     });
     if (answer === 'Enable') await this.enableBrowser();
@@ -807,7 +807,7 @@ class Registration {
     const argv = this.argvTarget();
     let argvStateValue: ArgvState | undefined;
     if (argv.file && !argv.blocked && !argv.viaEditor) argvStateValue = argvState(readTextIfExists(argv.file), this.extensionId);
-    const config = vscode.workspace.getConfiguration('agentBridge.registration');
+    const config = vscode.workspace.getConfiguration('copane.registration');
     const agents: AgentStatus[] = this.agents().map(agent => {
       const enabled = config.get<boolean>(agent.setting, true);
       const detected = agent.detect();
@@ -859,7 +859,7 @@ class Registration {
         appHost: vscode.env.appHost,
         uiKind: vscode.env.uiKind === vscode.UIKind.Web ? 'web' : 'desktop',
         shell: vscode.env.shell,
-        env: Object.fromEntries(['AGENT_BRIDGE_HOME', 'CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'ELECTRON_RUN_AS_NODE'].map(k => [k, this.env[k]])),
+        env: Object.fromEntries(['COPANE_HOME', 'CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'ELECTRON_RUN_AS_NODE'].map(k => [k, this.env[k]])),
       },
       window: {
         id,
@@ -945,7 +945,7 @@ class StatusDocuments implements vscode.TextDocumentContentProvider, vscode.Disp
   current = '';
   private readonly emitter = new vscode.EventEmitter<vscode.Uri>();
   readonly onDidChange = this.emitter.event;
-  private readonly uri = vscode.Uri.parse(`${STATUS_SCHEME}:Agent Bridge Status.md`);
+  private readonly uri = vscode.Uri.parse(`${STATUS_SCHEME}:Copane Status.md`);
 
   provideTextDocumentContent(): string {
     return this.current;

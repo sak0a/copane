@@ -1,7 +1,7 @@
 // Starts the MCP server exactly as an agent's registration says (command, args, env) and checks that
 // it works: an MCP handshake and a tool list over stdio (with `--no-connect`, so no agent session
 // appears in the user's window), that it ends when its stdin closes, and `--diagnose` for which
-// window it would reach. Free of `vscode`, so it is unit-tested with stand-in servers.
+// window it would reach. Free of `copane`, so it is unit-tested with stand-in servers.
 import { execFile, spawn } from 'node:child_process';
 
 export interface Launch {
@@ -41,8 +41,8 @@ export function childEnv(launch: Launch, base: NodeJS.ProcessEnv): NodeJS.Proces
   const env: NodeJS.ProcessEnv = { ...base };
   // The extension host runs with these; an agent normally does not, and they would change what is tested.
   delete env.ELECTRON_RUN_AS_NODE;
-  delete env.AGENT_BRIDGE_INSTANCE;
-  delete env.AGENT_BRIDGE_SESSION;
+  delete env.COPANE_INSTANCE;
+  delete env.COPANE_SESSION;
   return { ...env, ...launch.env };
 }
 
@@ -121,7 +121,7 @@ export function handshake(launch: Launch, options: ProbeOptions): Promise<Handsh
       jsonrpc: '2.0',
       id: 1,
       method: 'initialize',
-      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: 'agent-bridge-check', version: '1' } },
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: 'copane-check', version: '1' } },
     });
   });
 }

@@ -5,9 +5,9 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { Env, type InstanceInfo } from './protocol';
 
-/** `~/.vscode-agent-bridge`, or `$AGENT_BRIDGE_HOME` (tests and dev hosts use a private one). */
+/** `~/.copane`, or `$COPANE_HOME` (tests and dev hosts use a private one). */
 export function bridgeHome(env: NodeJS.ProcessEnv = process.env): string {
-  return env[Env.home] || path.join(os.homedir(), '.vscode-agent-bridge');
+  return env[Env.home] || path.join(os.homedir(), '.copane');
 }
 
 export function instancesDir(env?: NodeJS.ProcessEnv): string {
@@ -23,7 +23,7 @@ export function instanceFile(id: string, env?: NodeJS.ProcessEnv): string {
  * ~104 bytes on macOS, so keep it short); Windows uses a named pipe.
  */
 export function socketPathFor(id: string, env?: NodeJS.ProcessEnv): string {
-  if (process.platform === 'win32') return `\\\\.\\pipe\\vscode-agent-bridge-${os.userInfo().username}-${id}`;
+  if (process.platform === 'win32') return `\\\\.\\pipe\\copane-${os.userInfo().username}-${id}`;
   return path.join(bridgeHome(env), 'run', `${id}.sock`);
 }
 

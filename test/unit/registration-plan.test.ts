@@ -71,7 +71,7 @@ describe('Check and Repair', () => {
   it('respects Turn Off and says how to turn it back on', () => {
     const p = plan({ consent: 'declined' }, 'repair');
     expect(p).toMatchObject({ action: 'report' });
-    expect(p.action === 'report' && p.problem).toMatch(/turned off; run "Agent Bridge: Turn On"/);
+    expect(p.action === 'report' && p.problem).toMatch(/turned off; run "Copane: Turn On"/);
   });
 });
 

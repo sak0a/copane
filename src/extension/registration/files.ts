@@ -30,7 +30,7 @@ export function writeFileAtomic(file: string, text: string, mode = 0o600): void 
   } catch {
     fs.mkdirSync(path.dirname(target), { recursive: true });
   }
-  const temp = `${target}.agent-bridge-${process.pid}-${Date.now()}.tmp`;
+  const temp = `${target}.copane-${process.pid}-${Date.now()}.tmp`;
   try {
     fs.writeFileSync(temp, text, { mode: keepMode });
     if (process.platform !== 'win32') fs.chmodSync(temp, keepMode);

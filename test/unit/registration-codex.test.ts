@@ -18,8 +18,8 @@ import {
 } from '../../src/extension/registration/codex';
 import { serverSpec, type ServerSpec } from '../../src/extension/registration/launcher';
 
-const spec: ServerSpec = { command: '/home/u/.vscode-agent-bridge/bin/mcp-server', args: [], env: {} };
-const devSpec: ServerSpec = { command: '/tmp/agent-bridge-dev/r/home/bin/mcp-server', args: [], env: { AGENT_BRIDGE_HOME: '/tmp/agent-bridge-dev/r/home' } };
+const spec: ServerSpec = { command: '/home/u/.copane/bin/mcp-server', args: [], env: {} };
+const devSpec: ServerSpec = { command: '/tmp/copane-dev/r/home/bin/mcp-server', args: [], env: { COPANE_HOME: '/tmp/copane-dev/r/home' } };
 
 const USER_CONFIG = `# my settings
 model = "o3" # inline comment stays
@@ -48,7 +48,7 @@ describe('TOML scanning', () => {
   });
 
   it('splits dotted and quoted keys', () => {
-    expect(splitKey('mcp_servers."vscode".env')).toEqual(['mcp_servers', 'vscode', 'env']);
+    expect(splitKey('mcp_servers."copane".env')).toEqual(['mcp_servers', 'copane', 'env']);
     expect(splitKey(" a . 'b.c' ")).toEqual(['a', 'b.c']);
   });
 
@@ -71,7 +71,7 @@ describe('editing config.toml', () => {
   it('works on an empty or missing file', () => {
     expect(inspectCodexText(undefined, spec)).toEqual({ kind: 'absent' });
     const created = upsertCodexEntry('', devSpec);
-    expect(created).toContain('[mcp_servers.vscode.env]\nAGENT_BRIDGE_HOME = "/tmp/agent-bridge-dev/r/home"');
+    expect(created).toContain('[mcp_servers.copane.env]\nCOPANE_HOME = "/tmp/copane-dev/r/home"');
     expect(inspectCodexText(created, devSpec)).toMatchObject({ kind: 'ours', current: true });
     expect(removeCodexEntry(created).trim()).toBe('');
   });
@@ -81,7 +81,7 @@ describe('editing config.toml', () => {
     expect(inspectCodexText(before, spec)).toMatchObject({ kind: 'ours', current: false });
     const after = upsertCodexEntry(before, spec);
     expect(inspectCodexText(after, spec)).toMatchObject({ kind: 'ours', current: true });
-    expect(after).not.toContain('AGENT_BRIDGE_HOME');
+    expect(after).not.toContain('COPANE_HOME');
     expect(after).toContain('\n\n[profiles.fast]\nmodel = "x"\n');
     expect(upsertCodexEntry(after, spec)).toBe(after);
     expect(removeCodexEntry(after)).toBe(`${USER_CONFIG}\n[profiles.fast]\nmodel = "x"\n`);
@@ -106,7 +106,7 @@ describe('editing config.toml', () => {
     expect(inspectCodexText(moved, spec)).toMatchObject({ kind: 'ours', current: true });
     expect(moved).toContain('enabled = false # paused for now');
     expect(moved).toContain('tool_timeout_sec = 900');
-    expect(moved).not.toContain('AGENT_BRIDGE_HOME');
+    expect(moved).not.toContain('COPANE_HOME');
     // And back: the env table is added after the user's keys.
     const back = upsertCodexEntry(moved, devSpec);
     expect(inspectCodexText(back, devSpec)).toMatchObject({ kind: 'ours', current: true });
@@ -114,7 +114,7 @@ describe('editing config.toml', () => {
   });
 
   it('updates an entry whose last line is args without bringing the old line back', () => {
-    const minimal = `[mcp_servers.vscode]\ncommand = "/old/.vscode-agent-bridge/bin/mcp-server"\nargs = [\n  "x",\n]\n`;
+    const minimal = `[mcp_servers.copane]\ncommand = "/old/.copane/bin/mcp-server"\nargs = [\n  "x",\n]\n`;
     const next = upsertCodexEntry(minimal, devSpec);
     expect(inspectCodexText(next, devSpec)).toMatchObject({ kind: 'ours', current: true });
     expect(next).not.toContain('/old/');
@@ -122,16 +122,16 @@ describe('editing config.toml', () => {
   });
 
   it('treats a user-defined vscode server as theirs, in table and in inline form', () => {
-    const table = `${USER_CONFIG}\n[mcp_servers.vscode]\ncommand = "npx"\nargs = ["their-server"]\n`;
+    const table = `${USER_CONFIG}\n[mcp_servers.copane]\ncommand = "npx"\nargs = ["their-server"]\n`;
     expect(inspectCodexText(table, spec)).toEqual({ kind: 'foreign', command: 'npx their-server' });
-    const inline = `[mcp_servers]\nvscode = { command = "npx" }\n`;
+    const inline = `[mcp_servers]\ncopane = { command = "npx" }\n`;
     expect(inspectCodexText(inline, spec)).toMatchObject({ kind: 'foreign' });
-    const dotted = `mcp_servers.vscode.command = "npx"\n`;
+    const dotted = `mcp_servers.copane.command = "npx"\n`;
     expect(inspectCodexText(dotted, spec)).toMatchObject({ kind: 'foreign' });
   });
 
   it('writes Windows paths as valid TOML strings', () => {
-    const win: ServerSpec = { command: 'C:\\Program Files\\Microsoft VS Code\\Code.exe', args: ['C:\\Users\\me\\.vscode-agent-bridge\\bin\\mcp-server.js'], env: { ELECTRON_RUN_AS_NODE: '1' } };
+    const win: ServerSpec = { command: 'C:\\Program Files\\Microsoft VS Code\\Code.exe', args: ['C:\\Users\\me\\.copane\\bin\\mcp-server.js'], env: { ELECTRON_RUN_AS_NODE: '1' } };
     const text = upsertCodexEntry('', win);
     expect(text).toContain('command = "C:\\\\Program Files\\\\Microsoft VS Code\\\\Code.exe"');
     expect(inspectCodexText(text, win)).toMatchObject({ kind: 'ours', current: true });
@@ -140,7 +140,7 @@ describe('editing config.toml', () => {
   it('accepts the entry of another installed VS Code build on Windows, and updates once that build is gone', () => {
     const stable = 'C:\\Program Files\\Microsoft VS Code\\Code.exe';
     const insiders = 'C:\\Program Files\\Microsoft VS Code Insiders\\Code - Insiders.exe';
-    const binDir = 'C:\\Users\\me\\.vscode-agent-bridge\\bin';
+    const binDir = 'C:\\Users\\me\\.copane\\bin';
     const text = upsertCodexEntry('', serverSpec({ binDir, runtime: stable, platform: 'win32' }));
     const fromInsiders = serverSpec({ binDir, runtime: insiders, platform: 'win32', knownRuntimes: [stable], exists: () => true });
     expect(inspectCodexText(text, fromInsiders)).toMatchObject({ kind: 'ours', current: true });
@@ -169,7 +169,7 @@ describe('registerCodex / unregisterCodex', () => {
     expect(await registerCodex({ configFile: file }, spec)).toMatchObject({ kind: 'unchanged' });
     expect(await unregisterCodex({ configFile: file }, spec)).toMatchObject({ kind: 'changed' });
     expect(fs.readFileSync(file, 'utf8')).toBe(USER_CONFIG);
-    fs.appendFileSync(file, '\n[mcp_servers.vscode]\ncommand = "npx"\n');
+    fs.appendFileSync(file, '\n[mcp_servers.copane]\ncommand = "npx"\n');
     expect(await registerCodex({ configFile: file }, spec)).toMatchObject({ kind: 'conflict' });
     expect(await unregisterCodex({ configFile: file }, spec)).toMatchObject({ kind: 'conflict' });
     expect(await registerCodex({ configFile: file }, spec, { replaceForeign: true })).toMatchObject({ kind: 'changed' });
@@ -188,12 +188,12 @@ describe('registerCodex / unregisterCodex', () => {
     fs.writeFileSync(file, USER_CONFIG);
     await registerCodex({ configFile: file }, devSpec);
     const listed = JSON.parse(execFileSync('codex', ['mcp', 'list', '--json'], { env: { ...process.env, CODEX_HOME: dir }, encoding: 'utf8' }));
-    const ours = listed.find((s: { name: string }) => s.name === 'vscode');
+    const ours = listed.find((s: { name: string }) => s.name === 'copane');
     expect(ours.transport).toMatchObject({
       type: 'stdio',
       command: devSpec.command,
       env: devSpec.env,
-      env_vars: ['AGENT_BRIDGE_INSTANCE', 'AGENT_BRIDGE_SESSION'],
+      env_vars: ['COPANE_INSTANCE', 'COPANE_SESSION'],
     });
     expect(ours.tool_timeout_sec).toBe(600);
     expect(listed.find((s: { name: string }) => s.name === 'other')).toBeTruthy();

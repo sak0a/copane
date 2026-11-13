@@ -12,7 +12,7 @@ export class StatusBar implements vscode.Disposable {
     // Left side: it is about the window and workspace, not the active editor. Low priority keeps it
     // after remote, problems and ports.
     this.item = vscode.window.createStatusBarItem(STATUS_ITEM_ID, vscode.StatusBarAlignment.Left, -100);
-    this.item.name = 'Agent Bridge';
+    this.item.name = 'Copane';
     this.item.command = Cmd.showAttention;
     this.subscriptions.push(
       this.item,

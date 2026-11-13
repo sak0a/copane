@@ -139,7 +139,7 @@ describe('MCP server', () => {
     expect(client.getInstructions()).toMatch(/Not connected to a VS Code window/);
     expect(await toolNames()).toEqual(['window_select', 'window_status']);
     const status = await call('window_status');
-    expect(status.text).toMatch(/No VS Code window with the Agent Bridge extension is running/);
+    expect(status.text).toMatch(/No VS Code window with the Copane extension is running/);
     expect(status.text).toMatch(/appear on their own/);
     const failed = await call('whoami');
     expect(failed.isError).toBe(true);
@@ -160,7 +160,7 @@ describe('MCP server', () => {
   it('survives a window reload: calls wait for the new window, the tool list does not flap', async () => {
     const first = await openWindow('100', ['/work/a', '/work/b']);
     // A `claude` CLI in a terminal: found through the terminal variable, which goes stale on reload.
-    const { call, bridge, listChanged } = await agent({ env: { AGENT_BRIDGE_INSTANCE: '100' }, cwd: '/elsewhere' });
+    const { call, bridge, listChanged } = await agent({ env: { COPANE_INSTANCE: '100' }, cwd: '/elsewhere' });
     expect((await call('whoami')).text).toBe('Claude 1 in 100');
     const before = listChanged();
 
@@ -282,7 +282,7 @@ describe('MCP server', () => {
 
 describe('session key and instructions', () => {
   it('uses the explicit key, then the Claude Code session id, then a random one', () => {
-    expect(sessionKeyFrom({ AGENT_BRIDGE_SESSION: 'a', CLAUDE_CODE_SESSION_ID: 'b' })).toBe('a');
+    expect(sessionKeyFrom({ COPANE_SESSION: 'a', CLAUDE_CODE_SESSION_ID: 'b' })).toBe('a');
     expect(sessionKeyFrom({ CLAUDE_CODE_SESSION_ID: 'b' })).toBe('b');
     expect(sessionKeyFrom({})).toMatch(/^[0-9a-f-]{36}$/);
   });

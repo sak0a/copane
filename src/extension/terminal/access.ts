@@ -1,7 +1,7 @@
 // Who may read or type in which terminal. Pure, so the rules are unit-tested.
 //
 // - A session uses its own terminals freely, and terminals whose owning session has ended.
-// - The user's own terminals need the user's permission (setting `agentBridge.terminal.userTerminals`).
+// - The user's own terminals need the user's permission (setting `copane.terminal.userTerminals`).
 // - Another live session's terminal needs the user's permission too: sessions do not share by default.
 
 export type UserTerminalPolicy = 'ask' | 'allow' | 'deny';

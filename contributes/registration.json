@@ -1,42 +1,42 @@
 {
   "commands": [
     {
-      "command": "agentBridge.repair",
+      "command": "copane.repair",
       "title": "Check and Repair Setup",
-      "category": "Agent Bridge",
+      "category": "Copane",
       "icon": "$(tools)"
     },
     {
-      "command": "agentBridge.registerAgents",
+      "command": "copane.registerAgents",
       "title": "Turn On (Register with Claude Code and Codex)",
-      "category": "Agent Bridge"
+      "category": "Copane"
     },
     {
-      "command": "agentBridge.unregisterAgents",
+      "command": "copane.unregisterAgents",
       "title": "Turn Off (Unregister from Claude Code and Codex)",
-      "category": "Agent Bridge"
+      "category": "Copane"
     },
     {
-      "command": "agentBridge.enableBrowser",
+      "command": "copane.enableBrowser",
       "title": "Enable Integrated Browser",
-      "category": "Agent Bridge"
+      "category": "Copane"
     },
     {
-      "command": "agentBridge.showStatus",
+      "command": "copane.showStatus",
       "title": "Show Status",
-      "category": "Agent Bridge"
+      "category": "Copane"
     },
     {
-      "command": "agentBridge.copyStatus",
+      "command": "copane.copyStatus",
       "title": "Copy Status Report",
-      "category": "Agent Bridge",
+      "category": "Copane",
       "icon": "$(copy)"
     }
   ],
   "configuration": {
-    "title": "Agent Bridge",
+    "title": "Copane",
     "properties": {
-      "agentBridge.registration.mode": {
+      "copane.registration.mode": {
         "type": "string",
         "enum": [
           "ask",
@@ -44,33 +44,33 @@
           "manual"
         ],
         "enumDescriptions": [
-          "Ask once before adding the \"vscode\" MCP server to Claude Code's and Codex's user configuration. Afterwards Agent Bridge keeps its own entry present and up to date (it re-adds it if something removes it) until you run \"Agent Bridge: Turn Off\".",
-          "Add and keep the \"vscode\" MCP server in Claude Code's and Codex's user configuration without asking.",
-          "Never change agent configuration on its own; only report problems. Use \"Agent Bridge: Turn On\", \"Agent Bridge: Turn Off\" and \"Agent Bridge: Check and Repair Setup\"."
+          "Ask once before adding the \"copane\" MCP server to Claude Code's and Codex's user configuration. Afterwards Copane keeps its own entry present and up to date (it re-adds it if something removes it) until you run \"Copane: Turn Off\".",
+          "Add and keep the \"copane\" MCP server in Claude Code's and Codex's user configuration without asking.",
+          "Never change agent configuration on its own; only report problems. Use \"Copane: Turn On\", \"Copane: Turn Off\" and \"Copane: Check and Repair Setup\"."
         ],
         "default": "ask",
         "scope": "machine",
-        "markdownDescription": "How Agent Bridge makes its tools available to agents. It adds an MCP server named `vscode` to the user configuration of Claude Code (`~/.claude.json`) and Codex (`~/.codex/config.toml`), and never changes or removes a `vscode` server it did not add."
+        "markdownDescription": "How Copane makes its tools available to agents. It adds an MCP server named `copane` to the user configuration of Claude Code (`~/.claude.json`) and Codex (`~/.codex/config.toml`), and never changes or removes a `copane` server it did not add."
       },
-      "agentBridge.registration.claudeCode": {
+      "copane.registration.claudeCode": {
         "type": "boolean",
         "default": true,
         "scope": "machine",
-        "markdownDescription": "Register the `vscode` MCP server with Claude Code (the `claude` CLI and the Claude Code VS Code extension)."
+        "markdownDescription": "Register the `copane` MCP server with Claude Code (the `claude` CLI and the Claude Code VS Code extension)."
       },
-      "agentBridge.registration.codex": {
+      "copane.registration.codex": {
         "type": "boolean",
         "default": true,
         "scope": "machine",
-        "markdownDescription": "Register the `vscode` MCP server with Codex, when Codex is installed."
+        "markdownDescription": "Register the `copane` MCP server with Codex, when Codex is installed."
       }
     }
   },
   "menus": {
     "editor/title": [
       {
-        "command": "agentBridge.copyStatus",
-        "when": "resourceScheme == agent-bridge-status",
+        "command": "copane.copyStatus",
+        "when": "resourceScheme == copane-status",
         "group": "navigation"
       }
     ]

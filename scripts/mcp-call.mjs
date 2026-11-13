@@ -31,12 +31,12 @@ for (let i = 0; i < argv.length; i++) {
 }
 
 const name = options.name ?? 'dev';
-const home = join(process.platform === 'win32' ? process.env.TEMP : '/tmp', 'agent-bridge-dev', name, 'home');
-const env = { ...process.env, AGENT_BRIDGE_HOME: home };
-delete env.AGENT_BRIDGE_INSTANCE;
+const home = join(process.platform === 'win32' ? process.env.TEMP : '/tmp', 'copane-dev', name, 'home');
+const env = { ...process.env, COPANE_HOME: home };
+delete env.COPANE_INSTANCE;
 delete env.CLAUDE_CODE_SESSION_ID;
-if (options.session) env.AGENT_BRIDGE_SESSION = options.session;
-if (options.instance) env.AGENT_BRIDGE_INSTANCE = options.instance;
+if (options.session) env.COPANE_SESSION = options.session;
+if (options.instance) env.COPANE_INSTANCE = options.instance;
 
 const transport = new StdioClientTransport({
   command: process.execPath,

@@ -272,15 +272,15 @@ export const SUPPRESS_NATIVE_CONTEXT_MENU = `function () {
 /** Isolated world. Hides (true) or restores (false) the bridge's own UI elements for a screenshot. */
 export const TOGGLE_BRIDGE_UI = `function (hide) {
   let n = 0;
-  for (const el of document.querySelectorAll('[data-agent-bridge-ui]')) {
+  for (const el of document.querySelectorAll('[data-copane-ui]')) {
     if (hide) {
-      if (el.__agentBridgeHidden) continue;
-      el.__agentBridgeHidden = [el.style.getPropertyValue('visibility'), el.style.getPropertyPriority('visibility')];
+      if (el.__copaneHidden) continue;
+      el.__copaneHidden = [el.style.getPropertyValue('visibility'), el.style.getPropertyPriority('visibility')];
       el.style.setProperty('visibility', 'hidden', 'important');
-    } else if (el.__agentBridgeHidden) {
-      const [value, priority] = el.__agentBridgeHidden;
+    } else if (el.__copaneHidden) {
+      const [value, priority] = el.__copaneHidden;
       if (value) el.style.setProperty('visibility', value, priority); else el.style.removeProperty('visibility');
-      delete el.__agentBridgeHidden;
+      delete el.__copaneHidden;
     }
     n++;
   }

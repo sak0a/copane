@@ -28,7 +28,7 @@ export interface PromptService {
   ask(prompt: UserPrompt): Promise<string | undefined>;
 }
 
-const ANSWER_COMMAND = 'agentBridge.answerPrompt';
+const ANSWER_COMMAND = 'copane.answerPrompt';
 
 export class VscodePrompts implements PromptService {
   /** Answers queued by the `debug_answer_prompts` tool (development only), used before asking the user. */

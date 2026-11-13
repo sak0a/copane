@@ -30,7 +30,7 @@ export const DIALOG_GRACE_MS = 50;
 const CONTEXT_GONE = /Cannot find context|context was destroyed|Execution context was destroyed|Inspected target navigated|No frame with given id|Frame with the given id was not found/i;
 
 export class PageCall {
-  readonly group = `agent-bridge-${++groupCounter}`;
+  readonly group = `copane-${++groupCounter}`;
 
   constructor(
     readonly env: PageEnv,

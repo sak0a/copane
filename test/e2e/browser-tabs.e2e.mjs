@@ -1,7 +1,7 @@
 // Browser tabs: consent, leases, pause/resume, attribution, closing, the page indicator, the editor tab
 // badge and reveal, against a running dev host:
 //
-//   rm -rf /tmp/agent-bridge-dev/browser-tabs && node scripts/dev-host.mjs --name browser-tabs
+//   rm -rf /tmp/copane-dev/browser-tabs && node scripts/dev-host.mjs --name browser-tabs
 //   node test/e2e/browser-tabs.e2e.mjs --name browser-tabs [--only <text>]
 //
 // "The user" is played by `debug_vscode_command` (opening tabs, running commands), `debug_answer_prompts`
@@ -23,7 +23,7 @@ const settingsFile = join(hostDir, 'ud', 'User', 'settings.json');
 const baseSettings = JSON.parse(readFileSync(settingsFile, 'utf8'));
 async function setSettings(values) {
   writeFileSync(settingsFile, JSON.stringify({ ...baseSettings, ...values }, null, 2));
-  await sleep(1500); // VS Code picks up the file change asynchronously.
+  await sleep(3000); // VS Code picks up the file change asynchronously; shorter waits were flaky.
 }
 
 /** Parses browser_list_tabs into { id, url, notes, current }. */
@@ -124,8 +124,8 @@ test('the indicator is isolated from a hostile page (CSP, Trusted Types, removal
       assert.equal(i.count, 1, 'the page removed the indicator for good');
       assert.match(i.text, /Take over/);
       // The page's own global of the same name is untouched: the indicator lives in another world.
-      assert.equal(await page.evaluate('window.__agentBridgeMarker'), 'page');
-      assert.equal(await page.evaluate('typeof window.__agentBridgeUi'), 'undefined');
+      assert.equal(await page.evaluate('window.__copaneMarker'), 'page');
+      assert.equal(await page.evaluate('typeof window.__copaneUi'), 'undefined');
     } finally {
       page.close();
     }
@@ -168,7 +168,7 @@ test('consent: Deny is remembered, never asked twice, and the error says not to 
     assert.match(second.text, /declined/);
     assert.equal((await prompts(a, [], false)).shown.length, before + 1, 'asked more than once');
     // The user shares it after all, from the command palette.
-    await a.ok('debug_vscode_command', { command: 'agentBridge.browser.shareTab', args: [id, 'bt-deny'] });
+    await a.ok('debug_vscode_command', { command: 'copane.browser.shareTab', args: [id, 'bt-deny'] });
     assert.equal((await evaluate(a, id, '2')).text, '2');
   } finally {
     await a.close();
@@ -210,7 +210,7 @@ test('consent: two calls waiting on the same question share one prompt', async (
     );
     assert.equal(shown.filter(n => n.includes('wants to use your browser tab')).length, 1, `notifications: ${shown.join(' | ')}`);
     // The user shares the tab from the command palette instead of answering: both calls go ahead.
-    await a.ok('debug_vscode_command', { command: 'agentBridge.browser.shareTab', args: [id, 'bt-stack'] });
+    await a.ok('debug_vscode_command', { command: 'copane.browser.shareTab', args: [id, 'bt-stack'] });
     const [selected, evaluated] = await Promise.all(calls);
     assert.ok(!selected.isError, selected.text);
     assert.equal(evaluated.text, '6');
@@ -220,16 +220,16 @@ test('consent: two calls waiting on the same question share one prompt', async (
   }
 });
 
-test('setting agentBridge.browser.userTabs: deny refuses without asking, allow needs no prompt', async () => {
+test('setting copane.browser.userTabs: deny refuses without asking, allow needs no prompt', async () => {
   const a = await agent({ session: 'bt-setting' });
   try {
     const id = await userOpens(a, fresh());
     const before = (await prompts(a, [], true)).shown.length;
-    await setSettings({ 'agentBridge.browser.userTabs': 'deny' });
+    await setSettings({ 'copane.browser.userTabs': 'deny' });
     const denied = await evaluate(a, id, '1');
     assert.ok(denied.isError);
     assert.match(denied.text, /userTabs = "deny"/);
-    await setSettings({ 'agentBridge.browser.userTabs': 'allow' });
+    await setSettings({ 'copane.browser.userTabs': 'allow' });
     assert.equal((await evaluate(a, id, '3')).text, '3');
     assert.equal((await prompts(a, [], false)).shown.length, before, 'a prompt was shown');
   } finally {
@@ -273,11 +273,11 @@ test('two sessions: the lease makes the second one busy until release; reads sti
   }
 });
 
-test('an idle lease can be taken over after agentBridge.browser.leaseIdleSeconds', async () => {
+test('an idle lease can be taken over after copane.browser.leaseIdleSeconds', async () => {
   const a = await agent({ session: 'bt-idle-a' });
   const b = await agent({ session: 'bt-idle-b' });
   try {
-    await setSettings({ 'agentBridge.browser.leaseIdleSeconds': 5 });
+    await setSettings({ 'copane.browser.leaseIdleSeconds': 5 });
     const url = fresh();
     await a.ok('browser_open', { url });
     const id = (await tabByUrl(b, url)).id;
@@ -320,9 +320,9 @@ test('pause from the page indicator refuses agents until the user resumes', asyn
       await until(async () => !(await evaluate(a, id, '1')).isError, 'the agent to get the tab back');
 
       // The same through the command (Sessions view, editor title bar, palette).
-      await a.ok('debug_vscode_command', { command: 'agentBridge.browser.pauseTab', args: [id] });
+      await a.ok('debug_vscode_command', { command: 'copane.browser.pauseTab', args: [id] });
       assert.ok((await evaluate(a, id, '1')).isError);
-      await a.ok('debug_vscode_command', { command: 'agentBridge.browser.resumeTab', args: [id] });
+      await a.ok('debug_vscode_command', { command: 'copane.browser.resumeTab', args: [id] });
       assert.equal((await evaluate(a, id, '4')).text, '4');
     } finally {
       page.close();
@@ -455,7 +455,7 @@ test('browser_show_tab brings a tab to the front without opening a duplicate', a
 test('a session that ends frees its tabs for others', async () => {
   const b = await agent({ session: 'bt-end-b' });
   try {
-    await setSettings({ 'agentBridge.sessionGraceSeconds': 1 });
+    await setSettings({ 'copane.sessionGraceSeconds': 1 });
     const a = await agent({ session: `bt-end-${Date.now()}` });
     const url = fresh();
     await a.ok('browser_open', { url });

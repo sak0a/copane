@@ -29,7 +29,7 @@ export interface DiscoveryResult {
  *    chat session of the Claude Code extension. Checked before the environment variable because it
  *    is exact, while the variable can be inherited from elsewhere (VS Code started from a terminal
  *    of another VS Code inherits that window's id).
- * 3. `AGENT_BRIDGE_INSTANCE`: set in every integrated terminal of a window (a `claude` CLI run there).
+ * 3. `COPANE_INSTANCE`: set in every integrated terminal of a window (a `claude` CLI run there).
  * 4. The window that replaced the one this server was connected to: same workspace folders, i.e. the
  *    window was reloaded (its extension host, and so its id, changes) while the agent kept running.
  * 5. The working directory is inside a window's workspace folder (deepest folder wins, then the most
@@ -89,9 +89,9 @@ export function selectInstance(input: DiscoveryInput): DiscoveryResult | undefin
 export function explainNoMatch(input: Pick<DiscoveryInput, 'instances' | 'cwd' | 'env'>): string {
   const { instances, cwd, env } = input;
   if (instances.length === 0) {
-    return 'No VS Code window with the Agent Bridge extension is running (none has registered in the bridge home).';
+    return 'No VS Code window with the Copane extension is running (none has registered in the bridge home).';
   }
-  const stale = env[Env.instance] ? ` AGENT_BRIDGE_INSTANCE=${env[Env.instance]} names a window that is no longer open.` : '';
+  const stale = env[Env.instance] ? ` COPANE_INSTANCE=${env[Env.instance]} names a window that is no longer open.` : '';
   return `${instances.length} VS Code windows are open, and none contains the working directory ${cwd}.${stale}`;
 }
 

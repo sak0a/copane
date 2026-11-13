@@ -18,7 +18,7 @@ export function registerUiDebugTools(services: BridgeServices, state: UiState, s
     defineTool({
       name: 'debug_ui_state',
       description:
-        'Development only. Shows what the Agent Bridge UI currently renders: the Sessions tree as text, every row (id, label, description, icon, contextValue), the status bar item, the view badge, the attention list, and the Agent Tabs panel view (`panel`: text, rows, description, visible). `activeTerminal` is the active terminal (name, shell pid); `sessionsSelection` the selected Sessions rows. Reflects the last coalesced update, so poll for changes.',
+        'Development only. Shows what the Copane UI currently renders: the Sessions tree as text, every row (id, label, description, icon, contextValue), the status bar item, the view badge, the attention list, and the Agent Tabs panel view (`panel`: text, rows, description, visible). `activeTerminal` is the active terminal (name, shell pid); `sessionsSelection` the selected Sessions rows. Reflects the last coalesced update, so poll for changes.',
       input: {},
       annotations: { readOnlyHint: true },
       handler: async () => {
@@ -52,7 +52,7 @@ export function registerUiDebugTools(services: BridgeServices, state: UiState, s
     defineTool({
       name: 'debug_ui_fixtures',
       description:
-        'Development only. Replaces the fixture terminals shown in the Agent Bridge Sessions view (merged with the real ones). `ownedBy` and `allowedSessions` take session ids (the session key). The UI commands interrupt / close act on fixtures too.',
+        'Development only. Replaces the fixture terminals shown in the Copane Sessions view (merged with the real ones). `ownedBy` and `allowedSessions` take session ids (the session key). The UI commands interrupt / close act on fixtures too.',
       input: {
         terminals: z
           .array(

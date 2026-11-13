@@ -1,25 +1,25 @@
 {
   "viewsContainers": {
     "activitybar": [
-      { "id": "agentBridge", "title": "Agent Bridge", "icon": "media/agent-bridge.svg" }
+      { "id": "copane", "title": "Copane", "icon": "media/copane.svg" }
     ],
     "panel": [
-      { "id": "agentBridgeTabs", "title": "Agent Tabs", "icon": "media/agent-tabs.svg" }
+      { "id": "copaneTabs", "title": "Agent Tabs", "icon": "media/agent-tabs.svg" }
     ]
   },
   "views": {
-    "agentBridge": [
+    "copane": [
       {
-        "id": "agentBridge.sessions",
+        "id": "copane.sessions",
         "name": "Sessions",
         "type": "tree",
-        "icon": "media/agent-bridge.svg",
-        "contextualTitle": "Agent Bridge"
+        "icon": "media/copane.svg",
+        "contextualTitle": "Copane"
       }
     ],
-    "agentBridgeTabs": [
+    "copaneTabs": [
       {
-        "id": "agentBridge.tabs",
+        "id": "copane.tabs",
         "name": "Agent Tabs",
         "type": "tree",
         "icon": "media/agent-tabs.svg",
@@ -29,97 +29,97 @@
   },
   "viewsWelcome": [
     {
-      "view": "agentBridge.sessions",
-      "contents": "No agent is connected to this window yet.\nStart Claude Code in this window, in its panel or by running claude in a terminal. Each session appears here with the browser tabs and terminals it uses, and you can pause it or step in at any time.\n[Set Up Agents](command:agentBridge.registerAgents)\nAlready set up? [Show Status](command:agentBridge.showStatus) explains why nothing is connected."
+      "view": "copane.sessions",
+      "contents": "No agent is connected to this window yet.\nStart Claude Code in this window, in its panel or by running claude in a terminal. Each session appears here with the browser tabs and terminals it uses, and you can pause it or step in at any time.\n[Set Up Agents](command:copane.registerAgents)\nAlready set up? [Show Status](command:copane.showStatus) explains why nothing is connected."
     },
     {
-      "view": "agentBridge.sessions",
-      "when": "agentBridge.ui.browserUnavailable",
-      "contents": "The integrated browser is not enabled for Agent Bridge, so agents can use terminals but no browser tabs.\n[Enable Integrated Browser](command:agentBridge.enableBrowser)\nVS Code restarts once to turn it on."
+      "view": "copane.sessions",
+      "when": "copane.ui.browserUnavailable",
+      "contents": "The integrated browser is not enabled for Copane, so agents can use terminals but no browser tabs.\n[Enable Integrated Browser](command:copane.enableBrowser)\nVS Code restarts once to turn it on."
     },
     {
-      "view": "agentBridge.tabs",
-      "when": "!agentBridge.ui.browserUnavailable",
+      "view": "copane.tabs",
+      "when": "!copane.ui.browserUnavailable",
       "contents": "No agent session is using a browser tab in this window.\nTabs that agents open or control are listed here in the color of their session. Click one to bring it to the front."
     },
     {
-      "view": "agentBridge.tabs",
-      "when": "agentBridge.ui.browserUnavailable",
-      "contents": "The integrated browser is not enabled, so agents cannot open or use browser tabs.\n[Enable Integrated Browser](command:agentBridge.enableBrowser)"
+      "view": "copane.tabs",
+      "when": "copane.ui.browserUnavailable",
+      "contents": "The integrated browser is not enabled, so agents cannot open or use browser tabs.\n[Enable Integrated Browser](command:copane.enableBrowser)"
     }
   ],
   "commands": [
-    { "command": "agentBridge.ui.showAttention", "title": "Go to What Needs You", "category": "Agent Bridge", "icon": "$(bell)" },
-    { "command": "agentBridge.ui.revealTab", "title": "Show Browser Tab", "category": "Agent Bridge", "icon": "$(go-to-file)" },
-    { "command": "agentBridge.ui.pauseTab", "title": "Pause Agents on Browser Tab", "category": "Agent Bridge", "icon": "$(debug-pause)" },
-    { "command": "agentBridge.ui.resumeTab", "title": "Resume Agents on Browser Tab", "category": "Agent Bridge", "icon": "$(debug-continue)" },
-    { "command": "agentBridge.ui.releaseTab", "title": "Release Browser Tab from Agent", "category": "Agent Bridge", "icon": "$(debug-disconnect)" },
-    { "command": "agentBridge.ui.closeTab", "title": "Close Browser Tab", "category": "Agent Bridge", "icon": "$(close)" },
-    { "command": "agentBridge.ui.revealTerminal", "title": "Show Agent Terminal", "category": "Agent Bridge", "icon": "$(terminal)" },
-    { "command": "agentBridge.ui.interruptTerminal", "title": "Interrupt Terminal Command (Ctrl+C)", "category": "Agent Bridge", "icon": "$(debug-stop)" },
-    { "command": "agentBridge.ui.closeTerminal", "title": "Close Agent Terminal", "category": "Agent Bridge", "icon": "$(trash)" },
-    { "command": "agentBridge.ui.endSession", "title": "End Agent Session...", "category": "Agent Bridge", "icon": "$(close)" },
-    { "command": "agentBridge.ui.pauseSessionTabs", "title": "Pause Agent on All Its Tabs", "category": "Agent Bridge", "icon": "$(debug-pause)" },
-    { "command": "agentBridge.ui.resumeSessionTabs", "title": "Resume Agent on All Its Tabs", "category": "Agent Bridge", "icon": "$(debug-continue)" },
-    { "command": "agentBridge.ui.showSession", "title": "Show Agent Session", "icon": "$(robot)" },
-    { "command": "agentBridge.ui.showSessionInView", "title": "Show Agent Session in Sessions View", "icon": "$(list-tree)" }
+    { "command": "copane.ui.showAttention", "title": "Go to What Needs You", "category": "Copane", "icon": "$(bell)" },
+    { "command": "copane.ui.revealTab", "title": "Show Browser Tab", "category": "Copane", "icon": "$(go-to-file)" },
+    { "command": "copane.ui.pauseTab", "title": "Pause Agents on Browser Tab", "category": "Copane", "icon": "$(debug-pause)" },
+    { "command": "copane.ui.resumeTab", "title": "Resume Agents on Browser Tab", "category": "Copane", "icon": "$(debug-continue)" },
+    { "command": "copane.ui.releaseTab", "title": "Release Browser Tab from Agent", "category": "Copane", "icon": "$(debug-disconnect)" },
+    { "command": "copane.ui.closeTab", "title": "Close Browser Tab", "category": "Copane", "icon": "$(close)" },
+    { "command": "copane.ui.revealTerminal", "title": "Show Agent Terminal", "category": "Copane", "icon": "$(terminal)" },
+    { "command": "copane.ui.interruptTerminal", "title": "Interrupt Terminal Command (Ctrl+C)", "category": "Copane", "icon": "$(debug-stop)" },
+    { "command": "copane.ui.closeTerminal", "title": "Close Agent Terminal", "category": "Copane", "icon": "$(trash)" },
+    { "command": "copane.ui.endSession", "title": "End Agent Session...", "category": "Copane", "icon": "$(close)" },
+    { "command": "copane.ui.pauseSessionTabs", "title": "Pause Agent on All Its Tabs", "category": "Copane", "icon": "$(debug-pause)" },
+    { "command": "copane.ui.resumeSessionTabs", "title": "Resume Agent on All Its Tabs", "category": "Copane", "icon": "$(debug-continue)" },
+    { "command": "copane.ui.showSession", "title": "Show Agent Session", "icon": "$(robot)" },
+    { "command": "copane.ui.showSessionInView", "title": "Show Agent Session in Sessions View", "icon": "$(list-tree)" }
   ],
   "menus": {
     "commandPalette": [
-      { "command": "agentBridge.ui.showAttention", "when": "agentBridge.ui.hasSessions" },
-      { "command": "agentBridge.ui.revealTab", "when": "agentBridge.ui.hasSessions && !agentBridge.ui.browserUnavailable" },
-      { "command": "agentBridge.ui.pauseTab", "when": "agentBridge.ui.hasSessions && !agentBridge.ui.browserUnavailable" },
-      { "command": "agentBridge.ui.resumeTab", "when": "agentBridge.ui.hasSessions && !agentBridge.ui.browserUnavailable" },
-      { "command": "agentBridge.ui.releaseTab", "when": "agentBridge.ui.hasSessions && !agentBridge.ui.browserUnavailable" },
-      { "command": "agentBridge.ui.closeTab", "when": "agentBridge.ui.hasSessions && !agentBridge.ui.browserUnavailable" },
-      { "command": "agentBridge.ui.revealTerminal", "when": "agentBridge.ui.hasSessions" },
-      { "command": "agentBridge.ui.interruptTerminal", "when": "agentBridge.ui.hasSessions" },
-      { "command": "agentBridge.ui.closeTerminal", "when": "agentBridge.ui.hasSessions" },
-      { "command": "agentBridge.ui.endSession", "when": "agentBridge.ui.hasSessions" },
-      { "command": "agentBridge.ui.pauseSessionTabs", "when": "agentBridge.ui.hasSessions && !agentBridge.ui.browserUnavailable" },
-      { "command": "agentBridge.ui.resumeSessionTabs", "when": "agentBridge.ui.hasSessions && !agentBridge.ui.browserUnavailable" },
-      { "command": "agentBridge.ui.showSession", "when": "agentBridge.ui.hasSessions" },
-      { "command": "agentBridge.ui.showSessionInView", "when": "agentBridge.ui.hasSessions" }
+      { "command": "copane.ui.showAttention", "when": "copane.ui.hasSessions" },
+      { "command": "copane.ui.revealTab", "when": "copane.ui.hasSessions && !copane.ui.browserUnavailable" },
+      { "command": "copane.ui.pauseTab", "when": "copane.ui.hasSessions && !copane.ui.browserUnavailable" },
+      { "command": "copane.ui.resumeTab", "when": "copane.ui.hasSessions && !copane.ui.browserUnavailable" },
+      { "command": "copane.ui.releaseTab", "when": "copane.ui.hasSessions && !copane.ui.browserUnavailable" },
+      { "command": "copane.ui.closeTab", "when": "copane.ui.hasSessions && !copane.ui.browserUnavailable" },
+      { "command": "copane.ui.revealTerminal", "when": "copane.ui.hasSessions" },
+      { "command": "copane.ui.interruptTerminal", "when": "copane.ui.hasSessions" },
+      { "command": "copane.ui.closeTerminal", "when": "copane.ui.hasSessions" },
+      { "command": "copane.ui.endSession", "when": "copane.ui.hasSessions" },
+      { "command": "copane.ui.pauseSessionTabs", "when": "copane.ui.hasSessions && !copane.ui.browserUnavailable" },
+      { "command": "copane.ui.resumeSessionTabs", "when": "copane.ui.hasSessions && !copane.ui.browserUnavailable" },
+      { "command": "copane.ui.showSession", "when": "copane.ui.hasSessions" },
+      { "command": "copane.ui.showSessionInView", "when": "copane.ui.hasSessions" }
     ],
     "view/title": [
-      { "command": "agentBridge.registerAgents", "when": "view == agentBridge.sessions", "group": "8_setup@1" },
-      { "command": "agentBridge.unregisterAgents", "when": "view == agentBridge.sessions", "group": "8_setup@2" },
-      { "command": "agentBridge.repair", "when": "view == agentBridge.sessions", "group": "9_diagnostics@0" },
-      { "command": "agentBridge.showStatus", "when": "view == agentBridge.sessions", "group": "9_diagnostics@1" },
-      { "command": "agentBridge.showLog", "when": "view == agentBridge.sessions", "group": "9_diagnostics@2" }
+      { "command": "copane.registerAgents", "when": "view == copane.sessions", "group": "8_setup@1" },
+      { "command": "copane.unregisterAgents", "when": "view == copane.sessions", "group": "8_setup@2" },
+      { "command": "copane.repair", "when": "view == copane.sessions", "group": "9_diagnostics@0" },
+      { "command": "copane.showStatus", "when": "view == copane.sessions", "group": "9_diagnostics@1" },
+      { "command": "copane.showLog", "when": "view == copane.sessions", "group": "9_diagnostics@2" }
     ],
     "view/item/context": [
-      { "command": "agentBridge.ui.releaseTab", "when": "view == agentBridge.sessions && viewItem =~ /\\btab\\b/ && viewItem =~ /\\breleasable\\b/", "group": "inline@1" },
-      { "command": "agentBridge.ui.pauseTab", "when": "view == agentBridge.sessions && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bnotPaused\\b/", "group": "inline@2" },
-      { "command": "agentBridge.ui.resumeTab", "when": "view == agentBridge.sessions && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bpaused\\b/", "group": "inline@2" },
-      { "command": "agentBridge.ui.revealTab", "when": "view == agentBridge.sessions && viewItem =~ /\\btab\\b/", "group": "1_show@1" },
-      { "command": "agentBridge.ui.pauseTab", "when": "view == agentBridge.sessions && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bnotPaused\\b/", "group": "2_control@1" },
-      { "command": "agentBridge.ui.resumeTab", "when": "view == agentBridge.sessions && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bpaused\\b/", "group": "2_control@1" },
-      { "command": "agentBridge.ui.releaseTab", "when": "view == agentBridge.sessions && viewItem =~ /\\btab\\b/ && viewItem =~ /\\breleasable\\b/", "group": "2_control@2" },
-      { "command": "agentBridge.ui.closeTab", "when": "view == agentBridge.sessions && viewItem =~ /\\btab\\b/", "group": "3_close@1" },
+      { "command": "copane.ui.releaseTab", "when": "view == copane.sessions && viewItem =~ /\\btab\\b/ && viewItem =~ /\\breleasable\\b/", "group": "inline@1" },
+      { "command": "copane.ui.pauseTab", "when": "view == copane.sessions && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bnotPaused\\b/", "group": "inline@2" },
+      { "command": "copane.ui.resumeTab", "when": "view == copane.sessions && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bpaused\\b/", "group": "inline@2" },
+      { "command": "copane.ui.revealTab", "when": "view == copane.sessions && viewItem =~ /\\btab\\b/", "group": "1_show@1" },
+      { "command": "copane.ui.pauseTab", "when": "view == copane.sessions && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bnotPaused\\b/", "group": "2_control@1" },
+      { "command": "copane.ui.resumeTab", "when": "view == copane.sessions && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bpaused\\b/", "group": "2_control@1" },
+      { "command": "copane.ui.releaseTab", "when": "view == copane.sessions && viewItem =~ /\\btab\\b/ && viewItem =~ /\\breleasable\\b/", "group": "2_control@2" },
+      { "command": "copane.ui.closeTab", "when": "view == copane.sessions && viewItem =~ /\\btab\\b/", "group": "3_close@1" },
 
-      { "command": "agentBridge.ui.interruptTerminal", "when": "view == agentBridge.sessions && viewItem =~ /\\bterminal\\b/ && viewItem =~ /\\binterruptible\\b/", "group": "inline@1" },
-      { "command": "agentBridge.ui.revealTerminal", "when": "view == agentBridge.sessions && viewItem =~ /\\bterminal\\b/ && viewItem =~ /\\bopen\\b/", "group": "1_show@1" },
-      { "command": "agentBridge.ui.interruptTerminal", "when": "view == agentBridge.sessions && viewItem =~ /\\bterminal\\b/ && viewItem =~ /\\binterruptible\\b/", "group": "2_control@1" },
-      { "command": "agentBridge.ui.closeTerminal", "when": "view == agentBridge.sessions && viewItem =~ /\\bterminal\\b/ && viewItem =~ /\\bopen\\b/", "group": "3_close@1" },
+      { "command": "copane.ui.interruptTerminal", "when": "view == copane.sessions && viewItem =~ /\\bterminal\\b/ && viewItem =~ /\\binterruptible\\b/", "group": "inline@1" },
+      { "command": "copane.ui.revealTerminal", "when": "view == copane.sessions && viewItem =~ /\\bterminal\\b/ && viewItem =~ /\\bopen\\b/", "group": "1_show@1" },
+      { "command": "copane.ui.interruptTerminal", "when": "view == copane.sessions && viewItem =~ /\\bterminal\\b/ && viewItem =~ /\\binterruptible\\b/", "group": "2_control@1" },
+      { "command": "copane.ui.closeTerminal", "when": "view == copane.sessions && viewItem =~ /\\bterminal\\b/ && viewItem =~ /\\bopen\\b/", "group": "3_close@1" },
 
-      { "command": "agentBridge.ui.endSession", "when": "view == agentBridge.sessions && viewItem =~ /\\bsession\\b/", "group": "inline@9" },
-      { "command": "agentBridge.ui.pauseSessionTabs", "when": "view == agentBridge.sessions && viewItem =~ /\\bsession\\b/ && viewItem =~ /\\bhasUnpausedTabs\\b/", "group": "2_control@1" },
-      { "command": "agentBridge.ui.resumeSessionTabs", "when": "view == agentBridge.sessions && viewItem =~ /\\bsession\\b/ && viewItem =~ /\\bhasPausedTabs\\b/", "group": "2_control@2" },
-      { "command": "agentBridge.ui.endSession", "when": "view == agentBridge.sessions && viewItem =~ /\\bsession\\b/", "group": "9_end@1" },
+      { "command": "copane.ui.endSession", "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/", "group": "inline@9" },
+      { "command": "copane.ui.pauseSessionTabs", "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/ && viewItem =~ /\\bhasUnpausedTabs\\b/", "group": "2_control@1" },
+      { "command": "copane.ui.resumeSessionTabs", "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/ && viewItem =~ /\\bhasPausedTabs\\b/", "group": "2_control@2" },
+      { "command": "copane.ui.endSession", "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/", "group": "9_end@1" },
 
-      { "command": "agentBridge.ui.showSession", "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/", "group": "inline@1" },
-      { "command": "agentBridge.ui.pauseTab", "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bnotPaused\\b/", "group": "inline@2" },
-      { "command": "agentBridge.ui.resumeTab", "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bpaused\\b/", "group": "inline@2" },
-      { "command": "agentBridge.ui.releaseTab", "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\breleasable\\b/", "group": "inline@3" },
-      { "command": "agentBridge.ui.closeTab", "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/", "group": "inline@4" },
-      { "command": "agentBridge.ui.revealTab", "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/", "group": "1_show@1" },
-      { "command": "agentBridge.ui.showSession", "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/", "group": "1_show@2" },
-      { "command": "agentBridge.ui.showSessionInView", "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/", "group": "1_show@3" },
-      { "command": "agentBridge.ui.pauseTab", "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bnotPaused\\b/", "group": "2_control@1" },
-      { "command": "agentBridge.ui.resumeTab", "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bpaused\\b/", "group": "2_control@1" },
-      { "command": "agentBridge.ui.releaseTab", "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\breleasable\\b/", "group": "2_control@2" },
-      { "command": "agentBridge.ui.closeTab", "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/", "group": "3_close@1" }
+      { "command": "copane.ui.showSession", "when": "view == copane.tabs && viewItem =~ /\\btab\\b/", "group": "inline@1" },
+      { "command": "copane.ui.pauseTab", "when": "view == copane.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bnotPaused\\b/", "group": "inline@2" },
+      { "command": "copane.ui.resumeTab", "when": "view == copane.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bpaused\\b/", "group": "inline@2" },
+      { "command": "copane.ui.releaseTab", "when": "view == copane.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\breleasable\\b/", "group": "inline@3" },
+      { "command": "copane.ui.closeTab", "when": "view == copane.tabs && viewItem =~ /\\btab\\b/", "group": "inline@4" },
+      { "command": "copane.ui.revealTab", "when": "view == copane.tabs && viewItem =~ /\\btab\\b/", "group": "1_show@1" },
+      { "command": "copane.ui.showSession", "when": "view == copane.tabs && viewItem =~ /\\btab\\b/", "group": "1_show@2" },
+      { "command": "copane.ui.showSessionInView", "when": "view == copane.tabs && viewItem =~ /\\btab\\b/", "group": "1_show@3" },
+      { "command": "copane.ui.pauseTab", "when": "view == copane.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bnotPaused\\b/", "group": "2_control@1" },
+      { "command": "copane.ui.resumeTab", "when": "view == copane.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bpaused\\b/", "group": "2_control@1" },
+      { "command": "copane.ui.releaseTab", "when": "view == copane.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\breleasable\\b/", "group": "2_control@2" },
+      { "command": "copane.ui.closeTab", "when": "view == copane.tabs && viewItem =~ /\\btab\\b/", "group": "3_close@1" }
     ]
   }
 }

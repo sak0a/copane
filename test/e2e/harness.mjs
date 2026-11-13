@@ -17,17 +17,17 @@ export const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const nameIndex = process.argv.indexOf('--name');
 /** The dev host under test (`--name`, default "dev"). */
 export const hostName = nameIndex >= 0 ? process.argv[nameIndex + 1] : 'dev';
-export const hostDir = join(process.platform === 'win32' ? process.env.TEMP : '/tmp', 'agent-bridge-dev', hostName);
+export const hostDir = join(process.platform === 'win32' ? process.env.TEMP : '/tmp', 'copane-dev', hostName);
 
 /**
  * Starts an MCP server process and connects to it: one agent session. `session` is the session key
  * (omit for a fresh one each time), `client` the MCP client name ("claude-code", "codex", ...).
  */
 export async function agent({ session, client = 'claude-code', cwd, env = {} } = {}) {
-  const childEnv = { ...process.env, AGENT_BRIDGE_HOME: join(hostDir, 'home'), ...env };
-  delete childEnv.AGENT_BRIDGE_INSTANCE;
+  const childEnv = { ...process.env, COPANE_HOME: join(hostDir, 'home'), ...env };
+  delete childEnv.COPANE_INSTANCE;
   delete childEnv.CLAUDE_CODE_SESSION_ID;
-  if (session) childEnv.AGENT_BRIDGE_SESSION = session;
+  if (session) childEnv.COPANE_SESSION = session;
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [join(root, 'dist', 'mcp-server.js')],

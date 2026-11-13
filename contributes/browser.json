@@ -1,57 +1,57 @@
 {
   "commands": [
     {
-      "command": "agentBridge.browser.pauseTab",
+      "command": "copane.browser.pauseTab",
       "title": "Pause Agent Access to Browser Tab",
       "shortTitle": "Take Over",
-      "category": "Agent Bridge",
+      "category": "Copane",
       "icon": "$(debug-pause)"
     },
     {
-      "command": "agentBridge.browser.resumeTab",
+      "command": "copane.browser.resumeTab",
       "title": "Resume Agent Access to Browser Tab",
       "shortTitle": "Resume Agent",
-      "category": "Agent Bridge",
+      "category": "Copane",
       "icon": "$(debug-continue)"
     },
     {
-      "command": "agentBridge.browser.releaseTab",
+      "command": "copane.browser.releaseTab",
       "title": "End Agent Control of Browser Tab",
-      "category": "Agent Bridge"
+      "category": "Copane"
     },
     {
-      "command": "agentBridge.browser.revealTab",
+      "command": "copane.browser.revealTab",
       "title": "Show Browser Tab",
-      "category": "Agent Bridge"
+      "category": "Copane"
     },
     {
-      "command": "agentBridge.browser.shareTab",
+      "command": "copane.browser.shareTab",
       "title": "Share Browser Tab with Agent Session\u2026",
-      "category": "Agent Bridge"
+      "category": "Copane"
     },
     {
-      "command": "agentBridge.browser.resetPermissions",
+      "command": "copane.browser.resetPermissions",
       "title": "Reset Browser Tab Permissions",
-      "category": "Agent Bridge"
+      "category": "Copane"
     }
   ],
   "menus": {
     "editor/title": [
       {
-        "command": "agentBridge.browser.pauseTab",
-        "when": "activeEditor == workbench.editor.browser && agentBridge.browser.activeTabControlled && !agentBridge.browser.activeTabPaused",
+        "command": "copane.browser.pauseTab",
+        "when": "activeEditor == workbench.editor.browser && copane.browser.activeTabControlled && !copane.browser.activeTabPaused",
         "group": "navigation@-10"
       },
       {
-        "command": "agentBridge.browser.resumeTab",
-        "when": "activeEditor == workbench.editor.browser && agentBridge.browser.activeTabPaused",
+        "command": "copane.browser.resumeTab",
+        "when": "activeEditor == workbench.editor.browser && copane.browser.activeTabPaused",
         "group": "navigation@-10"
       }
     ]
   },
   "configuration": {
     "properties": {
-      "agentBridge.browser.userTabs": {
+      "copane.browser.userTabs": {
         "type": "string",
         "enum": [
           "ask",
@@ -66,18 +66,18 @@
         "default": "ask",
         "description": "Whether agent sessions may use integrated-browser tabs that you opened. Tabs an agent opened itself are always available to it."
       },
-      "agentBridge.browser.leaseIdleSeconds": {
+      "copane.browser.leaseIdleSeconds": {
         "type": "number",
         "default": 120,
         "minimum": 5,
         "description": "How long an agent session keeps control of a browser tab without acting in it. After that the tab's indicator disappears and another session may take control."
       },
-      "agentBridge.browser.pageIndicator": {
+      "copane.browser.pageIndicator": {
         "type": "boolean",
         "default": true,
         "description": "Show a small indicator in the page (and a thin frame in the session's color) while an agent session controls a browser tab, with a button to take over."
       },
-      "agentBridge.browser.certificateErrors": {
+      "copane.browser.certificateErrors": {
         "type": "string",
         "enum": [
           "ask",
@@ -90,7 +90,7 @@
         "default": "ask",
         "description": "What happens when a browser tab an agent session is driving hits a certificate error (self-signed, company authority, wrong host name)."
       },
-      "agentBridge.browser.trustedCertificateHosts": {
+      "copane.browser.trustedCertificateHosts": {
         "type": "array",
         "items": {
           "type": "string"

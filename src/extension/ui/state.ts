@@ -47,7 +47,7 @@ export class UiState implements vscode.Disposable {
     this.subscriptions.push(
       ...sources.subscribe(() => this.coalescer.schedule()),
       vscode.workspace.onDidChangeConfiguration(e => {
-        if (e.affectsConfiguration('agentBridge.sessionGraceSeconds')) this.coalescer.schedule();
+        if (e.affectsConfiguration('copane.sessionGraceSeconds')) this.coalescer.schedule();
       }),
     );
   }
@@ -78,7 +78,7 @@ export class UiState implements vscode.Disposable {
       tabs: this.sources.tabs(),
       terminals: this.sources.terminals(),
       browserAvailable: this.sources.browserAvailable,
-      graceSeconds: Math.max(0, vscode.workspace.getConfiguration('agentBridge').get<number>('sessionGraceSeconds', 20)),
+      graceSeconds: Math.max(0, vscode.workspace.getConfiguration('copane').get<number>('sessionGraceSeconds', 20)),
     };
   }
 

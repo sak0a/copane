@@ -245,7 +245,7 @@ describe('attention, badge and status bar', () => {
   it('shows the connected count quietly when nothing needs the user', () => {
     const model = buildViewModel(input({ sessions: [s1, s2] }));
     expect(model.status).toMatchObject({ visible: true, text: '$(robot) 2', warning: false });
-    expect(model.status.accessibilityLabel).toBe('Agent Bridge: 2 agent sessions connected');
+    expect(model.status.accessibilityLabel).toBe('Copane: 2 agent sessions connected');
     expect(model.attention).toEqual([]);
     expect(model.badge).toBeUndefined();
   });
@@ -273,7 +273,7 @@ describe('attention, badge and status bar', () => {
     expect(model.attention[0]).toMatchObject({ label: 'Claude 2 is waiting for you', description: 'zsh', detail: 'Enter the 2FA code', sessionIds: ['s2'] });
     expect(model.attention[1]).toMatchObject({ label: '"Login" is paused', description: 'Claude 1 cannot use it until you resume it' });
     expect(model.badge).toEqual({ value: 2, tooltip: '1 terminal is waiting for you, 1 tab is paused' });
-    expect(model.status.accessibilityLabel).toBe('Agent Bridge: 2 agent sessions connected, 1 terminal waiting for you, 1 tab paused');
+    expect(model.status.accessibilityLabel).toBe('Copane: 2 agent sessions connected, 1 terminal waiting for you, 1 tab paused');
     expect(model.status.tooltip).toContain(`command:${Cmd.showAttention}`);
   });
 

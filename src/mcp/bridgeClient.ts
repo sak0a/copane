@@ -236,7 +236,7 @@ export class BridgeClient {
   private adviceText(instances = this.options.readInstances()): string {
     if (instances.length === 0) {
       return (
-        'What to do: ask the user to open this project in VS Code with the Agent Bridge extension installed. ' +
+        'What to do: ask the user to open this project in VS Code with the Copane extension installed. ' +
         'The tools appear on their own a few seconds after the window has started; no restart of this session is needed.'
       );
     }

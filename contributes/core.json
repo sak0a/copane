@@ -1,11 +1,11 @@
 {
   "commands": [
-    { "command": "agentBridge.showLog", "title": "Show Log", "category": "Agent Bridge" }
+    { "command": "copane.showLog", "title": "Show Log", "category": "Copane" }
   ],
   "configuration": {
-    "title": "Agent Bridge",
+    "title": "Copane",
     "properties": {
-      "agentBridge.sessionGraceSeconds": {
+      "copane.sessionGraceSeconds": {
         "type": "number",
         "default": 20,
         "minimum": 0,

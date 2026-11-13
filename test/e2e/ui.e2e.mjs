@@ -12,7 +12,7 @@ import { startPageServer } from '../fixtures/ui-pages.mjs';
 import { agent, assert, hostName, root, run, test, until } from './harness.mjs';
 
 const exec = promisify(execFile);
-const STATUS_ID = 'sak0a.vscode-agent-bridge.agentBridge.status';
+const STATUS_ID = 'sak0a.copane.copane.status';
 
 /** Evaluates a JS expression in the dev host's workbench page and returns its (JSON) value. */
 async function dom(expression) {
@@ -23,9 +23,9 @@ async function dom(expression) {
 /** What the workbench shows: Sessions rows (aria labels), the status bar item, the activity bar badge, welcome text. */
 const workbench = () =>
   dom(`(() => {
-    const view = document.getElementById('workbench.view.extension.agentBridge');
+    const view = document.getElementById('workbench.view.extension.copane');
     const status = document.getElementById(${JSON.stringify(STATUS_ID)});
-    const container = [...document.querySelectorAll('.action-item')].find(a => /^Agent Bridge/.test(a.querySelector('.action-label')?.getAttribute('aria-label') ?? ''));
+    const container = [...document.querySelectorAll('.action-item')].find(a => /^Copane/.test(a.querySelector('.action-label')?.getAttribute('aria-label') ?? ''));
     return {
       rows: view ? [...view.querySelectorAll('.monaco-list-row')].map(r => r.getAttribute('aria-label')) : null,
       welcome: view?.querySelector('.welcome-view-content')?.innerText ?? null,
@@ -48,7 +48,7 @@ let alphaLabel;
 let tabId;
 
 test('a connecting session appears in the view and in the status bar', async () => {
-  await command('workbench.view.extension.agentBridge');
+  await command('workbench.view.extension.copane');
   alpha = await agent({ session: ALPHA });
   await alpha.ok('session_set_title', { title: 'ui e2e alpha' });
   alphaLabel = JSON.parse(await alpha.ok('session_info')).you.label;
@@ -91,7 +91,7 @@ test('a tab the agent opens is listed under it as controlling', async () => {
 });
 
 test('pausing the tab as the user shows it, counts it and blocks the agent; resuming clears it', async () => {
-  await command('agentBridge.ui.pauseTab', tabId);
+  await command('copane.ui.pauseTab', tabId);
   const s = await until(async () => {
     const s = await state();
     return row(s, `session:${ALPHA}/tab:${tabId}`)?.description?.startsWith('paused by you') && s;
@@ -111,7 +111,7 @@ test('pausing the tab as the user shows it, counts it and blocks the agent; resu
   const refused = await alpha.call('browser_evaluate', { tab: tabId, function: 'document.title' });
   if (!/Unknown tool/.test(refused.text)) assert.ok(refused.isError && /paused/.test(refused.text), `the agent was not blocked: ${refused.text}`);
 
-  await command('agentBridge.ui.resumeTab', tabId);
+  await command('copane.ui.resumeTab', tabId);
   await until(async () => {
     const s = await state();
     return !row(s, `session:${ALPHA}/tab:${tabId}`).description.startsWith('paused') && !s.attention.some(a => a.targetId === tabId);
@@ -137,7 +137,7 @@ test('a terminal waiting for the user turns the status bar into a warning until 
   }, 'the warning status bar item and the waiting terminal row in the workbench');
   assert.match(w.status.text, /needs you/);
 
-  await command('agentBridge.ui.interruptTerminal', 'fx-e2e');
+  await command('copane.ui.interruptTerminal', 'fx-e2e');
   const after = await until(async () => {
     const s = await state();
     return !s.status.warning && s;
@@ -149,7 +149,7 @@ test('a terminal waiting for the user turns the status bar into a warning until 
 test('ending the session asks first, then removes it and releases its tab', async () => {
   await user.ok('debug_ui_fixtures', { terminals: [] });
   await user.ok('debug_answer_prompts', { answers: ['End Session'], clear: true });
-  await command('agentBridge.ui.endSession', ALPHA);
+  await command('copane.ui.endSession', ALPHA);
   const prompts = JSON.parse(await user.ok('debug_answer_prompts', {})).shown;
   const prompt = prompts.at(-1);
   assert.equal(prompt.message, `End ${alphaLabel} (ui e2e alpha)?`);
@@ -162,14 +162,14 @@ test('ending the session asks first, then removes it and releases its tab', asyn
   // Lines look like "  tab-3  <url> ..." or "* tab-3  <url> ..." (the caller's current tab).
   const line = tabs.split('\n').map(l => l.replace(/^[*\s]+/, '')).find(l => l.startsWith(`${tabId} `));
   assert.ok(line && !/controlled by/.test(line), `the tab is still controlled: ${line}`);
-  await command('agentBridge.ui.closeTab', tabId);
+  await command('copane.ui.closeTab', tabId);
   await until(async () => !(await user.ok('browser_list_tabs')).includes(`${tabId} `), 'the tab to close');
 });
 
 test('with no session left the view shows its welcome and the status bar item hides', async () => {
   await alpha.close().catch(() => {});
   await user.close();
-  // The observer's own session ends after the grace period (agentBridge.sessionGraceSeconds, 20 s by default).
+  // The observer's own session ends after the grace period (copane.sessionGraceSeconds, 20 s by default).
   const w = await until(
     async () => {
       const w = await workbench();

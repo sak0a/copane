@@ -22,7 +22,7 @@ async function dom(expression) {
 /** The panel view in the workbench: row aria labels, their inline action titles, welcome text, the panel tab. */
 const workbench = () =>
   dom(`(() => {
-    const view = document.getElementById('workbench.view.extension.agentBridgeTabs');
+    const view = document.getElementById('workbench.view.extension.copaneTabs');
     const tab = [...document.querySelectorAll('.part.panel .composite-bar .action-label')].find(a => a.textContent.trim() === 'Agent Tabs' || a.getAttribute('aria-label')?.startsWith('Agent Tabs'));
     return {
       panelTab: !!tab,
@@ -48,7 +48,7 @@ let alpha, beta, alphaInfo, betaInfo;
 const tabs = {};
 
 test('the view sits in the panel and shows its welcome while no agent uses a tab', async () => {
-  await command('agentBridge.tabs.focus');
+  await command('copane.tabs.focus');
   const w = await until(async () => {
     const w = await workbench();
     return w.panelTab && w.rows && w;
@@ -97,7 +97,7 @@ test("each agent's tabs are listed in its color, sorted by session, with the tit
 });
 
 test('pausing from a row keeps the session color, swaps the inline action, and blocks the agent', async () => {
-  await command('agentBridge.ui.pauseTab', handle(tabs.a1));
+  await command('copane.ui.pauseTab', handle(tabs.a1));
   const s = await until(async () => {
     const s = await state();
     return panelRow(s, tabs.a1)?.icon.id === 'debug-pause' && s;
@@ -109,12 +109,12 @@ test('pausing from a row keeps the session color, swaps the inline action, and b
   const refused = await alpha.call('browser_evaluate', { tab: tabs.a1, function: 'document.title' });
   assert.ok(refused.isError && /paused/.test(refused.text), `the agent was not blocked: ${refused.text}`);
 
-  await command('agentBridge.ui.resumeTab', handle(tabs.a1));
+  await command('copane.ui.resumeTab', handle(tabs.a1));
   await until(async () => panelRow(await state(), tabs.a1)?.icon.id !== 'debug-pause', 'the row to resume');
 });
 
 test('releasing from a row turns it idle and removes the release action', async () => {
-  await command('agentBridge.ui.releaseTab', handle(tabs.b1));
+  await command('copane.ui.releaseTab', handle(tabs.b1));
   const s = await until(async () => {
     const s = await state();
     return panelRow(s, tabs.b1)?.description.includes(' · idle') && s;
@@ -124,18 +124,18 @@ test('releasing from a row turns it idle and removes the release action', async 
 });
 
 test('clicking a row brings its tab to the front', async () => {
-  await command('agentBridge.ui.revealTab', tabs.a2);
+  await command('copane.ui.revealTab', tabs.a2);
   await until(async () => panelRow(await state(), tabs.a2) && (await dom(`document.querySelector('.editor-group-container.active .tab.active')?.getAttribute('aria-label') ?? ''`)).includes('Panel Alpha Two'), 'the tab in front');
 });
 
 test('"Show Agent Session" for an agent outside the terminals selects its row in the Sessions view', async () => {
-  await command('agentBridge.ui.showSession', handle(tabs.b1));
+  await command('copane.ui.showSession', handle(tabs.b1));
   const s = await until(async () => {
     const s = await state();
     return s.sessionsViewVisible && s.sessionsSelection.includes(`session:${BETA}`) && s;
   }, 'the selected session row');
   assert.ok(s);
-  await command('agentBridge.tabs.focus');
+  await command('copane.tabs.focus');
 });
 
 test('"Show Agent Session" for an agent running in a terminal of the window shows that terminal', async () => {
@@ -154,7 +154,7 @@ test('"Show Agent Session" for an agent running in a terminal of the window show
   // Make another terminal the active one, then ask for the session.
   await command('workbench.action.terminal.new');
   const before = (await state()).activeTerminal;
-  await command('agentBridge.ui.showSession', handle(tabs.t));
+  await command('copane.ui.showSession', handle(tabs.t));
   const after = await until(async () => {
     const s = await state();
     return s.activeTerminal && s.activeTerminal.pid !== before?.pid && s.activeTerminal;
@@ -168,23 +168,23 @@ test('"Show Agent Session" for an agent running in a terminal of the window show
   }
 
   await launcher.ok('terminal_interrupt', { terminal: terminalId });
-  await command('agentBridge.ui.closeTab', tabs.t);
+  await command('copane.ui.closeTab', tabs.t);
 });
 
 test('closing a tab from its row removes the row; ending sessions empties the view', async () => {
-  await command('agentBridge.ui.closeTab', handle(tabs.a2));
+  await command('copane.ui.closeTab', handle(tabs.a2));
   await until(async () => !panelRow(await state(), tabs.a2), 'the closed row to disappear');
 
   await user.ok('debug_answer_prompts', { answers: ['End and Close Its Tabs', 'End and Close Its Tabs'], clear: true });
-  await command('agentBridge.ui.endSession', ALPHA);
-  await command('agentBridge.ui.endSession', BETA);
+  await command('copane.ui.endSession', ALPHA);
+  await command('copane.ui.endSession', BETA);
   const s = await until(async () => {
     const s = await state();
     return !s.panel.rows.some(r => [tabs.a1, tabs.b1].includes(r.ref.tabId)) && s;
   }, 'the ended sessions to leave the view');
   assert.ok(!s.panel.rows.some(r => r.label?.startsWith('Panel Alpha') || r.label?.startsWith('Panel Beta')));
   if (s.panel.rows.length === 0) {
-    await command('agentBridge.tabs.focus'); // the terminal case left the Terminal panel in front
+    await command('copane.tabs.focus'); // the terminal case left the Terminal panel in front
     await until(async () => (await workbench()).welcome?.includes('No agent session is using a browser tab'), 'the welcome content');
   }
 });

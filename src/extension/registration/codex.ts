@@ -1,11 +1,11 @@
-// Registration with Codex: the `[mcp_servers.vscode]` table in `~/.codex/config.toml` (or
+// Registration with Codex: the `[mcp_servers.copane]` table in `~/.codex/config.toml` (or
 // `$CODEX_HOME/config.toml`).
 //
 // The file is edited as text: only the lines of our tables are replaced or removed, everything else
 // (comments included) stays byte for byte. `codex mcp add` would rewrite the whole file and drops
 // inline comments, and there is no TOML library in the bundle. The scanner below understands as much
 // TOML as it needs to find table boundaries safely: strings, multi-line strings and arrays, comments.
-// A "vscode" server defined in a form it does not edit (dotted keys, an inline table) is reported as
+// A "copane" server defined in a form it does not edit (dotted keys, an inline table) is reported as
 // someone else's and left alone.
 //
 // Codex starts MCP servers with only a small allow-list of environment variables plus `env` and
@@ -20,9 +20,9 @@ export function codexConfigFile(env: NodeJS.ProcessEnv, home: string): string {
   return path.join(env.CODEX_HOME?.trim() || path.join(home, '.codex'), 'config.toml');
 }
 
-const MARKER = '# Added by the Agent Bridge VS Code extension; remove it with the command "Agent Bridge: Unregister from Claude Code and Codex".';
+const MARKER = '# Added by the Copane VS Code extension; remove it with the command "Copane: Unregister from Claude Code and Codex".';
 /** Variables Codex must pass through so the server finds the window of the terminal it runs in. */
-const PASS_THROUGH = ['AGENT_BRIDGE_INSTANCE', 'AGENT_BRIDGE_SESSION'];
+const PASS_THROUGH = ['COPANE_INSTANCE', 'COPANE_SESSION'];
 /** Codex's default per-call timeout is 60 s; browser waits and terminal commands can take longer. */
 const TOOL_TIMEOUT_SEC = 600;
 
@@ -104,7 +104,7 @@ function findTopLevelEquals(s: string): number {
   return -1;
 }
 
-/** `mcp_servers."vscode".env` → ['mcp_servers', 'vscode', 'env'] */
+/** `mcp_servers."copane".env` → ['mcp_servers', 'copane', 'env'] */
 export function splitKey(key: string): string[] {
   const parts: string[] = [];
   let i = 0;
@@ -154,13 +154,13 @@ interface KeySpan {
 }
 
 interface Located {
-  /** Our tables: `[mcp_servers.vscode]` and its sub-tables. */
+  /** Our tables: `[mcp_servers.copane]` and its sub-tables. */
   tables: Table[];
   main: Table | undefined;
   env: Table | undefined;
-  /** Keys of `[mcp_servers.vscode]`. */
+  /** Keys of `[mcp_servers.copane]`. */
   keys: KeySpan[];
-  /** Keys of `[mcp_servers.vscode.env]`, raw TOML values. */
+  /** Keys of `[mcp_servers.copane.env]`, raw TOML values. */
   envValues: Map<string, string>;
   /** The server is (also) defined with dotted keys or an inline table, which this editor does not touch. */
   inline: boolean;
@@ -317,7 +317,7 @@ export function inspectCodexText(text: string | undefined, spec: ServerSpec): En
   if (!isOurEntry(entry)) return { kind: 'foreign', command: described };
   // Current when what makes it start is right. Other keys (timeouts, enabled, ...) are the user's.
   const registered = { command: entry.command ?? '', args: entry.args, env: entry.env ?? {} };
-  if (!entry.env) return { kind: 'ours', current: false, command: described, reason: 'its env table is not in the form Agent Bridge writes', entry: registered };
+  if (!entry.env) return { kind: 'ours', current: false, command: described, reason: 'its env table is not in the form Copane writes', entry: registered };
   const compared = compareEntry({ command: entry.command, args: entry.args, env: entry.env }, spec);
   return { kind: 'ours', current: compared.current, command: described, ...(compared.current ? {} : { reason: compared.reason }), entry: registered };
 }
@@ -414,7 +414,7 @@ export async function unregisterCodex(target: CodexTarget, spec: ServerSpec): Pr
     const text = readTextIfExists(target.configFile);
     const before = inspectCodexText(text, spec);
     if (before.kind === 'absent') return { kind: 'unchanged', detail: 'not registered' };
-    if (before.kind === 'foreign') return { kind: 'conflict', detail: `the "${MCP_SERVER_NAME}" server there is not Agent Bridge's (${before.command}); left it alone` };
+    if (before.kind === 'foreign') return { kind: 'conflict', detail: `the "${MCP_SERVER_NAME}" server there is not Copane's (${before.command}); left it alone` };
     writeFileAtomic(target.configFile, removeCodexEntry(text!), 0o600);
     if (inspectCodexText(readTextIfExists(target.configFile), spec).kind !== 'absent') return { kind: 'failed', detail: 'the entry is still there' };
     return { kind: 'changed', detail: 'removed', via: 'file' };

@@ -20,14 +20,14 @@ export function activateTerminals(services: BridgeServices): void {
     return pending.find(t => answer === `${t.name}: ${t.handoff!.message}`.slice(0, 80));
   };
   services.context.subscriptions.push(
-    vscode.commands.registerCommand('agentBridge.terminal.finishRequest', async (terminalId?: unknown) => {
+    vscode.commands.registerCommand('copane.terminal.finishRequest', async (terminalId?: unknown) => {
       const t = await pick(terminalId);
       if (t) manager.resolveUserRequest(t.id, 'done');
     }),
-    vscode.commands.registerCommand('agentBridge.terminal.declineRequest', async (terminalId?: unknown) => {
+    vscode.commands.registerCommand('copane.terminal.declineRequest', async (terminalId?: unknown) => {
       const t = await pick(terminalId);
       if (t) manager.resolveUserRequest(t.id, 'declined');
     }),
   );
-  void vscode.commands.executeCommand('setContext', 'agentBridge.terminal.waitingForUser', false);
+  void vscode.commands.executeCommand('setContext', 'copane.terminal.waitingForUser', false);
 }

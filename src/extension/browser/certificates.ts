@@ -55,17 +55,17 @@ export class CertificateGate implements vscode.Disposable {
       services.browser.onDidAttachPage(page => this.attach(page)),
       services.tabLeases.onDidChange(change => void this.sync(change.resourceId)),
       vscode.workspace.onDidChangeConfiguration(e => {
-        if (e.affectsConfiguration('agentBridge.browser.certificateErrors')) for (const id of this.pages.keys()) void this.sync(id);
+        if (e.affectsConfiguration('copane.browser.certificateErrors')) for (const id of this.pages.keys()) void this.sync(id);
       }),
     );
   }
 
   private get mode(): 'ask' | 'block' {
-    return vscode.workspace.getConfiguration('agentBridge.browser').get<'ask' | 'block'>('certificateErrors', 'ask');
+    return vscode.workspace.getConfiguration('copane.browser').get<'ask' | 'block'>('certificateErrors', 'ask');
   }
 
   private get trustedHosts(): string[] {
-    return vscode.workspace.getConfiguration('agentBridge.browser').get<string[]>('trustedCertificateHosts', []);
+    return vscode.workspace.getConfiguration('copane.browser').get<string[]>('trustedCertificateHosts', []);
   }
 
   private attach(page: CdpPage): void {
@@ -147,7 +147,7 @@ export class CertificateGate implements vscode.Disposable {
         })
         .then(async answer => {
           if (answer === always) {
-            const config = vscode.workspace.getConfiguration('agentBridge.browser');
+            const config = vscode.workspace.getConfiguration('copane.browser');
             const current = config.get<string[]>('trustedCertificateHosts', []);
             if (!hostMatches(host, current)) await config.update('trustedCertificateHosts', [...current, host], vscode.ConfigurationTarget.Global);
             this.services.log.info(`certificate for ${host} is now always trusted (${params.errorType})`);

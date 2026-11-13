@@ -8,7 +8,7 @@
 // itself back when the page removes it, and acts only on trusted (real or CDP) clicks. It is installed
 // with `Page.addScriptToEvaluateOnNewDocument`, so it survives navigations and reloads.
 //
-// Contract with the page tools: every node the bridge injects into a page carries `data-agent-bridge-ui`
+// Contract with the page tools: every node the bridge injects into a page carries `data-copane-ui`
 // on its outermost element. Their snapshots skip it, their screenshots hide it (an author `!important`
 // rule or inline style on that element works: the indicator never sets display, visibility or opacity
 // on it as important). The indicator itself also turns click-through while an agent sends input, so an
@@ -16,9 +16,9 @@
 //
 // No `vscode` dependency: it only needs `send` and `on` of a CDP page.
 
-export const MARKER_ATTRIBUTE = 'data-agent-bridge-ui';
-export const WORLD = '__agentBridge';
-export const BINDING = '__agentBridgeUi';
+export const MARKER_ATTRIBUTE = 'data-copane-ui';
+export const WORLD = '__copane';
+export const BINDING = '__copaneUi';
 
 export interface MarkerState {
   /** "Claude 2 · checkout tests" */
@@ -56,8 +56,8 @@ type HTMLElement = any;
 function pageScript(BINDING: string, ATTRIBUTE: string): void {
   if (window.top !== window) return;
   const g = globalThis as any;
-  if (g.__agentBridgeMarker) {
-    g.__agentBridgeMarker.hello();
+  if (g.__copaneMarker) {
+    g.__copaneMarker.hello();
     return;
   }
   const send = (message: unknown) => {
@@ -241,7 +241,7 @@ function pageScript(BINDING: string, ATTRIBUTE: string): void {
     else attach();
   }
 
-  g.__agentBridgeMarker = {
+  g.__copaneMarker = {
     set(next: typeof state) {
       state = next;
       render();
@@ -313,7 +313,7 @@ export class PageMarker {
     const now = this.now();
     if (now < this.passiveUntil - 500) return;
     this.passiveUntil = now + PASSIVE_MS;
-    await this.evaluate(`globalThis.__agentBridgeMarker?.passive(${PASSIVE_MS})`, 300);
+    await this.evaluate(`globalThis.__copaneMarker?.passive(${PASSIVE_MS})`, 300);
   }
 
   dispose(): void {
@@ -369,7 +369,7 @@ export class PageMarker {
   private async push(): Promise<void> {
     if (this.disposed) return;
     if (this.installing) await this.installing;
-    await this.evaluate(`globalThis.__agentBridgeMarker?.set(${JSON.stringify(this.state && { ...this.state, corner: this.corner })})`);
+    await this.evaluate(`globalThis.__copaneMarker?.set(${JSON.stringify(this.state && { ...this.state, corner: this.corner })})`);
   }
 
   private async evaluate(expression: string, timeoutMs = 5000): Promise<void> {

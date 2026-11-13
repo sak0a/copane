@@ -101,7 +101,7 @@ export function newArgvJson(extensionId: string): string {
     '// This configuration file allows you to pass permanent command line arguments to VS Code.',
     '// Changing this file requires a restart of VS Code.',
     '{',
-    `\t// Lets the Agent Bridge extension use VS Code's integrated browser (proposed API).`,
+    `\t// Lets the Copane extension use VS Code's integrated browser (proposed API).`,
     `\t"${PROPOSED_API_KEY}": [${JSON.stringify(extensionId)}]`,
     '}',
     '',

@@ -1,39 +1,39 @@
 {
   "commands": [
     {
-      "command": "agentBridge.terminal.finishRequest",
+      "command": "copane.terminal.finishRequest",
       "title": "Done: Hand Terminal Back to Agent",
-      "category": "Agent Bridge",
+      "category": "Copane",
       "icon": "$(check)"
     },
     {
-      "command": "agentBridge.terminal.declineRequest",
+      "command": "copane.terminal.declineRequest",
       "title": "Won't Do: Decline Agent's Terminal Request",
-      "category": "Agent Bridge",
+      "category": "Copane",
       "icon": "$(close)"
     }
   ],
   "menus": {
     "view/title": [
       {
-        "command": "agentBridge.terminal.finishRequest",
-        "when": "view == terminal && agentBridge.terminal.waitingForUser",
+        "command": "copane.terminal.finishRequest",
+        "when": "view == terminal && copane.terminal.waitingForUser",
         "group": "navigation@0"
       },
       {
-        "command": "agentBridge.terminal.declineRequest",
-        "when": "view == terminal && agentBridge.terminal.waitingForUser",
-        "group": "1_agentBridge"
+        "command": "copane.terminal.declineRequest",
+        "when": "view == terminal && copane.terminal.waitingForUser",
+        "group": "1_copane"
       }
     ],
     "commandPalette": [
-      { "command": "agentBridge.terminal.finishRequest", "when": "agentBridge.terminal.waitingForUser" },
-      { "command": "agentBridge.terminal.declineRequest", "when": "agentBridge.terminal.waitingForUser" }
+      { "command": "copane.terminal.finishRequest", "when": "copane.terminal.waitingForUser" },
+      { "command": "copane.terminal.declineRequest", "when": "copane.terminal.waitingForUser" }
     ]
   },
   "configuration": {
     "properties": {
-      "agentBridge.terminal.userTerminals": {
+      "copane.terminal.userTerminals": {
         "type": "string",
         "enum": ["ask", "allow", "deny"],
         "enumDescriptions": [
@@ -44,7 +44,7 @@
         "default": "ask",
         "description": "Whether agent sessions may read and type in terminals you opened yourself."
       },
-      "agentBridge.terminal.onSessionEnd": {
+      "copane.terminal.onSessionEnd": {
         "type": "string",
         "enum": ["keep", "closeIdle", "close"],
         "enumDescriptions": [

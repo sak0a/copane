@@ -9,7 +9,7 @@
 // --folder may be repeated to open several windows. On macOS the windows open in the background
 // (they do not take focus) unless --foreground. Prints the bridge home and live instances.
 // The workbench UI is inspectable through scripts/ui.mjs (screenshots, DOM) unless --no-ui-port.
-// State (open tabs, terminals) persists per name; delete /tmp/agent-bridge-dev/<name> for a clean start.
+// State (open tabs, terminals) persists per name; delete /tmp/copane-dev/<name> for a clean start.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
@@ -23,7 +23,7 @@ const values = name => args.flatMap((a, i) => (a === `--${name}` && args[i + 1] 
 
 const name = values('name')[0] ?? 'dev';
 // Short path on purpose: unix socket paths are limited to ~104 bytes.
-const base = join(process.platform === 'win32' ? process.env.TEMP : '/tmp', 'agent-bridge-dev', name);
+const base = join(process.platform === 'win32' ? process.env.TEMP : '/tmp', 'copane-dev', name);
 const dirs = { userData: join(base, 'ud'), extensions: join(base, 'ext'), home: join(base, 'home'), workspace: join(base, 'ws') };
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const extensionId = `${pkg.publisher}.${pkg.name}`;
@@ -84,14 +84,14 @@ if (!flag('no-ui-port')) {
 // Throwaway agent and VS Code configuration: what the registration module edits in a dev host. The
 // extension refuses to change agent config or argv.json in a dev host unless they point in here.
 const sandboxEnv = {
-  AGENT_BRIDGE_HOME: dirs.home,
+  COPANE_HOME: dirs.home,
   CLAUDE_CONFIG_DIR: join(base, 'claude'),
   CODEX_HOME: join(base, 'codex'),
-  AGENT_BRIDGE_ARGV_JSON: join(base, 'argv.json'),
+  COPANE_ARGV_JSON: join(base, 'argv.json'),
 };
 const env = { ...process.env, ...sandboxEnv };
 // Variables that would make `code` talk to the VS Code this script was started from.
-for (const k of ['VSCODE_IPC_HOOK_CLI', 'ELECTRON_RUN_AS_NODE', 'AGENT_BRIDGE_INSTANCE', 'VSCODE_PID', 'VSCODE_CWD']) delete env[k];
+for (const k of ['VSCODE_IPC_HOOK_CLI', 'ELECTRON_RUN_AS_NODE', 'COPANE_INSTANCE', 'VSCODE_PID', 'VSCODE_CWD']) delete env[k];
 
 // macOS: VS Code activates itself when a window opens, even when started in the background. Remember
 // who had focus and give it back, so a dev host never interrupts whoever is working on this machine.
@@ -152,6 +152,6 @@ for (const f of found) {
   console.log(`  window ${i.id}: ${i.workspaceFolders.join(', ') || '(no folder)'}`);
 }
 if (found.length < folders.length) {
-  console.error(`only ${found.length} of ${folders.length} windows registered within 45 s; check "Agent Bridge" in the Output panel`);
+  console.error(`only ${found.length} of ${folders.length} windows registered within 45 s; check "Copane" in the Output panel`);
   process.exit(1);
 }

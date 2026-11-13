@@ -42,7 +42,7 @@ const routes = {
          new MutationObserver(() => {
            for (const el of [...document.documentElement.children]) if (el !== document.head && el !== document.body) el.remove();
          }).observe(document.documentElement, { childList: true });
-         window.__agentBridgeMarker = 'page';
+         window.__copaneMarker = 'page';
        </script>`,
       `<style>html > div { display: none; } * { font-size: 40px !important; color: red !important; }</style>`,
     ),

@@ -28,13 +28,13 @@ describe('selectInstance', () => {
   });
 
   it('prefers the terminal environment variable over the working directory', () => {
-    const r = selectInstance({ instances: [a, b], env: { AGENT_BRIDGE_INSTANCE: '200' }, cwd: '/work/a', ancestors: [] });
+    const r = selectInstance({ instances: [a, b], env: { COPANE_INSTANCE: '200' }, cwd: '/work/a', ancestors: [] });
     expect(r).toMatchObject({ instance: b, matchedBy: 'env' });
   });
 
   it('trusts the extension-host ancestor over an inherited environment variable', () => {
     // VS Code started from a terminal of another VS Code inherits that window's id.
-    const r = selectInstance({ instances: [a, b], env: { AGENT_BRIDGE_INSTANCE: '200' }, cwd: '/work/b', ancestors: [55, 100] });
+    const r = selectInstance({ instances: [a, b], env: { COPANE_INSTANCE: '200' }, cwd: '/work/b', ancestors: [55, 100] });
     expect(r).toMatchObject({ instance: a, matchedBy: 'ancestor' });
   });
 
@@ -48,7 +48,7 @@ describe('selectInstance', () => {
     const reloaded = instance('300', ['/work/b', '/work/a/packages/web'], 0, 10);
     const r = selectInstance({
       instances: [a, reloaded],
-      env: { AGENT_BRIDGE_INSTANCE: '200' },
+      env: { COPANE_INSTANCE: '200' },
       cwd: '/work/a',
       ancestors: [],
       previous: { id: '200', workspaceFolders: ['/work/a/packages/web', '/work/b'] },
@@ -57,7 +57,7 @@ describe('selectInstance', () => {
   });
 
   it('ignores an environment variable that points at a window that is gone', () => {
-    const r = selectInstance({ instances: [a, b], env: { AGENT_BRIDGE_INSTANCE: '999' }, cwd: '/work/a', ancestors: [] });
+    const r = selectInstance({ instances: [a, b], env: { COPANE_INSTANCE: '999' }, cwd: '/work/a', ancestors: [] });
     expect(r).toMatchObject({ instance: a, matchedBy: 'cwd' });
   });
 
@@ -89,9 +89,9 @@ describe('selectInstance', () => {
 describe('explainNoMatch', () => {
   it('distinguishes no window from several unrelated windows and names a stale terminal id', () => {
     expect(explainNoMatch({ instances: [], cwd: '/x', env: {} })).toMatch(/No VS Code window/);
-    const text = explainNoMatch({ instances: [instance('1', ['/a']), instance('2', ['/b'])], cwd: '/x', env: { AGENT_BRIDGE_INSTANCE: '9' } });
+    const text = explainNoMatch({ instances: [instance('1', ['/a']), instance('2', ['/b'])], cwd: '/x', env: { COPANE_INSTANCE: '9' } });
     expect(text).toMatch(/2 VS Code windows/);
-    expect(text).toMatch(/AGENT_BRIDGE_INSTANCE=9/);
+    expect(text).toMatch(/COPANE_INSTANCE=9/);
   });
 });
 
