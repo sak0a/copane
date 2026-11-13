@@ -1,0 +1,134 @@
+{
+  "commands": [
+    {
+      "command": "copane.openWalkthrough",
+      "title": "Get Started",
+      "category": "Copane",
+      "icon": "$(rocket)"
+    },
+    {
+      "command": "copane.walkthrough.copyPrompt",
+      "title": "Copy Example Prompt",
+      "category": "Copane"
+    }
+  ],
+  "menus": {
+    "view/title": [
+      {
+        "command": "copane.openWalkthrough",
+        "when": "view == copane.sessions",
+        "group": "8_setup@0"
+      }
+    ],
+    "commandPalette": [
+      {
+        "command": "copane.walkthrough.copyPrompt",
+        "when": "false"
+      }
+    ]
+  },
+  "walkthroughs": [
+    {
+      "id": "copane.gettingStarted",
+      "title": "Get Started with Copane",
+      "description": "Let Claude Code and Codex work in this window's browser tabs and terminals, next to you.",
+      "steps": [
+        {
+          "id": "intro",
+          "title": "What Copane does",
+          "description": "Copane gives Claude Code, Codex and other MCP agents the VS Code window they run in: its integrated browser tabs and its terminals. You see every click and every command, and you can take over at any moment.\nTwo one-time steps follow: let agents use the integrated browser, and turn Copane on for your agents.",
+          "media": {
+            "svg": "media/walkthrough/intro.svg",
+            "altText": "A VS Code window with a browser tab and a terminal, both marked with the color and label of the agent session using them."
+          }
+        },
+        {
+          "id": "browser",
+          "title": "Let agents use the integrated browser",
+          "description": "VS Code's integrated browser is controlled through an API that is still marked proposed. VS Code allows it only for extensions named in its argv.json, and reads that file only when it starts.\n[Enable Integrated Browser](command:copane.enableBrowser)\nCopane adds one line to argv.json and keeps the rest. Then quit VS Code completely and start it again: reloading the window is not enough. Until then agents get the terminal tools.",
+          "when": "copane.setup.browser != 'restart' && copane.setup.browser != 'remote' && copane.setup.browser != 'unsupported'",
+          "completionEvents": ["onContext:copane.setup.browserReady"],
+          "media": {
+            "svg": "media/walkthrough/browser.svg",
+            "altText": "The line \"enable-proposed-api\": [\"saka.copane\"] in argv.json, and a restart of VS Code."
+          }
+        },
+        {
+          "id": "browserRestart",
+          "title": "Restart VS Code to turn the browser on",
+          "description": "argv.json already lets Copane use the integrated browser, but VS Code reads it only when it starts, and this VS Code started before.\n[Quit VS Code](command:workbench.action.quit)\nThen start it again. This step is checked off once the browser is available.",
+          "when": "copane.setup.browser == 'restart'",
+          "completionEvents": ["onContext:copane.setup.browserReady"],
+          "media": {
+            "svg": "media/walkthrough/browser.svg",
+            "altText": "The line \"enable-proposed-api\": [\"saka.copane\"] in argv.json, and a restart of VS Code."
+          }
+        },
+        {
+          "id": "browserRemote",
+          "title": "Let agents use the integrated browser",
+          "description": "This is a remote window (WSL, SSH or a container). Copane runs on the remote side, but the browser and its setting, argv.json, belong to VS Code on this computer. The button opens that file (as **Preferences: Configure Runtime Arguments** does) and adds the line; if it cannot, it copies the line for you to paste.\n[Enable Integrated Browser](command:copane.enableBrowser)\nThen quit VS Code on this computer completely and start it again.",
+          "when": "copane.setup.browser == 'remote'",
+          "completionEvents": ["onContext:copane.setup.browserReady"],
+          "media": {
+            "svg": "media/walkthrough/browser.svg",
+            "altText": "The line \"enable-proposed-api\": [\"saka.copane\"] in argv.json, and a restart of VS Code."
+          }
+        },
+        {
+          "id": "browserUnsupported",
+          "title": "No browser tabs in this editor",
+          "description": "This editor has no integrated browser that extensions can drive (VS Code's proposed browser API), so there is nothing to enable: agents get Copane's terminal tools here, but no browser tabs. The browser tools need an editor that includes VS Code's integrated browser, such as Visual Studio Code 1.140 or newer.\n[Show Status](command:copane.showStatus)",
+          "when": "copane.setup.browser == 'unsupported'",
+          "completionEvents": ["onStepSelected"],
+          "media": {
+            "svg": "media/walkthrough/unsupported.svg",
+            "altText": "A window whose browser area is empty because the editor has no integrated browser, and a terminal that agents still use."
+          }
+        },
+        {
+          "id": "agents",
+          "title": "Turn Copane on for Claude Code and Codex",
+          "description": "Copane adds an MCP server named copane to your user configuration of Claude Code (~/.claude.json) and Codex (~/.codex/config.toml), and keeps it current. Nothing else in those files changes.\n[Turn On](command:copane.registerAgents)\nIn a remote window that is the configuration on the remote machine, where the agents run. **Turn Off** in the Copane view's ... menu removes it again.",
+          "when": "copane.setup.agents != 'none'",
+          "completionEvents": ["onContext:copane.setup.agentsReady"],
+          "media": {
+            "svg": "media/walkthrough/agents.svg",
+            "altText": "Claude Code and Codex connected to the copane MCP server, which connects them to this VS Code window."
+          }
+        },
+        {
+          "id": "agentsNone",
+          "title": "Install Claude Code or Codex",
+          "description": "Copane gives its tools to agents that speak MCP. Neither Claude Code nor Codex was found on this machine (or both are turned off in Copane's settings). Install one of them, then turn Copane on for it.\n[Find the Claude Code Extension](command:workbench.extensions.search?%22anthropic.claude-code%22)\n[Turn On](command:copane.registerAgents)\nOther MCP clients work too: run the server at ~/.copane/bin/mcp-server from them.",
+          "when": "copane.setup.agents == 'none'",
+          "completionEvents": ["onContext:copane.setup.agentsReady"],
+          "media": {
+            "svg": "media/walkthrough/agents.svg",
+            "altText": "Claude Code and Codex connected to the copane MCP server, which connects them to this VS Code window."
+          }
+        },
+        {
+          "id": "tryIt",
+          "title": "Try it",
+          "description": "Start a **new** Claude Code or Codex session in this window (sessions that were already running do not see Copane's tools) and give it this prompt:\n\u201cUse the copane tools: set your session title to \"Copane tour\", open https://example.com in a VS Code browser tab and tell me the page heading, then run node --version in a VS Code terminal and tell me what it printed.\u201d\n[Copy Prompt](command:copane.walkthrough.copyPrompt)\nA browser tab opens on example.com and a terminal named after the session (Claude 1) runs the command, both marked in the session's color, and the session appears in the Copane view. Your agent may ask you to approve its tool calls.",
+          "completionEvents": ["onContext:copane.setup.sessionSeen"],
+          "media": {
+            "svg": "media/walkthrough/try.svg",
+            "altText": "An agent's prompt, then a browser tab on example.com and a terminal running node --version, both labelled Claude 1."
+          }
+        },
+        {
+          "id": "sessions",
+          "title": "See and control agent sessions",
+          "description": "Every agent session in this window is listed in the Copane view with its label, color, tabs and terminals. There, or in a browser tab's title bar, you can pause an agent and take over a tab, release it, interrupt or close a terminal, or end the session. The Agent Tabs view in the bottom panel lists the browser tabs agents use.\n[Open the Copane View](command:copane.sessions.focus)\nWhen something does not work, **Copane: Check and Repair Setup** fixes what it can, and **Copane: Show Status** explains the rest.",
+          "completionEvents": ["onView:copane.sessions"],
+          "media": {
+            "svg": "media/walkthrough/sessions.svg",
+            "altText": "The Copane view: session Claude 1 with its title, browser tab and terminal, and buttons to pause, release and end."
+          }
+        }
+      ]
+    }
+  ]
+}

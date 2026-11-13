@@ -59,7 +59,14 @@ export interface StatusData {
   };
   otherWindows: Array<{ id: string; workspaceName: string | null; folders: string[]; remoteName: string | null }>;
   bridgeHome: string;
-  browser: { available: boolean; argvPath: string | undefined; argvState: ArgvState | undefined; remote: boolean };
+  browser: {
+    available: boolean;
+    argvPath: string | undefined;
+    argvState: ArgvState | undefined;
+    remote: boolean;
+    /** Set when this editor has no integrated browser: why, in a sentence (setup.ts). */
+    unsupported?: string;
+  };
   server: {
     spec: ServerSpec;
     installedVersion: string | undefined;
@@ -112,6 +119,7 @@ function stateText(state: EntryState): string {
 }
 
 function argvText(d: StatusData['browser']): string {
+  if (d.unsupported) return `not supported in this editor. ${d.unsupported}`;
   if (d.available) return 'available ✓';
   const s = d.argvState;
   if (d.remote && !d.argvPath) return 'not enabled. This is a remote window: argv.json is on your local machine; run "Copane: Enable Integrated Browser".';
@@ -175,7 +183,7 @@ export function renderStatus(d: StatusData): string {
 
   line('## Integrated browser');
   line(`- Browser API: ${argvText(d.browser)}`);
-  if (d.browser.argvPath) line(`- argv.json: ${d.browser.argvPath}`);
+  if (d.browser.argvPath && !d.browser.unsupported) line(`- argv.json: ${d.browser.argvPath}`);
   line();
 
   line('## Agents');

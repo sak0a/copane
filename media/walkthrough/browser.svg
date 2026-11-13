@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 340" width="480" height="340" fill="none">
+  <rect fill="var(--vscode-sideBar-background, #f3f3f3)" stroke="var(--vscode-foreground, #3b3b3b)" stroke-opacity=".22" stroke-width="1.5" x="40" y="40" width="300" height="220" rx="12"/>
+  <rect fill="var(--vscode-editor-background, #ffffff)" stroke="var(--vscode-foreground, #3b3b3b)" stroke-opacity=".16" x="56" y="54" width="62" height="18" rx="5"/>
+  <text font-family="var(--vscode-font-family, -apple-system, Segoe UI, sans-serif)" fill="var(--vscode-foreground, #3b3b3b)" x="64" y="67" font-size="10.5">argv.json</text>
+  <path stroke="var(--vscode-foreground, #3b3b3b)" stroke-opacity=".16" fill="none" d="M40 80h300"/>
+  <g font-size="12.5">
+    <text font-family="var(--vscode-editor-font-family, Menlo, Consolas, monospace)" fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".55" x="58" y="108">// Runtime arguments of VS Code</text>
+    <text font-family="var(--vscode-editor-font-family, Menlo, Consolas, monospace)" fill="var(--vscode-foreground, #3b3b3b)" x="58" y="132">{</text>
+    <text font-family="var(--vscode-editor-font-family, Menlo, Consolas, monospace)" fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".55" x="74" y="156">"locale": "en",</text>
+    <rect fill="var(--vscode-terminal-ansiBlue, #3794ff)" fill-opacity=".14" x="66" y="166" width="262" height="48" rx="6"/>
+    <rect fill="var(--vscode-terminal-ansiBlue, #3794ff)" x="66" y="166" width="3" height="48"/>
+    <text font-family="var(--vscode-editor-font-family, Menlo, Consolas, monospace)" fill="var(--vscode-foreground, #3b3b3b)" x="74" y="184">"enable-proposed-api": [</text>
+    <text font-family="var(--vscode-editor-font-family, Menlo, Consolas, monospace)" fill="var(--vscode-foreground, #3b3b3b)" x="90" y="205">"saka.copane"</text>
+    <text font-family="var(--vscode-editor-font-family, Menlo, Consolas, monospace)" fill="var(--vscode-foreground, #3b3b3b)" x="74" y="230">]</text>
+    <text font-family="var(--vscode-editor-font-family, Menlo, Consolas, monospace)" fill="var(--vscode-foreground, #3b3b3b)" x="58" y="250">}</text>
+  </g>
+  <!-- restart -->
+  <circle fill="var(--vscode-editor-background, #ffffff)" stroke="var(--vscode-foreground, #3b3b3b)" stroke-opacity=".16" cx="392" cy="178" r="42"/>
+  <path stroke="var(--vscode-terminal-ansiBlue, #3794ff)" fill="none" d="M407.6 158.2A26 26 0 1 0 418 178" stroke-width="6" stroke-linecap="round"/>
+  <path stroke="var(--vscode-terminal-ansiBlue, #3794ff)" fill="none" d="M403 149l7 10-12 3" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text font-family="var(--vscode-font-family, -apple-system, Segoe UI, sans-serif)" fill="var(--vscode-foreground, #3b3b3b)" x="392" y="244" font-size="13" font-weight="600" text-anchor="middle">Quit and</text>
+  <text font-family="var(--vscode-font-family, -apple-system, Segoe UI, sans-serif)" fill="var(--vscode-foreground, #3b3b3b)" x="392" y="261" font-size="13" font-weight="600" text-anchor="middle">start again</text>
+  <text font-family="var(--vscode-font-family, -apple-system, Segoe UI, sans-serif)" fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".55" x="392" y="284" font-size="10.5" text-anchor="middle">Reload Window</text>
+  <text font-family="var(--vscode-font-family, -apple-system, Segoe UI, sans-serif)" fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".55" x="392" y="298" font-size="10.5" text-anchor="middle">is not enough</text>
+  <path stroke="var(--vscode-foreground, #3b3b3b)" stroke-opacity=".35" stroke-width="2" fill="none" stroke-dasharray="4 5" stroke-linecap="round" d="M340 178h8"/>
+</svg>

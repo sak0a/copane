@@ -6,7 +6,7 @@
 // copane.repair (Check and Repair Setup), copane.enableBrowser, copane.showStatus,
 // copane.copyStatus (the UI module links to some of these ids), and
 // copane.registration.runStartupCheck (internal: the startup check, which development hosts do
-// not run on their own).
+// not run on their own). The getting-started walkthrough and its setup state are in walkthrough.ts.
 //
 // Every change to an agent's configuration goes through `applyChange`, which logs it with its reason
 // in the output channel and appends it to `<bridge home>/registration-history.json`. Changes are
@@ -38,7 +38,9 @@ import { appendHistory, readHistory, recentReAdds, type Trigger } from './histor
 import { installServer, readInstalledManifest, scriptPath, serverSpec, type ServerSpec } from './launcher';
 import { DEFAULT_TITLES, planAgent, type CommandTitles, type Mode, type Plan } from './plan';
 import { diagnose, handshake, type HandshakeResult } from './probe';
+import { unsupportedBrowserText } from './setup';
 import { renderStatus, type AgentStatus, type CheckResult, type StatusData } from './status';
+import { SetupTracker } from './walkthrough';
 
 type AgentId = 'claude-code' | 'codex';
 
@@ -97,7 +99,10 @@ export function activateRegistration(services: BridgeServices): void {
   const registration = new Registration(services);
   const { context } = services;
   const statusProvider = new StatusDocuments();
+  const setup = new SetupTracker(services, registration.setupSources(), registration.log);
+  registration.setup = setup;
   context.subscriptions.push(
+    setup,
     vscode.workspace.registerTextDocumentContentProvider(STATUS_SCHEME, statusProvider),
     statusProvider,
     vscode.commands.registerCommand('copane.registerAgents', () => registration.registerAgents()),
@@ -126,10 +131,24 @@ export function activateRegistration(services: BridgeServices): void {
   );
 
   registration.installServerSafely();
+  const detected = setup
+    .detectIntegratedBrowser()
+    .then(() => setup.refresh())
+    .catch(err => registration.log.error('setup state failed', err));
   // A development host must not ask on its own: tests queue answers for the prompts they expect, and
   // an unexpected one would take them. Tests run the check with the internal command instead.
   if (context.extensionMode !== vscode.ExtensionMode.Production) return;
-  setTimeout(() => void registration.startup().catch(err => registration.log.error('startup check failed', err)), 1500);
+  setTimeout(async () => {
+    try {
+      await detected;
+      // The first start opens the walkthrough, which covers registering and enabling the browser:
+      // its notifications wait for a later start instead of appearing on top of it.
+      const walkthrough = await setup.openOnFirstRun();
+      await registration.startup(walkthrough ? { browserNotice: false, ask: false } : {});
+    } catch (err) {
+      registration.log.error('startup check failed', err);
+    }
+  }, 1500);
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration(e => {
       if (e.affectsConfiguration('copane.registration')) void registration.startup({ browserNotice: false, trigger: 'settings' });
@@ -148,6 +167,8 @@ class Registration {
   private readonly lastCheckFile: string;
   private spec: ServerSpec;
   private installError: string | undefined;
+  /** The walkthrough's setup state, refreshed after every change made here. */
+  setup: SetupTracker | undefined;
 
   constructor(private readonly services: BridgeServices) {
     this.log = scopedLogger(services.log, 'registration');
@@ -315,6 +336,20 @@ class Registration {
     return this.agents().filter(a => config.get<boolean>(a.setting, true));
   }
 
+  /** What the walkthrough's setup state is computed from. */
+  setupSources(): { agents(): Array<{ enabled: boolean; detected: boolean; state: EntryState }>; argv(): ArgvState | undefined } {
+    return {
+      agents: () => {
+        const config = vscode.workspace.getConfiguration('copane.registration');
+        return this.agents().map(a => ({ enabled: config.get<boolean>(a.setting, true), detected: a.detect().detected, state: a.inspect().state }));
+      },
+      argv: () => {
+        const target = this.argvTarget();
+        return target.file && !target.blocked && !target.viaEditor ? argvState(readTextIfExists(target.file), this.extensionId) : undefined;
+      },
+    };
+  }
+
   private consentFor(agent: Agent, setup = this.readState()): 'granted' | 'declined' | undefined {
     return setup.consent && setup.agents?.includes(agent.id) ? setup.consent : undefined;
   }
@@ -365,6 +400,7 @@ class Registration {
         ...(before.kind === 'ours' || before.kind === 'foreign' ? { before: before.command } : {}),
         by: this.by,
       });
+      void this.setup?.refresh();
     }
     return { agent: agent.name, outcome };
   }
@@ -382,7 +418,7 @@ class Registration {
    * before adding one, never touches another server named "copane", and tests that the registered
    * command starts. Says something only when something is wrong that it could not fix.
    */
-  async startup(options: { browserNotice?: boolean; trigger?: Trigger; probe?: 'background' | 'wait' } = {}): Promise<AgentResult[]> {
+  async startup(options: { browserNotice?: boolean; ask?: boolean; trigger?: Trigger; probe?: 'background' | 'wait' } = {}): Promise<AgentResult[]> {
     const trigger = options.trigger ?? 'startup';
     this.installServerSafely();
     const results: AgentResult[] = [];
@@ -406,7 +442,7 @@ class Registration {
         }
       }
     });
-    if (toAsk.length > 0) results.push(...(await this.askToRegister(toAsk)));
+    if (toAsk.length > 0 && options.ask !== false) results.push(...(await this.askToRegister(toAsk)));
     for (const problem of problems) this.warnOnce(problem, `${this.titles.product}: ${problem}.`);
 
     const probe = this.startupProbe().catch(err => this.log.error('start test failed', err));
@@ -694,6 +730,12 @@ class Registration {
       void this.services.prompts.ask({ message: 'Copane: the integrated browser is already enabled.', choices: [] });
       return { state: 'available' };
     }
+    if (this.setup && !this.setup.browserSupported) {
+      // Nothing in argv.json can add a browser this editor does not have.
+      const text = unsupportedBrowserText(vscode.env.appName, vscode.version);
+      void this.services.prompts.ask({ message: `Copane: ${text}`, choices: [] });
+      return { state: 'unsupported', error: text };
+    }
     const target = this.argvTarget();
     if (target.blocked) {
       void this.services.prompts.ask({ message: `Copane: not changing argv.json: ${target.blocked}.`, choices: [] });
@@ -701,6 +743,7 @@ class Registration {
     }
     try {
       const result = target.viaEditor || options.viaEditor ? await this.enableViaEditor(target.file) : this.enableInFile(target.file!);
+      void this.setup?.refresh();
       void this.offerRestart(result.changed, result.file);
       return { state: 'enabled', ...result };
     } catch (err) {
@@ -781,6 +824,7 @@ class Registration {
   private async browserNotice(): Promise<void> {
     const memento = this.services.context.globalState;
     if (this.services.browser.available || memento.get<boolean>(BROWSER_NOTICE_KEY)) return;
+    if (this.setup && !this.setup.browserSupported) return; // Nothing to enable here; the status report says why.
     await memento.update(BROWSER_NOTICE_KEY, true);
     const target = this.argvTarget();
     const state = target.file && !target.blocked ? argvState(readTextIfExists(target.file), this.extensionId) : undefined;
@@ -872,7 +916,13 @@ class Registration {
       },
       otherWindows: others.map(i => ({ id: i.id, workspaceName: i.workspaceName, folders: i.workspaceFolders, remoteName: i.remoteName })),
       bridgeHome: bridgeHome(),
-      browser: { available: services.browser.available, argvPath: argv.file, argvState: argvStateValue, remote: !!vscode.env.remoteName },
+      browser: {
+        available: services.browser.available,
+        argvPath: argv.file,
+        argvState: argvStateValue,
+        remote: !!vscode.env.remoteName,
+        ...(this.setup && !this.setup.browserSupported ? { unsupported: unsupportedBrowserText(vscode.env.appName, vscode.version) } : {}),
+      },
       server: {
         spec: this.spec,
         installedVersion: manifest?.version,

@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 340" width="480" height="340" fill="none">
+  <rect fill="var(--vscode-sideBar-background, #f3f3f3)" stroke="var(--vscode-foreground, #3b3b3b)" stroke-opacity=".22" stroke-width="1.5" x="20" y="40" width="168" height="120" rx="12"/>
+  <text font-family="var(--vscode-font-family, -apple-system, Segoe UI, sans-serif)" fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".55" x="34" y="62" font-size="11" font-weight="600">You</text>
+  <text font-family="var(--vscode-font-family, -apple-system, Segoe UI, sans-serif)" fill="var(--vscode-foreground, #3b3b3b)" x="34" y="84" font-size="12">Open example.com in a</text>
+  <text font-family="var(--vscode-font-family, -apple-system, Segoe UI, sans-serif)" fill="var(--vscode-foreground, #3b3b3b)" x="34" y="101" font-size="12">browser tab, then run</text>
+  <text font-family="var(--vscode-font-family, -apple-system, Segoe UI, sans-serif)" fill="var(--vscode-foreground, #3b3b3b)" x="34" y="118" font-size="12"><tspan font-family="var(--vscode-editor-font-family, Menlo, Consolas, monospace)">node --version</tspan> in</text>
+  <text font-family="var(--vscode-font-family, -apple-system, Segoe UI, sans-serif)" fill="var(--vscode-foreground, #3b3b3b)" x="34" y="135" font-size="12">a terminal.</text>
+  <rect fill="var(--vscode-terminal-ansiBlue, #3794ff)" fill-opacity=".14" x="20" y="176" width="168" height="34" rx="10"/>
+  <rect fill="var(--vscode-terminal-ansiBlue, #3794ff)" x="34" y="188" width="10" height="10" rx="3"/>
+  <text font-family="var(--vscode-font-family, -apple-system, Segoe UI, sans-serif)" fill="var(--vscode-foreground, #3b3b3b)" x="52" y="197" font-size="12" font-weight="600">Claude 1 · Copane tour</text>
+  <path stroke="var(--vscode-foreground, #3b3b3b)" stroke-opacity=".35" stroke-width="2" fill="none" stroke-dasharray="4 5" stroke-linecap="round" d="M196 120h22"/>
+  <path stroke="var(--vscode-terminal-ansiBlue, #3794ff)" fill="none" d="M214 114l7 6-7 6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- browser tab -->
+  <rect fill="var(--vscode-editor-background, #ffffff)" stroke="var(--vscode-foreground, #3b3b3b)" stroke-opacity=".16" x="230" y="34" width="232" height="150" rx="10"/>
+  <rect stroke="var(--vscode-terminal-ansiBlue, #3794ff)" fill="none" x="230" y="34" width="232" height="150" rx="10" stroke-width="2.5"/>
+  <rect fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".10" x="242" y="46" width="132" height="16" rx="8"/>
+  <text font-family="var(--vscode-editor-font-family, Menlo, Consolas, monospace)" fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".55" x="252" y="58" font-size="10">example.com</text>
+  <rect fill="var(--vscode-terminal-ansiBlue, #3794ff)" x="382" y="45" width="68" height="18" rx="9"/>
+  <text font-family="var(--vscode-font-family, -apple-system, Segoe UI, sans-serif)" fill="#ffffff" x="416.0" y="57.6" font-size="10.5" font-weight="600" text-anchor="middle">Claude 1</text>
+  <text font-family="var(--vscode-font-family, -apple-system, Segoe UI, sans-serif)" fill="var(--vscode-foreground, #3b3b3b)" x="248" y="98" font-size="17" font-weight="700">Example Domain</text>
+  <rect fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".10" x="248" y="112" width="194" height="7" rx="3"/><rect fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".10" x="248" y="125" width="170" height="7" rx="3"/>
+  <rect fill="var(--vscode-terminal-ansiBlue, #3794ff)" fill-opacity=".14" x="248" y="146" width="80" height="8" rx="3"/>
+  <!-- terminal -->
+  <rect fill="var(--vscode-editor-background, #ffffff)" stroke="var(--vscode-foreground, #3b3b3b)" stroke-opacity=".16" x="230" y="196" width="232" height="110" rx="10"/>
+  <rect fill="var(--vscode-terminal-ansiBlue, #3794ff)" x="244" y="208" width="8" height="8" rx="2"/>
+  <text font-family="var(--vscode-font-family, -apple-system, Segoe UI, sans-serif)" fill="var(--vscode-foreground, #3b3b3b)" x="258" y="216" font-size="10.5" font-weight="600">Claude 1</text>
+  <path stroke="var(--vscode-foreground, #3b3b3b)" stroke-opacity=".16" fill="none" d="M230 226h232"/>
+  <text font-family="var(--vscode-editor-font-family, Menlo, Consolas, monospace)" fill="var(--vscode-foreground, #3b3b3b)" x="244" y="250" font-size="12">$ node --version</text>
+  <text font-family="var(--vscode-editor-font-family, Menlo, Consolas, monospace)" fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".55" x="244" y="272" font-size="12">v22.20.0</text>
+  <text font-family="var(--vscode-editor-font-family, Menlo, Consolas, monospace)" fill="var(--vscode-foreground, #3b3b3b)" x="244" y="294" font-size="12">$ <tspan fill="var(--vscode-terminal-ansiBlue, #3794ff)">▍</tspan></text>
+</svg>

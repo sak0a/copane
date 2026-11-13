@@ -30,12 +30,27 @@
   "viewsWelcome": [
     {
       "view": "copane.sessions",
-      "contents": "No agent is connected to this window yet.\nStart Claude Code in this window, in its panel or by running claude in a terminal. Each session appears here with the browser tabs and terminals it uses, and you can pause it or step in at any time.\n[Set Up Agents](command:copane.registerAgents)\nAlready set up? [Show Status](command:copane.showStatus) explains why nothing is connected."
+      "contents": "No agent is connected to this window yet.\nStart Claude Code or Codex in this window, in its panel or in a terminal. Each session appears here with the browser tabs and terminals it uses, and you can pause it or step in at any time."
     },
     {
       "view": "copane.sessions",
-      "when": "copane.ui.browserUnavailable",
+      "when": "!copane.setup.agentsReady",
+      "contents": "[Get Started](command:copane.openWalkthrough)\nTwo one-time steps: let agents use the integrated browser, and turn Copane on for Claude Code and Codex."
+    },
+    {
+      "view": "copane.sessions",
+      "when": "copane.setup.agentsReady",
+      "contents": "Already set up? [Show Status](command:copane.showStatus) explains why nothing is connected."
+    },
+    {
+      "view": "copane.sessions",
+      "when": "copane.ui.browserUnavailable && copane.setup.agentsReady && copane.setup.browser != 'unsupported'",
       "contents": "The integrated browser is not enabled for Copane, so agents can use terminals but no browser tabs.\n[Enable Integrated Browser](command:copane.enableBrowser)\nVS Code restarts once to turn it on."
+    },
+    {
+      "view": "copane.sessions",
+      "when": "copane.setup.browser == 'unsupported'",
+      "contents": "This editor has no integrated browser that extensions can drive, so agents get the terminal tools here but no browser tabs."
     },
     {
       "view": "copane.tabs",
@@ -44,8 +59,13 @@
     },
     {
       "view": "copane.tabs",
-      "when": "copane.ui.browserUnavailable",
+      "when": "copane.ui.browserUnavailable && copane.setup.browser != 'unsupported'",
       "contents": "The integrated browser is not enabled, so agents cannot open or use browser tabs.\n[Enable Integrated Browser](command:copane.enableBrowser)"
+    },
+    {
+      "view": "copane.tabs",
+      "when": "copane.setup.browser == 'unsupported'",
+      "contents": "This editor has no integrated browser that extensions can drive, so agents cannot open or use browser tabs here. Their terminals are in the Copane view."
     }
   ],
   "commands": [
