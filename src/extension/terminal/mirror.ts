@@ -27,6 +27,8 @@ export interface Region {
   exitCode: number | undefined;
   /** The command line the shell reported for it (OSC 633;E), when it did. */
   commandLine: string | undefined;
+  /** When the output started (the mirror's clock). */
+  readonly startedAt?: number;
 }
 
 /** A read position: new output is everything after it. */
@@ -69,6 +71,7 @@ export class TerminalMirror {
   private readonly startEmitter = new Emitter<Region>();
   private readonly endEmitter = new Emitter<Region>();
   private readonly promptEmitter = new Emitter<void>();
+  private readonly promptEndEmitter = new Emitter<void>();
   /** When data last arrived (ms). */
   lastWriteAt = 0;
   /** Total characters received, to tell "something changed" cheaply. */
@@ -80,6 +83,8 @@ export class TerminalMirror {
   readonly onRegionEnd: Event<Region> = this.endEmitter.event;
   /** The shell started drawing its prompt (OSC 633;A, stream mode only). */
   readonly onPrompt: Event<void> = this.promptEmitter.event;
+  /** The shell finished drawing its prompt and waits for input (OSC 633;B, stream mode only). */
+  readonly onPromptEnd: Event<void> = this.promptEndEmitter.event;
 
   constructor(options: MirrorOptions) {
     this.feed = options.feed;
@@ -228,6 +233,7 @@ export class TerminalMirror {
     this.startEmitter.dispose();
     this.endEmitter.dispose();
     this.promptEmitter.dispose();
+    this.promptEndEmitter.dispose();
     this.xterm.dispose();
   }
 
@@ -245,6 +251,7 @@ export class TerminalMirror {
         ended: false,
         exitCode: undefined,
         commandLine: this.reportedCommandLine,
+        startedAt: this.now(),
       };
       this.reportedCommandLine = undefined;
       this.openRegion = region;
@@ -257,6 +264,8 @@ export class TerminalMirror {
       this.reportedCommandLine = decodeOscValue(rest[0] ?? '');
     } else if (kind === 'A') {
       this.promptEmitter.fire();
+    } else if (kind === 'B') {
+      this.promptEndEmitter.fire();
     }
   }
 
@@ -272,6 +281,27 @@ export class TerminalMirror {
 }
 
 /** Undoes the escaping of shell-integration values: \\ is a backslash, \xHH a character. */
+/**
+ * Whether a region's reported command line (OSC 633;E) belongs to an execution of `executionLine`;
+ * unknown matches anything. bash reports only the simple command running when its output starts
+ * ($BASH_COMMAND, unless its history can be used): "echo a" for "echo a; echo b", "make" for
+ * "make && make test", "ls" for "ls | wc -l". So a reported command also matches when it is one whole
+ * simple command of the line: bounded by the start, a separator (; & | ( newline) or the end.
+ */
+export function sameCommand(executionLine: string, reported: string | undefined): boolean {
+  if (reported === undefined) return true;
+  const line = executionLine.trim();
+  const command = reported.trim();
+  if (command === line) return true;
+  if (!command) return false;
+  for (let at = line.indexOf(command); at >= 0; at = line.indexOf(command, at + 1)) {
+    const before = line.slice(0, at);
+    const after = line.slice(at + command.length);
+    if (/(^|[;&|(\n]\s*)$/.test(before) && /^\s*($|[;&|)\n])/.test(after)) return true;
+  }
+  return false;
+}
+
 export function decodeOscValue(value: string): string {
   return value.replace(/\\(\\|x([0-9a-fA-F]{2}))/g, (_m, _what: string, hex: string | undefined) => (hex ? String.fromCharCode(parseInt(hex, 16)) : '\\'));
 }
