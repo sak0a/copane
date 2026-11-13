@@ -38,6 +38,40 @@
         "command": "agentBridge.showLog",
         "title": "Show Log",
         "category": "Agent Bridge"
+      },
+      {
+        "command": "agentBridge.browser.pauseTab",
+        "title": "Pause Agent Access to Browser Tab",
+        "shortTitle": "Take Over",
+        "category": "Agent Bridge",
+        "icon": "$(debug-pause)"
+      },
+      {
+        "command": "agentBridge.browser.resumeTab",
+        "title": "Resume Agent Access to Browser Tab",
+        "shortTitle": "Resume Agent",
+        "category": "Agent Bridge",
+        "icon": "$(debug-continue)"
+      },
+      {
+        "command": "agentBridge.browser.releaseTab",
+        "title": "End Agent Control of Browser Tab",
+        "category": "Agent Bridge"
+      },
+      {
+        "command": "agentBridge.browser.revealTab",
+        "title": "Show Browser Tab",
+        "category": "Agent Bridge"
+      },
+      {
+        "command": "agentBridge.browser.shareTab",
+        "title": "Share Browser Tab with Agent Session…",
+        "category": "Agent Bridge"
+      },
+      {
+        "command": "agentBridge.browser.resetPermissions",
+        "title": "Reset Browser Tab Permissions",
+        "category": "Agent Bridge"
       }
     ],
     "configuration": {
@@ -48,8 +82,48 @@
           "default": 20,
           "minimum": 0,
           "description": "How long a disconnected agent session keeps its tabs and terminals before they are released. Lets an agent reconnect after a window reload."
+        },
+        "agentBridge.browser.userTabs": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "allow",
+            "deny"
+          ],
+          "enumDescriptions": [
+            "Ask before an agent session reads or controls a browser tab you opened (once per tab, or per site).",
+            "Let every agent session use browser tabs you opened without asking.",
+            "Never let agent sessions use browser tabs you opened; they work in their own tabs."
+          ],
+          "default": "ask",
+          "description": "Whether agent sessions may use integrated-browser tabs that you opened. Tabs an agent opened itself are always available to it."
+        },
+        "agentBridge.browser.leaseIdleSeconds": {
+          "type": "number",
+          "default": 120,
+          "minimum": 5,
+          "description": "How long an agent session keeps control of a browser tab without acting in it. After that the tab's indicator disappears and another session may take control."
+        },
+        "agentBridge.browser.pageIndicator": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a small indicator in the page (and a thin frame in the session's color) while an agent session controls a browser tab, with a button to take over."
         }
       }
+    },
+    "menus": {
+      "editor/title": [
+        {
+          "command": "agentBridge.browser.pauseTab",
+          "when": "activeEditor == workbench.editor.browser && agentBridge.browser.activeTabControlled && !agentBridge.browser.activeTabPaused",
+          "group": "navigation@-10"
+        },
+        {
+          "command": "agentBridge.browser.resumeTab",
+          "when": "activeEditor == workbench.editor.browser && agentBridge.browser.activeTabPaused",
+          "group": "navigation@-10"
+        }
+      ]
     }
   },
   "scripts": {
