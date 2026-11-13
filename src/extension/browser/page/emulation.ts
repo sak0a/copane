@@ -217,7 +217,7 @@ export class EmulationManager implements PageHook, vscode.Disposable {
       }
     }
     if (!tabId || !this.tabs.has(tabId)) {
-      if (arg === undefined && this.tabs.size === 0) void vscode.window.showInformationMessage('No agent is emulating a device in a browser tab.');
+      if (arg === undefined && this.tabs.size === 0) vscode.window.setStatusBarMessage('No agent is emulating a device in a browser tab.', 5000);
       return;
     }
     const session = this.services.sessions.get(this.tabs.get(tabId)!.sessionId);

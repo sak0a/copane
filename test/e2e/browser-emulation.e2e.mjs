@@ -47,6 +47,9 @@ const titleActions = () => workbench(`[...document.querySelectorAll('.editor-act
 test('a phone preset with dark scheme, locale and time zone is what the page sees', async () => {
   const a = await session('preset');
   try {
+    // A notification left on screen by an earlier suite makes VS Code pause browser views; a tab opened
+    // then keeps its 1024×768 placeholder size, which is not the "normal" size this suite compares with.
+    await a.ok('debug_vscode_command', { command: 'notifications.clearAll' });
     await a.ok('browser_open', { url: server.url('/') });
     const before = await settledReport(a);
     const scheme = before.dark ? 'light' : 'dark';

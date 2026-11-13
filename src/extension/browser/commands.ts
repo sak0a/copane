@@ -27,7 +27,7 @@ export function registerBrowserCommands(services: BridgeServices, browser: Brows
     if (arg === undefined && active && filter(browser.getTab(active)!)) return active;
     const tabs = browser.listTabs().filter(filter);
     if (tabs.length === 0) {
-      void vscode.window.showInformationMessage('There is no browser tab for that.');
+      vscode.window.setStatusBarMessage('There is no browser tab for that.', 5000);
       return undefined;
     }
     const picked = await vscode.window.showQuickPick(
@@ -69,7 +69,7 @@ export function registerBrowserCommands(services: BridgeServices, browser: Brows
       if (!sessionId) {
         const live = sessions.list();
         if (live.length === 0) {
-          void vscode.window.showInformationMessage('No agent session is connected to this window.');
+          vscode.window.setStatusBarMessage('No agent session is connected to this window.', 5000);
           return;
         }
         const picked = await vscode.window.showQuickPick(
@@ -82,7 +82,7 @@ export function registerBrowserCommands(services: BridgeServices, browser: Brows
     }),
     vscode.commands.registerCommand('copane.browser.resetPermissions', () => {
       browser.resetConsent();
-      void vscode.window.showInformationMessage('Agent sessions will ask again before using your browser tabs.');
+      vscode.window.setStatusBarMessage('Agent sessions will ask again before using your browser tabs.', 5000);
     }),
   );
 }

@@ -106,7 +106,8 @@ export class RequestRoutes implements FetchClient, vscode.Disposable {
     for (const r of removed) {
       this.interception.note(r.tabId, `The user removed your request rules on ${r.tabId} (${removed.filter(o => o.tabId === r.tabId && o.sessionId === r.sessionId).map(o => o.id).join(', ')}); its requests go to the network normally again.`, { to: r.sessionId, topic: `rules-removed\u0000${r.tabId}` });
     }
-    void vscode.window.showInformationMessage(removed.length ? `Removed ${removed.length} request rule${removed.length === 1 ? '' : 's'}${tabId ? ` from ${tabId}` : ''}.` : 'No request rules were active.');
+    // A status bar message, not a notification: VS Code pauses a browser view while a notification covers it.
+    vscode.window.setStatusBarMessage(removed.length ? `Removed ${removed.length} request rule${removed.length === 1 ? '' : 's'}${tabId ? ` from ${tabId}` : ''}.` : 'No request rules were active.', 6000);
     return removed.length;
   }
 
