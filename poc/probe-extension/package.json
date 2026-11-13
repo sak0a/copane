@@ -1,0 +1,11 @@
+{
+  "name": "vsc-probe",
+  "displayName": "VS Code Browser/Terminal Feasibility Probe",
+  "publisher": "local",
+  "version": "0.0.1",
+  "engines": { "vscode": "^1.112.0" },
+  "enabledApiProposals": ["browser"],
+  "extensionKind": ["ui"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./extension.js"
+}
