@@ -57,6 +57,8 @@ if (!existsSync(settingsFile)) {
         'window.restoreWindows': 'none',
         // Native macOS sheets cannot be seen or answered through scripts/ui.mjs; custom dialogs are in the DOM.
         'window.dialogStyle': 'custom',
+        // No Copilot sign-in dialog on first start (it covers the window in screenshots), no chat panel.
+        'chat.disableAIFeatures': true,
       },
       null,
       2,

@@ -34,8 +34,11 @@ const workbench = () =>
     };
   })()`);
 
+// Unique per run: the browser service persists tab ownership per session key, so a reused key
+// would resume with the tabs of an earlier run.
+const ALPHA = `ui-e2e-alpha-${Date.now()}`;
 const pages = await startPageServer();
-const user = await agent({ session: 'ui-e2e-user' });
+const user = await agent({ session: `ui-e2e-user-${Date.now()}` });
 const state = async () => JSON.parse(await user.ok('debug_ui_state'));
 const command = (name, ...args) => user.ok('debug_vscode_command', { command: name, args });
 const row = (s, id) => s.rows.find(r => r.id === id);
@@ -46,16 +49,16 @@ let tabId;
 
 test('a connecting session appears in the view and in the status bar', async () => {
   await command('workbench.view.extension.agentBridge');
-  alpha = await agent({ session: 'ui-e2e-alpha' });
+  alpha = await agent({ session: ALPHA });
   await alpha.ok('session_set_title', { title: 'ui e2e alpha' });
   alphaLabel = JSON.parse(await alpha.ok('session_info')).you.label;
 
   const s = await until(async () => {
     const s = await state();
-    return row(s, 'session:ui-e2e-alpha#empty')?.description === 'ui e2e alpha' && s;
+    return row(s, `session:${ALPHA}#empty`)?.description === 'ui e2e alpha' && s;
   }, 'the session row');
-  assert.equal(row(s, 'session:ui-e2e-alpha#empty').label, alphaLabel);
-  assert.equal(row(s, 'session:ui-e2e-alpha#empty').icon.id, 'circle-filled');
+  assert.equal(row(s, `session:${ALPHA}#empty`).label, alphaLabel);
+  assert.equal(row(s, `session:${ALPHA}#empty`).icon.id, 'circle-filled');
   assert.match(s.status.shown.text, /^\$\(robot\) \d+$/);
   assert.equal(s.badge, null);
 
@@ -74,12 +77,12 @@ test('a tab the agent opens is listed under it as controlling', async () => {
 
   const s = await until(async () => {
     const s = await state();
-    return row(s, `session:ui-e2e-alpha/tab:${tabId}`)?.description?.startsWith('controlling') && s;
+    return row(s, `session:${ALPHA}/tab:${tabId}`)?.description?.startsWith('controlling') && s;
   }, 'the controlling tab row');
-  const tab = row(s, `session:ui-e2e-alpha/tab:${tabId}`);
+  const tab = row(s, `session:${ALPHA}/tab:${tabId}`);
   assert.equal(tab.label, 'UI Checkout');
   assert.equal(tab.icon.id, 'globe');
-  assert.equal(tab.icon.color, row(s, 'session:ui-e2e-alpha').icon.color, 'the tab row uses the session color');
+  assert.equal(tab.icon.color, row(s, `session:${ALPHA}`).icon.color, 'the tab row uses the session color');
   assert.match(tab.contextValue, /\breleasable\b/);
 
   await until(async () => (await workbench()).rows?.some(r => r.startsWith('Browser tab UI Checkout, controlling')), 'the tab row in the workbench');
@@ -89,9 +92,9 @@ test('pausing the tab as the user shows it, counts it and blocks the agent; resu
   await command('agentBridge.ui.pauseTab', tabId);
   const s = await until(async () => {
     const s = await state();
-    return row(s, `session:ui-e2e-alpha/tab:${tabId}`)?.description?.startsWith('paused by you') && s;
+    return row(s, `session:${ALPHA}/tab:${tabId}`)?.description?.startsWith('paused by you') && s;
   }, 'the paused tab row');
-  assert.equal(row(s, `session:ui-e2e-alpha/tab:${tabId}`).icon.id, 'debug-pause');
+  assert.equal(row(s, `session:${ALPHA}/tab:${tabId}`).icon.id, 'debug-pause');
   assert.ok(s.badge.value >= 1);
   assert.ok(s.attention.some(a => a.kind === 'tab' && a.targetId === tabId));
   assert.match(s.status.shown.text, /\$\(debug-pause\) \d+/);
@@ -109,13 +112,13 @@ test('pausing the tab as the user shows it, counts it and blocks the agent; resu
   await command('agentBridge.ui.resumeTab', tabId);
   await until(async () => {
     const s = await state();
-    return !row(s, `session:ui-e2e-alpha/tab:${tabId}`).description.startsWith('paused') && !s.attention.some(a => a.targetId === tabId);
+    return !row(s, `session:${ALPHA}/tab:${tabId}`).description.startsWith('paused') && !s.attention.some(a => a.targetId === tabId);
   }, 'the tab to be resumed');
 });
 
 test('a terminal waiting for the user turns the status bar into a warning until it is handled', async () => {
   await user.ok('debug_ui_fixtures', {
-    terminals: [{ id: 'fx-e2e', name: 'deploy', ownedBy: 'ui-e2e-alpha', state: 'waiting-for-user', currentCommand: 'npm login', userInputRequest: 'Log in to npm' }],
+    terminals: [{ id: 'fx-e2e', name: 'deploy', ownedBy: ALPHA, state: 'waiting-for-user', currentCommand: 'npm login', userInputRequest: 'Log in to npm' }],
   });
   const s = await until(async () => {
     const s = await state();
@@ -123,8 +126,8 @@ test('a terminal waiting for the user turns the status bar into a warning until 
   }, 'the warning status');
   assert.equal(s.status.shown.text, `$(bell-dot) ${alphaLabel} needs you`);
   assert.equal(s.status.shown.backgroundColor, 'statusBarItem.warningBackground');
-  assert.equal(row(s, 'session:ui-e2e-alpha').description, 'ui e2e alpha · needs you');
-  assert.equal(row(s, 'session:ui-e2e-alpha/terminal:fx-e2e').description, 'waiting for you: Log in to npm');
+  assert.equal(row(s, `session:${ALPHA}`).description, 'ui e2e alpha · needs you');
+  assert.equal(row(s, `session:${ALPHA}/terminal:fx-e2e`).description, 'waiting for you: Log in to npm');
 
   const w = await until(async () => {
     const w = await workbench();
@@ -137,24 +140,25 @@ test('a terminal waiting for the user turns the status bar into a warning until 
     const s = await state();
     return !s.status.warning && s;
   }, 'the warning to clear');
-  assert.equal(row(after, 'session:ui-e2e-alpha/terminal:fx-e2e').description, 'idle · exit 130');
+  assert.equal(row(after, `session:${ALPHA}/terminal:fx-e2e`).description, 'idle · exit 130');
   await user.ok('debug_ui_fixtures', { terminals: [] });
 });
 
 test('ending the session asks first, then removes it and releases its tab', async () => {
   await user.ok('debug_ui_fixtures', { terminals: [] });
   await user.ok('debug_answer_prompts', { answers: ['End Session'], clear: true });
-  await command('agentBridge.ui.endSession', 'ui-e2e-alpha');
+  await command('agentBridge.ui.endSession', ALPHA);
   const prompts = JSON.parse(await user.ok('debug_answer_prompts', {})).shown;
   const prompt = prompts.at(-1);
   assert.equal(prompt.message, `End ${alphaLabel} (ui e2e alpha)?`);
   assert.deepEqual(prompt.choices, ['End Session', 'End and Close Its Tabs']);
   assert.equal(prompt.answer, 'End Session');
 
-  await until(async () => !(await state()).rows.some(r => r.id.startsWith('session:ui-e2e-alpha')), 'the session to disappear');
+  await until(async () => !(await state()).rows.some(r => r.id.startsWith(`session:${ALPHA}`)), 'the session to disappear');
   await until(async () => !(await workbench()).rows?.some(r => r.startsWith(`${alphaLabel} agent session`)), 'the session row to disappear from the workbench');
   const tabs = await user.ok('browser_list_tabs');
-  const line = tabs.split('\n').find(l => l.startsWith(`${tabId} `));
+  // Lines look like "  tab-3  <url> ..." or "* tab-3  <url> ..." (the caller's current tab).
+  const line = tabs.split('\n').map(l => l.replace(/^[*\s]+/, '')).find(l => l.startsWith(`${tabId} `));
   assert.ok(line && !/controlled by/.test(line), `the tab is still controlled: ${line}`);
   await command('agentBridge.ui.closeTab', tabId);
   await until(async () => !(await user.ok('browser_list_tabs')).includes(`${tabId} `), 'the tab to close');
