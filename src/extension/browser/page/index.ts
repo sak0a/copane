@@ -5,6 +5,7 @@
 //
 // State kept here, never on the shared CdpPage: one PageState per tab (recorders, frames, dialog), and
 // per-session ref tables, read cursors and the last view of each page (for reporting changes).
+import type { Event } from '../../core/events';
 import type { BridgeServices } from '../../core/services';
 import type { ToolContext } from '../../core/tools';
 import { actionTools } from './actionTools';
@@ -22,12 +23,22 @@ import { scriptTools } from './scriptTools';
 import { snapshotTools } from './snapshotTools';
 import { waitTools } from './waitTools';
 
+/** Sources of per-tab information from the rest of the browser module (request interception). */
+export interface PageToolExtras {
+  interception?: {
+    /** A sentence for the agent driving the tab, shown with its next action result. */
+    readonly onDidNote: Event<{ tabId: string; text: string; topic?: string; to?: string }>;
+    /** A request was answered by the bridge (mocked, delayed, ...): marked in the network log. */
+    readonly onDidIntercept: Event<{ tabId: string; networkId: string; note: string }>;
+  };
+}
+
 export interface PageHooks {
   /** Waits for a tab just opened on `url` to load, and describes it (see describeOpened). */
   describeOpened(ctx: ToolContext, tabId: string, url: string): Promise<string>;
 }
 
-export function registerPageTools(services: BridgeServices, host: TabInfoHost): PageHooks {
+export function registerPageTools(services: BridgeServices, host: TabInfoHost, extras: PageToolExtras = {}): PageHooks {
   const { browser, context } = services;
   const env: PageEnv = { services, states: new PageStates(services.log), refs: new RefStore(), cursors: new Map(), baselines: new Map() };
   // Downloads and device emulation (downloads.ts, emulation.ts) hook into page tool calls.
@@ -35,6 +46,12 @@ export function registerPageTools(services: BridgeServices, host: TabInfoHost): 
   const emulation = new EmulationManager(services, host);
   env.hooks = [downloads, emulation];
   context.subscriptions.push(downloads, emulation);
+  if (extras.interception) {
+    context.subscriptions.push(
+      extras.interception.onDidNote(({ tabId, text, topic, to }) => env.states.get(tabId)?.addNote(text, { topic, to })),
+      extras.interception.onDidIntercept(({ tabId, networkId, note }) => env.states.get(tabId)?.network.annotate(networkId, note)),
+    );
+  }
 
   // Recording starts as soon as a tab's CDP connection exists.
   context.subscriptions.push(

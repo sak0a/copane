@@ -88,6 +88,8 @@ export async function describeEffects(call: PageCall, mark: ActionMark): Promise
     }
   }
 
+  lines.push(...state.notesFor(call.ctx.session.id, mark.seq));
+
   // After a navigation, only what the new document logged and requested counts: messages and failed
   // requests of the page being left (aborted fetches, unload errors) say nothing about the new one.
   const committed = [...navs].reverse().find(n => !n.sameDocument && n.loaderId === state.loaderId);
@@ -102,7 +104,7 @@ export async function describeEffects(call: PageCall, mark: ActionMark): Promise
   const failures = state.network.entries
     .after(mark.seq)
     .filter(e => isFailure(e) && !(e.loaderId && e.requestId === e.loaderId && e.status !== undefined) && !(committed && e.loaderId !== undefined && e.loaderId !== state.loaderId));
-  for (const f of failures.slice(0, 3)) lines.push(`Request failed: ${f.method} ${clip(f.url, 200)} → ${f.failed ?? `HTTP ${f.status}`} (${f.id}).`);
+  for (const f of failures.slice(0, 3)) lines.push(`Request failed: ${f.method} ${clip(f.url, 200)} → ${f.failed ?? `HTTP ${f.status}`} (${f.id}${f.intercepted ? `, ${f.intercepted}` : ''}).`);
   if (failures.length > 3) lines.push(`${failures.length - 3} more requests failed (browser_network_requests with status "failed").`);
 
   const hooks = (call.env.hooks ?? []).filter(h => h.effectLines);

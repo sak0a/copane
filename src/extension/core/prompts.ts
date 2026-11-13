@@ -24,8 +24,29 @@ export interface UserPrompt {
   autoClose?: boolean;
 }
 
+/** A text field the user types into, e.g. a user name, or a password with `password: true`. */
+export interface InputPrompt {
+  /** Title of the input box, naming who asks and for what, e.g. 'Login for intranet.corp (realm "Staff")'. */
+  title: string;
+  /** What to type, shown below the field, e.g. "User name". */
+  prompt: string;
+  /** Pre-filled text. */
+  value?: string;
+  placeholder?: string;
+  /** Mask what is typed. The answer is never written to logs or the prompt history. */
+  password?: boolean;
+  /** Resolves undefined when aborted, and closes the input box. */
+  signal?: AbortSignal;
+}
+
 export interface PromptService {
   ask(prompt: UserPrompt): Promise<string | undefined>;
+  /**
+   * Asks the user to type something. Resolves undefined when they cancel. It takes keyboard focus, so
+   * only call it right after the user chose to answer (e.g. a button in an `ask` prompt), never out of
+   * the blue: keys meant for the editor would land in it. Optional so other implementations stay valid.
+   */
+  input?(prompt: InputPrompt): Promise<string | undefined>;
 }
 
 const ANSWER_COMMAND = 'copane.answerPrompt';
@@ -33,8 +54,8 @@ const ANSWER_COMMAND = 'copane.answerPrompt';
 export class VscodePrompts implements PromptService {
   /** Answers queued by the `debug_answer_prompts` tool (development only), used before asking the user. */
   readonly queuedAnswers: Array<string | null> = [];
-  /** Prompts shown so far, newest last, for tests to inspect. */
-  readonly history: Array<{ message: string; choices: string[]; answer: string | undefined }> = [];
+  /** Prompts shown so far, newest last, for tests to inspect. Input prompts have `input` set; a password answer is recorded as "(hidden)". */
+  readonly history: Array<{ message: string; choices: string[]; answer: string | undefined; input?: { prompt: string; value?: string; password: boolean } }> = [];
 
   private nextId = 1;
   /** Dismissable prompts that are on screen, by id. */
@@ -47,6 +68,37 @@ export class VscodePrompts implements PromptService {
     this.history.push({ message: prompt.message, choices: prompt.choices, answer });
     if (this.history.length > 50) this.history.shift();
     return answer;
+  }
+
+  async input(prompt: InputPrompt): Promise<string | undefined> {
+    const answer = await this.resolveInput(prompt);
+    const recorded = prompt.password && answer !== undefined ? '(hidden)' : answer;
+    this.history.push({ message: prompt.title, choices: [], answer: recorded, input: { prompt: prompt.prompt, value: prompt.value, password: Boolean(prompt.password) } });
+    if (this.history.length > 50) this.history.shift();
+    return answer;
+  }
+
+  private async resolveInput(prompt: InputPrompt): Promise<string | undefined> {
+    if (this.queuedAnswers.length > 0) {
+      const queued = this.queuedAnswers.shift() ?? undefined;
+      this.log.info(`input "${prompt.title}: ${prompt.prompt}" answered automatically${prompt.password ? '' : `: ${queued ?? '(dismissed)'}`}`);
+      return queued;
+    }
+    const signal = prompt.signal;
+    if (signal?.aborted) return undefined;
+    const cancel = new vscode.CancellationTokenSource();
+    const onAbort = () => cancel.cancel();
+    signal?.addEventListener('abort', onAbort, { once: true });
+    try {
+      const answer = await vscode.window.showInputBox(
+        { title: prompt.title, prompt: prompt.prompt, value: prompt.value, placeHolder: prompt.placeholder, password: prompt.password ?? false, ignoreFocusOut: true },
+        cancel.token,
+      );
+      return signal?.aborted ? undefined : answer;
+    } finally {
+      signal?.removeEventListener('abort', onAbort);
+      cancel.dispose();
+    }
   }
 
   private async resolve(prompt: UserPrompt): Promise<string | undefined> {

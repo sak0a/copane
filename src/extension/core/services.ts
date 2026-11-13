@@ -79,6 +79,11 @@ export interface BrowserTabInfo {
     /** Where the file was saved (state "saved"). */
     path?: string;
   }>;
+  /**
+   * Request-mocking rules (browser_route) active in this tab, per session that set them; absent when
+   * none. While present, some of the tab's requests get canned responses, errors or delays.
+   */
+  requestRules?: Array<{ sessionId: string; rules: number }>;
 }
 
 /** A CDP connection to one tab's page target. Shared by all sessions that use the tab. */

@@ -40,6 +40,17 @@
       "shortTitle": "End Emulation",
       "category": "Copane",
       "icon": "$(device-mobile)"
+    },
+    {
+      "command": "copane.browser.forgetLogins",
+      "title": "Forget Saved Browser Logins",
+      "category": "Copane"
+    },
+    {
+      "command": "copane.browser.removeRequestRules",
+      "title": "Remove Agent Request Mocks from Browser Tab",
+      "shortTitle": "Remove Request Mocks",
+      "category": "Copane"
     }
   ],
   "menus": {
@@ -131,6 +142,11 @@
         "default": "",
         "scope": "machine",
         "markdownDescription": "Where files that agent sessions download are saved. Empty: a `Copane` folder in your Downloads folder. `~/...` is relative to your home folder, a relative path to the first workspace folder. A file never replaces an existing one: it gets a name like `report (1).csv`. In a remote window (WSL, SSH) this is not used: the browser runs on your computer and VS Code asks you where to save."
+      },
+      "copane.browser.loginPrompts": {
+        "type": "boolean",
+        "default": true,
+        "markdownDescription": "When a site or proxy asks for a login (HTTP authentication: Basic, Digest, NTLM) in a browser tab an agent session is driving, ask you for it in VS Code instead of letting the page fail. The agent never sees what you type. Logins are remembered until the window closes, or saved in VS Code's secret storage if you choose **Log In and Remember**; **Copane: Forget Saved Browser Logins** removes them. While a session drives a tab, every request of that tab passes through the bridge."
       }
     }
   }

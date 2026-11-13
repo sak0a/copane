@@ -3,7 +3,7 @@
 // own user-data dir, extensions dir and bridge home, so the user's real VS Code, settings and agent
 // configuration are never touched, and several dev hosts (one per --name) can run side by side.
 //
-//   node scripts/dev-host.mjs --name <name> [--folder <dir>] [--no-build] [--no-proposed] [--no-ui-port] [--foreground]
+//   node scripts/dev-host.mjs --name <name> [--folder <dir>] [--no-build] [--no-proposed] [--no-ui-port] [--foreground] [--test-proxy]
 //   node scripts/dev-host.mjs --name <name> --stop
 //
 // --folder may be repeated to open several windows. On macOS the windows open in the background
@@ -68,6 +68,24 @@ if (!existsSync(settingsFile)) {
 
 const folders = values('folder').length ? values('folder') : [dirs.workspace];
 
+// --test-proxy: requests to hosts under ".proxy.test" (a name that exists nowhere) go through a proxy
+// on 127.0.0.1:<port in <base>/test-proxy-port>, which the auth e2e test starts. A PAC script passed
+// to this VS Code only; every other request goes direct, and the machine's proxy settings are untouched.
+const testProxyFile = join(base, 'test-proxy-port');
+rmSync(testProxyFile, { force: true });
+const testProxyArgs = [];
+if (flag('test-proxy')) {
+  const port = await new Promise(resolve => {
+    const probe = createServer().listen(0, '127.0.0.1', () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+  writeFileSync(testProxyFile, String(port));
+  const pac = `function FindProxyForURL(url, host) { return dnsDomainIs(host, ".proxy.test") ? "PROXY 127.0.0.1:${port}" : "DIRECT"; }`;
+  testProxyArgs.push(`--proxy-pac-url=data:application/x-ns-proxy-autoconfig;base64,${Buffer.from(pac).toString('base64')}`);
+}
+
 // A Chrome DevTools port on the workbench itself, so its UI can be inspected without desktop automation.
 const uiPortFile = join(base, 'ui-port');
 rmSync(uiPortFile, { force: true });
@@ -122,6 +140,7 @@ for (const folder of folders) {
     // window, and UI that appears on a frame (notification toasts) never reaches the DOM the tests read.
     '--disable-backgrounding-occluded-windows',
     '--disable-renderer-backgrounding',
+    ...testProxyArgs,
     '--new-window',
     folder,
   ];

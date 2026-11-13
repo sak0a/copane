@@ -27,7 +27,7 @@ export function activateDebugTools(services: BridgeServices, prompts: VscodeProm
       defineTool({
         name: 'debug_answer_prompts',
         description:
-          'Development only. Queues answers for the next prompts the extension would show the user (consent, hand-off), in order. Each answer is the exact button label, or null to dismiss. Also returns the prompts shown so far.',
+          'Development only. Queues answers for the next prompts the extension would show the user (consent, hand-off, login), in order. Each answer is the exact button label, or for an input prompt the text to type; null dismisses. Also returns the prompts shown so far (typed passwords are shown as "(hidden)").',
         input: {
           answers: z.array(z.string().nullable()).optional().describe('Answers to queue. Omit to only read the history.'),
           clear: z.boolean().optional().describe('Drop answers that are still queued first.'),

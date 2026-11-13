@@ -90,6 +90,9 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
   /** Resolves once tabs restored after a window reload have their old ids back. */
   readonly ready: Promise<void>;
 
+  private readonly tabInfoProviders: Array<(tabId: string) => Partial<BrowserTabInfo>> = [];
+  private readonly releaseHooks: Array<(sessionId: string, tabIds: string[]) => string | undefined> = [];
+
   /** Set by the certificate gate (see `BrowserService.certificateRefusal`). */
   certificateRefusal: ((url: string) => string | undefined) | undefined;
   /** Features that add fields to a tab's info (downloads, emulation); see `addTabInfoProvider`. */
@@ -266,6 +269,36 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
   }
 
   // ------------------------------------------------------------------ Used by the tools and commands of this module
+
+  /** Lets another part of this module add fields to every BrowserTabInfo. Call `notifyChanged` when they change. */
+  addTabInfo(provider: (tabId: string) => Partial<BrowserTabInfo>): vscode.Disposable {
+    this.tabInfoProviders.push(provider);
+    return { dispose: () => removeItem(this.tabInfoProviders, provider) };
+  }
+
+  /** Fires onDidChange for state kept outside this class (see `addTabInfo`). */
+  notifyChanged(): void {
+    this.changeEmitter.fire();
+  }
+
+  /** Runs when a session releases tabs with browser_release_tab (whether or not its lease was still held). Returns a sentence for the agent, if any. */
+  addReleaseHook(hook: (sessionId: string, tabIds: string[]) => string | undefined): vscode.Disposable {
+    this.releaseHooks.push(hook);
+    return { dispose: () => removeItem(this.releaseHooks, hook) };
+  }
+
+  runReleaseHooks(sessionId: string, tabIds: string[]): string[] {
+    const out: string[] = [];
+    for (const hook of this.releaseHooks) {
+      try {
+        const line = hook(sessionId, tabIds);
+        if (line) out.push(line);
+      } catch (err) {
+        this.log.warn(`release hook failed: ${errorText(err)}`);
+      }
+    }
+    return out;
+  }
 
   /** Forget everything the user allowed or denied, for every tab and session. */
   resetConsent(): void {
@@ -752,6 +785,7 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
       paused: record.paused,
       viewId: record.viewId,
       openerTab: record.openerTab,
+      ...Object.assign({}, ...this.tabInfoProviders.map(provide => provide(record.id))),
     };
   }
 
@@ -802,6 +836,11 @@ function hostOf(url: string): string {
   } catch {
     return url;
   }
+}
+
+function removeItem<T>(list: T[], item: T): void {
+  const i = list.indexOf(item);
+  if (i >= 0) list.splice(i, 1);
 }
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));

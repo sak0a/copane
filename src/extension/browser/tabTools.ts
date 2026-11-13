@@ -15,6 +15,7 @@ export function formatTab(tab: BrowserTabInfo, services: BridgeServices, viewer:
     tab.controlledBy ? `controlled by ${label(tab.controlledBy)}` : undefined,
     tab.active ? 'in front' : undefined,
     tab.paused ? 'PAUSED by the user' : undefined,
+    ...(tab.requestRules ?? []).map(r => `${r.rules} request rule${r.rules === 1 ? '' : 's'} by ${label(r.sessionId) ?? 'an ended session'} (browser_route)`),
   ].filter(Boolean);
   return `${tab.id}  ${tab.url}  "${tab.title}"  (${notes.join(', ')})`;
 }
@@ -115,13 +116,15 @@ export function registerTabTools(services: BridgeServices, browser: BrowserServi
           await requireBrowser();
           if (args.all) {
             const released = services.tabLeases.releaseAllOf(ctx.session.id);
-            return released.length ? `Released ${released.join(', ')}.` : 'You did not control any tab.';
+            const extra = browser.runReleaseHooks(ctx.session.id, browser.listTabs().map(t => t.id));
+            return [released.length ? `Released ${released.join(', ')}.` : 'You did not control any tab.', ...extra].join(' ');
           }
           const id = browser.resolveId(ctx.session, args.tab);
           const holder = services.tabLeases.holder(id);
-          if (holder?.sessionId !== ctx.session.id) return `You did not control ${id}; nothing to release.`;
+          const extra = browser.runReleaseHooks(ctx.session.id, [id]);
+          if (holder?.sessionId !== ctx.session.id) return [`You did not control ${id}; nothing to release.`, ...extra].join(' ');
           browser.releaseTab(id, ctx.session.id);
-          return `Released ${id}.`;
+          return [`Released ${id}.`, ...extra].join(' ');
         },
       }),
       defineTool({
