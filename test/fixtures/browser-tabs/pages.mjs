@@ -49,9 +49,11 @@ export async function openPage(hostDir, url) {
     visit(root, false);
     const texts = [];
     let button;
+    let labelNode;
     const collect = node => {
       if (node.nodeType === 3 && node.nodeValue.trim()) texts.push(node.nodeValue.trim());
       if (node.nodeName === 'BUTTON') button ??= node;
+      if (node.nodeName === 'SPAN' && (node.attributes ?? []).includes('label')) labelNode ??= node;
       for (const child of [...(node.children ?? []), ...(node.shadowRoots ?? [])]) collect(child);
     };
     for (const host of hosts) collect(host);
@@ -65,14 +67,33 @@ export async function openPage(hostDir, url) {
         // Not laid out (yet, or any more): no position to click.
       }
     }
+    let labelCenter;
+    if (labelNode) {
+      try {
+        const { model } = await send('DOM.getBoxModel', { backendNodeId: labelNode.backendNodeId });
+        const q = model.border;
+        labelCenter = { x: (q[0] + q[4]) / 2, y: (q[1] + q[5]) / 2 };
+      } catch {
+        // Not laid out.
+      }
+    }
     // Text minus the stylesheet (a <style> fallback would show up as text).
-    return { count: hosts.length, text: texts.filter(t => !t.includes('{')).join(' '), buttonCenter };
+    return { count: hosts.length, text: texts.filter(t => !t.includes('{')).join(' '), buttonCenter, labelCenter };
   }
 
   return {
     send,
     indicator,
     /** A real (trusted) mouse click, as the user's. */
+    /** A real mouse drag, as the user would do it. */
+    async drag(fromX, fromY, toX, toY) {
+      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: fromX, y: fromY });
+      await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: fromX, y: fromY, button: 'left', clickCount: 1 });
+      for (let i = 1; i <= 8; i++) {
+        await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: fromX + ((toX - fromX) * i) / 8, y: fromY + ((toY - fromY) * i) / 8, button: 'left', buttons: 1 });
+      }
+      await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: toX, y: toY, button: 'left', clickCount: 1 });
+    },
     async click(x, y) {
       await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
       await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });

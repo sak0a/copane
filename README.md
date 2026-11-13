@@ -68,6 +68,16 @@ Tools appear in Claude Code as `mcp__vscode__<name>`.
 | Debugging a page | `browser_console_messages`, `browser_network_requests`, `browser_network_request` |
 | Terminals | `terminal_run`, `terminal_read`, `terminal_wait`, `terminal_send`, `terminal_interrupt`, `terminal_request_user_input` (hand a login or prompt to the user), `terminal_create`, `terminal_list`, `terminal_close` |
 
+The session indicator in a page can be dragged to any corner; it stays there for that tab and new
+tabs start in the corner you last chose.
+
+**Certificate errors.** When an agent opens a site whose certificate the system does not trust
+(self-signed, or issued by a company authority), you are asked once per host: *Proceed*, *Always
+Trust <host>*, or *Cancel*. *Always Trust* adds the host to
+`agentBridge.browser.trustedCertificateHosts`, which you can also fill yourself, e.g.
+`["localhost", "*.corp.example"]`. Set `agentBridge.browser.certificateErrors` to `block` to never
+proceed for agents. This applies only to tabs an agent session is driving.
+
 Known limits: content of cross-origin iframes is not in snapshots (use a screenshot and click by
 coordinates); JavaScript `prompt()` is not available in VS Code's browser; without shell integration
 a terminal command's exit code is unknown.

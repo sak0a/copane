@@ -91,6 +91,11 @@ export interface BrowserService {
   releaseTab(tabId: string, sessionId?: string): void;
   /** User takeover: while paused, agents cannot act on the tab. */
   setPaused(tabId: string, paused: boolean): void;
+  /**
+   * Why a URL's certificate error was not accepted just now (the user said no, did not answer, or the
+   * setting forbids it), or undefined when no certificate error was refused for its host recently.
+   */
+  certificateRefusal?(url: string): string | undefined;
   /** Fires once per new tab, after it is attributed (agent tab, popup of an agent tab, or user tab). */
   readonly onDidOpenTab?: Event<BrowserTabInfo>;
   /** The user shares one of their tabs with a session (as if they had answered "Allow"). */

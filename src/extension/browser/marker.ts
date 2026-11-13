@@ -29,7 +29,14 @@ export interface MarkerState {
   paused: boolean;
 }
 
+/** Where the pill sits. The user drags it; the choice is kept for the tab and used for new tabs. */
+export type MarkerCorner = 'br' | 'bl' | 'tr' | 'tl';
+
+let preferredCorner: MarkerCorner = 'br';
+
 export type MarkerAction = 'pause' | 'resume';
+
+const CORNERS: readonly MarkerCorner[] = ['br', 'bl', 'tl', 'tr'];
 
 /** The CDP surface the marker needs; `CdpPage` satisfies it. */
 export interface MarkerPage {
@@ -69,9 +76,14 @@ function pageScript(BINDING: string, ATTRIBUTE: string): void {
       background: rgba(30, 30, 32, .92); color: #f3f3f3; font: 500 12px/18px system-ui, -apple-system, "Segoe UI", sans-serif;
       letter-spacing: normal; text-align: left; box-shadow: 0 2px 10px rgba(0, 0, 0, .28); pointer-events: auto; user-select: none;
       cursor: default; transition: opacity .12s; direction: ltr; }
-    .left .pill { right: auto; left: 10px; }
+    .bl .pill { right: auto; left: 10px; }
+    .tr .pill { bottom: auto; top: 10px; }
+    .tl .pill { right: auto; left: 10px; bottom: auto; top: 10px; }
+    .pill { touch-action: none; }
+    .dragging .pill { transition: none; cursor: grabbing; box-shadow: 0 6px 18px rgba(0, 0, 0, .4); }
+    .dragging .label { cursor: grabbing; }
     .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
-    .label { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: pointer; }
+    .label { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: grab; }
     button { all: unset; flex: none; cursor: pointer; padding: 0 8px; border-radius: 999px; background: rgba(255, 255, 255, .14);
       font: inherit; color: inherit; line-height: 18px; }
     button:hover { background: rgba(255, 255, 255, .28); }
@@ -80,13 +92,15 @@ function pageScript(BINDING: string, ATTRIBUTE: string): void {
     .paused .frame { display: none; }
     .paused .dot { background: transparent; border: 2px solid var(--c); width: 4px; height: 8px; border-radius: 0; border-top: 0; border-bottom: 0; }
   `;
-  let state: { label: string; color: string; paused: boolean } | null = null;
+  let state: { label: string; color: string; paused: boolean; corner?: string } | null = null;
   let host: HTMLElement | undefined;
   let root: HTMLElement | undefined;
   let label: HTMLElement | undefined;
   let button: HTMLElement | undefined;
   let passiveTimer: any;
-  let left = false;
+  let corner = 'br';
+  let pill: HTMLElement | undefined;
+  let drag: { id: number; x: number; y: number; moved: boolean } | undefined;
   let reattachBudget = 50;
   let budgetTimer: any;
 
@@ -118,31 +132,70 @@ function pageScript(BINDING: string, ATTRIBUTE: string): void {
     root.className = 'root';
     const frame = document.createElement('div');
     frame.className = 'frame';
-    const pill = document.createElement('div');
+    pill = document.createElement('div');
     pill.className = 'pill';
     pill.setAttribute('role', 'status');
     const dot = document.createElement('span');
     dot.className = 'dot';
     label = document.createElement('span');
     label.className = 'label';
-    label.title = 'Move to the other corner';
+    label.title = 'Drag to another corner';
     button = document.createElement('button');
     button.setAttribute('type', 'button');
     pill.append(dot, label, button);
     root.append(frame, pill);
     shadow.appendChild(root);
-    label.addEventListener('click', (event: any) => {
-      if (!event.isTrusted) return;
-      left = !left;
-      render();
+    // Drag the pill to any corner; it snaps to the nearest one when released.
+    const setCorner = (next: string) => {
+      if (next === corner) return;
+      corner = next;
+      if (state) state.corner = next; // Otherwise the next render would restore the corner the extension last sent.
+      send({ type: 'corner', corner });
+    };
+    pill.addEventListener('pointerdown', (event: any) => {
+      if (!event.isTrusted || event.button !== 0 || event.target === button) return;
+      drag = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false };
+      try {
+        pill!.setPointerCapture(event.pointerId);
+      } catch {
+        // Capture is a convenience; the drag still works while the pointer stays over the pill.
+      }
+      event.preventDefault();
     });
+    pill.addEventListener('pointermove', (event: any) => {
+      if (!drag || event.pointerId !== drag.id) return;
+      const dx = event.clientX - drag.x;
+      const dy = event.clientY - drag.y;
+      if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+      drag.moved = true;
+      root!.classList.add('dragging');
+      pill!.style.transform = `translate(${dx}px, ${dy}px)`;
+    });
+    const endDrag = (event: any) => {
+      if (!drag || event.pointerId !== drag.id) return;
+      const moved = drag.moved;
+      drag = undefined;
+      pill!.style.transform = '';
+      if (moved) {
+        const vertical = event.clientY < window.innerHeight / 2 ? 't' : 'b';
+        const horizontal = event.clientX < window.innerWidth / 2 ? 'l' : 'r';
+        setCorner(vertical + horizontal);
+      } else if (event.type === 'pointerup') {
+        // A plain click moves it one corner on, for when dragging is awkward.
+        const order = ['br', 'bl', 'tl', 'tr'];
+        setCorner(order[(order.indexOf(corner) + 1) % order.length]!);
+      }
+      render();
+    };
+    pill.addEventListener('pointerup', endDrag);
+    pill.addEventListener('pointercancel', endDrag);
     button.addEventListener('click', (event: any) => {
       if (!event.isTrusted || !state) return;
       event.stopPropagation();
       send({ type: state.paused ? 'resume' : 'pause' });
     });
     // Keep page handlers from seeing interaction with the indicator.
-    for (const type of ['click', 'mousedown', 'mouseup', 'pointerdown', 'pointerup', 'keydown', 'keyup']) {
+    for (const type of ['click', 'mousedown', 'mouseup', 'mousemove', 'pointerdown', 'pointerup', 'pointermove', 'keydown', 'keyup']) {
       pill.addEventListener(type, (event: any) => event.stopPropagation());
     }
   }
@@ -179,7 +232,8 @@ function pageScript(BINDING: string, ATTRIBUTE: string): void {
     }
     if (!host) build();
     root!.style.setProperty('--c', state.color);
-    root!.className = `root${state.paused ? ' paused' : ''}${left ? ' left' : ''}${passiveTimer ? ' passive' : ''}`;
+    if (!drag && state.corner) corner = state.corner;
+    root!.className = `root ${corner}${state.paused ? ' paused' : ''}${passiveTimer ? ' passive' : ''}${drag?.moved ? ' dragging' : ''}`;
     label!.textContent = state.paused ? 'Agent access paused' : state.label;
     button!.textContent = state.paused ? 'Resume' : 'Take over';
     button!.title = state.paused ? `Let ${state.label} use this tab again` : `Pause ${state.label}: agents cannot use this tab until you resume`;
@@ -219,6 +273,7 @@ const PASSIVE_MS = 1500;
 export class PageMarker {
   private contextId: number | undefined;
   private state: MarkerState | null = null;
+  private corner: MarkerCorner = preferredCorner;
   private passiveUntil = 0;
   private installing: Promise<void> | undefined;
   private readonly subscriptions: Array<{ dispose(): void }> = [];
@@ -279,6 +334,12 @@ export class PageMarker {
         if (message?.type === 'hello') {
           this.contextId = params.executionContextId;
           if (this.state) void this.push();
+        } else if (message?.type === 'corner') {
+          const corner = (message as { corner?: string }).corner as MarkerCorner;
+          if (CORNERS.includes(corner)) {
+            this.corner = corner;
+            preferredCorner = corner; // New tabs start where the user last put it.
+          }
         } else if (message?.type === 'pause' || message?.type === 'resume') {
           this.onAction(message.type);
         }
@@ -308,7 +369,7 @@ export class PageMarker {
   private async push(): Promise<void> {
     if (this.disposed) return;
     if (this.installing) await this.installing;
-    await this.evaluate(`globalThis.__agentBridgeMarker?.set(${JSON.stringify(this.state)})`);
+    await this.evaluate(`globalThis.__agentBridgeMarker?.set(${JSON.stringify(this.state && { ...this.state, corner: this.corner })})`);
   }
 
   private async evaluate(expression: string, timeoutMs = 5000): Promise<void> {

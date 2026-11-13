@@ -332,6 +332,56 @@ test('pause from the page indicator refuses agents until the user resumes', asyn
   }
 });
 
+test('the indicator can be dragged to any corner, stays there across navigation, and new tabs follow', async () => {
+  const a = await agent({ session: `bt-drag-${Date.now()}` });
+  const url = fresh();
+  try {
+    await a.ok('browser_open', { url });
+    const page = await openPage(hostDir, url);
+    try {
+      const size = JSON.parse(await page.evaluate('JSON.stringify({ w: innerWidth, h: innerHeight })'));
+      const at = async () => (await until(async () => (await page.indicator()).labelCenter, 'the indicator label'));
+      const quadrant = p => `${p.y < size.h / 2 ? 't' : 'b'}${p.x < size.w / 2 ? 'l' : 'r'}`;
+      assert.equal(quadrant(await at()), 'br', 'starts bottom right');
+
+      for (const [corner, x, y] of [['tl', 40, 40], ['tr', size.w - 40, 40], ['bl', 40, size.h - 40]]) {
+        const from = await at();
+        await page.drag(from.x, from.y, x, y);
+        await until(async () => quadrant(await at()) === corner, `the indicator in corner ${corner}`);
+      }
+      // The drag did not reach the page underneath.
+      assert.equal(await page.evaluate("document.getElementById('clicks').textContent"), '0');
+
+      // Stays in its corner when the page is replaced.
+      await a.ok('browser_evaluate', { function: 'location.reload()' });
+      await sleep(800);
+    } finally {
+      page.close();
+    }
+    const reloaded = await openPage(hostDir, url);
+    try {
+      const size = JSON.parse(await reloaded.evaluate('JSON.stringify({ w: innerWidth, h: innerHeight })'));
+      const p = await until(async () => (await reloaded.indicator()).labelCenter, 'the indicator after reload');
+      assert.ok(p.x < size.w / 2 && p.y > size.h / 2, `after reload the indicator is at ${JSON.stringify(p)}, expected bottom left`);
+    } finally {
+      reloaded.close();
+    }
+    // A tab opened afterwards starts where the user last put it.
+    const second = fresh();
+    await a.ok('browser_open', { url: second });
+    const other = await openPage(hostDir, second);
+    try {
+      const size = JSON.parse(await other.evaluate('JSON.stringify({ w: innerWidth, h: innerHeight })'));
+      const p = await until(async () => (await other.indicator()).labelCenter, 'the indicator in the new tab');
+      assert.ok(p.x < size.w / 2 && p.y > size.h / 2, `the new tab's indicator is at ${JSON.stringify(p)}, expected bottom left`);
+    } finally {
+      other.close();
+    }
+  } finally {
+    await a.close();
+  }
+});
+
 test('attribution: agent tabs, user tabs and popups of a controlled page', async () => {
   const a = await agent({ session: 'bt-attr' });
   const b = await agent({ session: 'bt-attr-b' });

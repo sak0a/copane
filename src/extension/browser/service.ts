@@ -90,6 +90,9 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
   /** Resolves once tabs restored after a window reload have their old ids back. */
   readonly ready: Promise<void>;
 
+  /** Set by the certificate gate (see `BrowserService.certificateRefusal`). */
+  certificateRefusal: ((url: string) => string | undefined) | undefined;
+
   readonly onDidChange = this.changeEmitter.event;
   readonly onDidAttachPage = this.attachEmitter.event;
   readonly onDidOpenTab = this.openEmitter.event;

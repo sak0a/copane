@@ -215,6 +215,28 @@
           "default": true,
           "description": "Show a small indicator in the page (and a thin frame in the session's color) while an agent session controls a browser tab, with a button to take over."
         },
+        "agentBridge.browser.certificateErrors": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "block"
+          ],
+          "enumDescriptions": [
+            "When an agent session opens a site with an untrusted certificate, ask whether to proceed (once per host). Hosts in the trusted list proceed without asking.",
+            "Never proceed past certificate errors for agents. You can still proceed yourself on the browser's error page."
+          ],
+          "default": "ask",
+          "description": "What happens when a browser tab an agent session is driving hits a certificate error (self-signed, company authority, wrong host name)."
+        },
+        "agentBridge.browser.trustedCertificateHosts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "machine",
+          "markdownDescription": "Hosts whose certificate errors are accepted without asking in tabs an agent session is driving, for local and company servers with self-signed or internally issued certificates. Exact host names (`localhost`, `build.corp.example`) or `*.corp.example` for a domain and all its subdomains. Choosing **Always Trust** in the prompt adds a host here."
+        },
         "agentBridge.registration.mode": {
           "type": "string",
           "enum": [

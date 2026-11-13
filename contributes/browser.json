@@ -1,11 +1,39 @@
 {
   "commands": [
-    { "command": "agentBridge.browser.pauseTab", "title": "Pause Agent Access to Browser Tab", "shortTitle": "Take Over", "category": "Agent Bridge", "icon": "$(debug-pause)" },
-    { "command": "agentBridge.browser.resumeTab", "title": "Resume Agent Access to Browser Tab", "shortTitle": "Resume Agent", "category": "Agent Bridge", "icon": "$(debug-continue)" },
-    { "command": "agentBridge.browser.releaseTab", "title": "End Agent Control of Browser Tab", "category": "Agent Bridge" },
-    { "command": "agentBridge.browser.revealTab", "title": "Show Browser Tab", "category": "Agent Bridge" },
-    { "command": "agentBridge.browser.shareTab", "title": "Share Browser Tab with Agent Session…", "category": "Agent Bridge" },
-    { "command": "agentBridge.browser.resetPermissions", "title": "Reset Browser Tab Permissions", "category": "Agent Bridge" }
+    {
+      "command": "agentBridge.browser.pauseTab",
+      "title": "Pause Agent Access to Browser Tab",
+      "shortTitle": "Take Over",
+      "category": "Agent Bridge",
+      "icon": "$(debug-pause)"
+    },
+    {
+      "command": "agentBridge.browser.resumeTab",
+      "title": "Resume Agent Access to Browser Tab",
+      "shortTitle": "Resume Agent",
+      "category": "Agent Bridge",
+      "icon": "$(debug-continue)"
+    },
+    {
+      "command": "agentBridge.browser.releaseTab",
+      "title": "End Agent Control of Browser Tab",
+      "category": "Agent Bridge"
+    },
+    {
+      "command": "agentBridge.browser.revealTab",
+      "title": "Show Browser Tab",
+      "category": "Agent Bridge"
+    },
+    {
+      "command": "agentBridge.browser.shareTab",
+      "title": "Share Browser Tab with Agent Session\u2026",
+      "category": "Agent Bridge"
+    },
+    {
+      "command": "agentBridge.browser.resetPermissions",
+      "title": "Reset Browser Tab Permissions",
+      "category": "Agent Bridge"
+    }
   ],
   "menus": {
     "editor/title": [
@@ -25,7 +53,11 @@
     "properties": {
       "agentBridge.browser.userTabs": {
         "type": "string",
-        "enum": ["ask", "allow", "deny"],
+        "enum": [
+          "ask",
+          "allow",
+          "deny"
+        ],
         "enumDescriptions": [
           "Ask before an agent session reads or controls a browser tab you opened (once per tab, or per site).",
           "Let every agent session use browser tabs you opened without asking.",
@@ -44,6 +76,28 @@
         "type": "boolean",
         "default": true,
         "description": "Show a small indicator in the page (and a thin frame in the session's color) while an agent session controls a browser tab, with a button to take over."
+      },
+      "agentBridge.browser.certificateErrors": {
+        "type": "string",
+        "enum": [
+          "ask",
+          "block"
+        ],
+        "enumDescriptions": [
+          "When an agent session opens a site with an untrusted certificate, ask whether to proceed (once per host). Hosts in the trusted list proceed without asking.",
+          "Never proceed past certificate errors for agents. You can still proceed yourself on the browser's error page."
+        ],
+        "default": "ask",
+        "description": "What happens when a browser tab an agent session is driving hits a certificate error (self-signed, company authority, wrong host name)."
+      },
+      "agentBridge.browser.trustedCertificateHosts": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": [],
+        "scope": "machine",
+        "markdownDescription": "Hosts whose certificate errors are accepted without asking in tabs an agent session is driving, for local and company servers with self-signed or internally issued certificates. Exact host names (`localhost`, `build.corp.example`) or `*.corp.example` for a domain and all its subdomains. Choosing **Always Trust** in the prompt adds a host here."
       }
     }
   }

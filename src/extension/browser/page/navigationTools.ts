@@ -113,13 +113,18 @@ export function navigationTools(env: PageEnv): ToolDefinition<any>[] {
             const waited = await waitForNavigation(call, mark, { waitUntil, timeoutMs: (args.timeout ?? 20) * 1000 });
             return navigationResult(call, mark, started, `Navigated ${call.tab.id} to`, waited, waitUntil);
           }
+          // A certificate error that was not approved shows up as an aborted navigation.
+          const refused = result.errorText ? env.services.browser.certificateRefusal?.(url) : undefined;
+          if (refused) {
+            throw new ToolError('access_denied', `Could not load ${url}: its security certificate is not trusted and ${refused}. Do not retry right away. Tell the user; they can approve the host when asked, or add it to the trusted certificate hosts in the extension's settings.`);
+          }
           if (result.errorText && result.errorText !== 'net::ERR_ABORTED') {
             const hint = /CONNECTION_REFUSED|ADDRESS_UNREACHABLE|CONNECTION_RESET|EMPTY_RESPONSE/.test(result.errorText)
               ? ' Nothing answered at that address: is the server running, and on that port?'
               : /NAME_NOT_RESOLVED/.test(result.errorText)
                 ? ' The host name does not resolve; check the URL.'
                 : /CERT/.test(result.errorText)
-                  ? ' The certificate is not trusted.'
+                  ? " The site's certificate is not trusted, and proceeding past certificate errors was not approved or is turned off in the extension's settings. Do not retry; tell the user."
                   : '';
             throw new ToolError('failed', `Could not load ${url}: ${result.errorText}.${hint} The tab now shows the browser's error page.`);
           }
