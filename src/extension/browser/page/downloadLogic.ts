@@ -1,6 +1,6 @@
 // Downloads an agent starts in a browser tab: file names, the folder they go to, and how a download
 // is described to the agent. Pure; the bookkeeping that needs VS Code is in downloads.ts.
-import { basename, extname, isAbsolute, join } from 'node:path';
+import { basename, extname, isAbsolute, join, posix } from 'node:path';
 import { clip, formatBytes } from './ringBuffer';
 
 export type DownloadPhase =
@@ -70,7 +70,9 @@ const WINDOWS_DEVICE = /^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i;
 
 /** A file name that is safe on every platform: no path, no reserved characters, not empty. */
 export function sanitizeFileName(name: string): string {
-  let n = basename(String(name).replace(/\\/g, '/')).replace(RESERVED, '_').trim();
+  // posix: with backslashes already turned into slashes, and on Windows `basename` would also drop a
+  // leading "x:" as a drive letter ("a:b.txt" → "b.txt") instead of making it safe like everywhere else.
+  let n = posix.basename(String(name).replace(/\\/g, '/')).replace(RESERVED, '_').trim();
   n = n.replace(/^[.\s]+$/, '').replace(/[.\s]+$/, '');
   if (WINDOWS_DEVICE.test(n)) n = `_${n}`;
   if (n.length > 200) {

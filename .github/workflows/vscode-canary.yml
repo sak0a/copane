@@ -1,0 +1,83 @@
+# Early warning for VS Code changes. Copane builds on VS Code's proposed `browser` API and on how its
+# CDP proxy behaves; either can change in any release. Every night this runs the end-to-end suites
+# against the current VS Code Insiders and compares the vendored proposed-API typings (src/typings/)
+# with microsoft/vscode main, then keeps one issue labelled "vscode-canary" open while something is
+# wrong (scripts/canary-issue.mjs): no new issue per night, a comment only when what is wrong changes,
+# closed automatically once all is well again.
+name: VS Code canary
+
+on:
+  schedule:
+    - cron: '17 4 * * *' # daily, after the Insiders build of the night
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vscode-canary
+  cancel-in-progress: false
+
+jobs:
+  insiders-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    continue-on-error: true
+    env:
+      COPANE_E2E_OFFLINE: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Packages VS Code needs on a bare runner
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb libgbm1 libnss3 libasound2t64 libxkbfile1 libsecret-1-0 libgtk-3-0
+      - name: End-to-end suites against VS Code Insiders
+        run: xvfb-run -a --server-args="-screen 0 1600x1000x24" node scripts/e2e.mjs --set ci --vscode insiders --report .dev/e2e/report.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: insiders-e2e
+          path: .dev/e2e/
+          include-hidden-files: true # .dev/ is a hidden folder, skipped by default
+          retention-days: 14
+
+  proposed-api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Compare src/typings with microsoft/vscode main
+        run: |
+          set +e
+          node scripts/check-proposed-api.mjs --report proposed-api.md
+          echo $? > proposed-api.exit
+      - uses: actions/upload-artifact@v7
+        with:
+          name: proposed-api
+          path: proposed-api.*
+          retention-days: 14
+
+  report:
+    needs: [insiders-e2e, proposed-api]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          path: canary
+      - name: Open, update or close the canary issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          api_exit=$(cat canary/proposed-api/proposed-api.exit 2>/dev/null || echo 2)
+          node scripts/canary-issue.mjs --e2e canary/insiders-e2e/report.json --api canary/proposed-api/proposed-api.md --api-exit "$api_exit" --run-url "$RUN_URL"

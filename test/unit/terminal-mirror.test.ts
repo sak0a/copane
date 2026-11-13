@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TerminalMirror } from '../../src/extension/terminal/mirror';
+import { sameCommand, TerminalMirror } from '../../src/extension/terminal/mirror';
 
 const C = '\x1b]633;C\x07';
 const D = (code?: number) => `\x1b]633;D${code === undefined ? '' : `;${code}`}\x07`;
@@ -109,5 +109,30 @@ describe('TerminalMirror (executions feed)', () => {
     expect(first.exitCode).toBe(0);
     expect(second.exitCode).toBe(1);
     expect(m.regionLines(first).lines).toEqual(['first output']);
+  });
+});
+
+describe('sameCommand (which execution a region of output belongs to)', () => {
+  it('matches the whole line, or an unknown one', () => {
+    expect(sameCommand('echo hi', 'echo hi')).toBe(true);
+    expect(sameCommand('  echo hi ', 'echo hi')).toBe(true);
+    expect(sameCommand('echo hi', undefined)).toBe(true);
+    expect(sameCommand('echo hi', 'echo ho')).toBe(false);
+  });
+
+  it("matches bash's report of one simple command of a compound line", () => {
+    expect(sameCommand("echo hello; printf '\\033[31mred\\033[0m\\n'; false", 'echo hello')).toBe(true);
+    expect(sameCommand('make && make test', 'make')).toBe(true);
+    expect(sameCommand('ls | wc -l', 'ls')).toBe(true);
+    expect(sameCommand('false || echo fallback', 'echo fallback')).toBe(true);
+    expect(sameCommand('(cd sub && npm test)', 'cd sub')).toBe(true);
+    expect(sameCommand('echo a\necho b', 'echo b')).toBe(true);
+  });
+
+  it('does not match a different command that merely starts the same', () => {
+    expect(sameCommand('ls -la', 'ls')).toBe(false);
+    expect(sameCommand('npm test', 'npm')).toBe(false);
+    expect(sameCommand('echo hello; true', 'hello')).toBe(false);
+    expect(sameCommand('echo hi', '')).toBe(false);
   });
 });

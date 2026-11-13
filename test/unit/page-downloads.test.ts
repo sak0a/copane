@@ -29,18 +29,19 @@ describe('file names', () => {
 describe('downloads folder', () => {
   const env = { home: '/home/u', downloadsDir: '/home/u/Downloads', workspaceFolder: '/work/app' };
   it('defaults to a Copane folder in Downloads and resolves ~ and relative paths', () => {
-    expect(resolveDownloadsFolder('', env)).toEqual({ folder: '/home/u/Downloads/Copane' });
-    expect(resolveDownloadsFolder('~/agent-files', env)).toEqual({ folder: '/home/u/agent-files' });
+    // Native separators: on Windows the folder is joined with backslashes.
+    expect(resolveDownloadsFolder('', env)).toEqual({ folder: join('/home/u/Downloads', 'Copane') });
+    expect(resolveDownloadsFolder('~/agent-files', env)).toEqual({ folder: join('/home/u', 'agent-files') });
     expect(resolveDownloadsFolder('/tmp/x', env)).toEqual({ folder: '/tmp/x' });
-    expect(resolveDownloadsFolder('out/downloads', env)).toEqual({ folder: '/work/app/out/downloads' });
+    expect(resolveDownloadsFolder('out/downloads', env)).toEqual({ folder: join('/work/app', 'out', 'downloads') });
     expect(resolveDownloadsFolder('out', { ...env, workspaceFolder: undefined })).toMatchObject({ error: expect.stringMatching(/no workspace folder/) });
   });
 
   it('honours XDG_DOWNLOAD_DIR on Linux only', () => {
     const dirs = '# comment\nXDG_DOWNLOAD_DIR="$HOME/Herunterladen"\n';
     expect(systemDownloadsDir('/home/u', 'linux', dirs)).toBe('/home/u/Herunterladen');
-    expect(systemDownloadsDir('/home/u', 'linux', 'XDG_DOWNLOAD_DIR="$HOME/"')).toBe('/home/u/Downloads');
-    expect(systemDownloadsDir('/Users/u', 'darwin', dirs)).toBe('/Users/u/Downloads');
+    expect(systemDownloadsDir('/home/u', 'linux', 'XDG_DOWNLOAD_DIR="$HOME/"')).toBe(join('/home/u', 'Downloads'));
+    expect(systemDownloadsDir('/Users/u', 'darwin', dirs)).toBe(join('/Users/u', 'Downloads'));
   });
 });
 

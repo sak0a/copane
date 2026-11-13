@@ -26,6 +26,18 @@
 - Shorter tool definitions (25,366 → 24,153 characters) and a test that keeps them within budget.
 - README: installing, other editors and Open VSX, and how Codex treats Copane's tools.
 
+Fixed:
+
+- In bash (the default shell on Linux, and Git Bash), commands that chain several commands
+  (`a && b`, `a; b`, `a | b`) or use an alias (`ls` is `ls --color=auto` on Ubuntu) returned
+  "(no output)" after a 2.5 s wait. They return their output again.
+- The first command in a new bash terminal could be taken for a stray Ctrl+C and return at once
+  without its output.
+- A finished command no longer looks like it runs forever when VS Code misses its end (seen with
+  bash when the command line wraps): the shell's own end marker finishes it.
+- On Windows, a downloaded file whose suggested name contains a colon (`a:b.txt`) is saved as
+  `a_b.txt`, as on macOS and Linux, instead of losing the part before the colon.
+
 ## 0.2.1
 
 - License changed from MIT to the PolyForm Shield License 1.0.0: use, change and share it freely,

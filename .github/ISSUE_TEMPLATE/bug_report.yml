@@ -1,0 +1,47 @@
+name: Bug report
+description: Something in Copane does not work as described.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. The status report is what makes a bug diagnosable: in the VS Code window where the problem happens, run **Copane: Copy Status Report** from the Command Palette (Ctrl+Shift+P / Cmd+Shift+P) and paste it below. It lists versions, paths on your machine (workspace folders, configuration files) and the titles of connected agent sessions; look it over and remove anything you do not want to share.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you or the agent did, what you expected, and what happened instead. Include the exact error an agent got from a tool, if any.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Ask the agent to ...
+        3. ...
+  - type: textarea
+    id: status
+    attributes:
+      label: Status report
+      description: The output of **Copane: Copy Status Report**.
+      render: markdown
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log (optional)
+      description: The relevant part of **Copane: Show Log** (the "Copane" output channel), from around the time of the problem.
+      render: text
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Agent
+      multiple: true
+      options:
+        - Claude Code (VS Code extension)
+        - Claude Code (CLI in a terminal)
+        - Codex
+        - Other MCP client

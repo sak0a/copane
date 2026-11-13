@@ -8,6 +8,8 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { createServer } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -76,18 +78,49 @@ export async function until(fn, what = 'condition', { timeoutMs = 10_000, interv
 }
 
 const cases = [];
-/** Registers a test case. Cases run in order; a failure does not stop the others. */
-export function test(name, fn) {
-  cases.push({ name, fn });
+/**
+ * Registers a test case. Cases run in order; a failure does not stop the others. `skip`: a reason
+ * (string) to skip the case on this machine, printed as `SKIP  <name>  (<reason>)`; falsy runs it.
+ */
+export function test(name, fn, { skip } = {}) {
+  cases.push({ name, fn, skip });
 }
+
+/** Why `command` cannot be run here, or undefined when `<command> <versionArg>` works. */
+export function missingCommand(command, versionArg = '--version') {
+  try {
+    execFileSync(command, [versionArg], { stdio: 'ignore', timeout: 15_000 });
+    return undefined;
+  } catch {
+    return `needs \`${command}\` on the PATH`;
+  }
+}
+
+/** Why the IPv6 loopback address [::1] cannot be used here (CI containers often have no IPv6), or undefined. */
+export async function missingIpv6Loopback() {
+  return new Promise(resolve => {
+    const probe = createServer();
+    probe.once('error', () => resolve('needs the IPv6 loopback address [::1], which this machine does not have'));
+    probe.listen(0, '::1', () => probe.close(() => resolve(undefined)));
+  });
+}
+
+/** Why cases that load real public sites are skipped: COPANE_E2E_OFFLINE=1 (set in CI, where they would be flaky). */
+export const offline = /^(1|true)$/i.test(process.env.COPANE_E2E_OFFLINE ?? '') ? 'loads a real public site; skipped with COPANE_E2E_OFFLINE=1' : undefined;
 
 /** Runs the registered cases and exits with 0 (all passed) or 1. `--only <text>` filters by name. */
 export async function run() {
   const onlyIndex = process.argv.indexOf('--only');
   const only = onlyIndex >= 0 ? process.argv[onlyIndex + 1] : undefined;
   let failed = 0;
-  for (const { name, fn } of cases) {
+  let skipped = 0;
+  for (const { name, fn, skip } of cases) {
     if (only && !name.includes(only)) continue;
+    if (skip) {
+      skipped++;
+      console.log(`SKIP  ${name}  (${skip})`);
+      continue;
+    }
     const started = Date.now();
     try {
       await fn();
@@ -97,6 +130,7 @@ export async function run() {
       console.log(`FAIL  ${name}\n      ${String(err?.stack ?? err).split('\n').join('\n      ')}`);
     }
   }
-  console.log(failed ? `\n${failed} failed` : '\nall passed');
+  const skippedNote = skipped ? `, ${skipped} skipped` : '';
+  console.log(failed ? `\n${failed} failed${skippedNote}` : `\nall passed${skippedNote}`);
   process.exit(failed ? 1 : 0);
 }

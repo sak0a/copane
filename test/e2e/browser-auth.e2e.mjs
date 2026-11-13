@@ -10,7 +10,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { startAuthProxy, startAuthServer } from '../fixtures/browser-auth/server.mjs';
 import { startSelfSignedServer } from '../fixtures/browser-certs/server.mjs';
-import { agent, assert, hostDir, run, sleep, test, until } from './harness.mjs';
+import { agent, assert, hostDir, missingCommand, run, sleep, test, until } from './harness.mjs';
 
 const settingsFile = join(hostDir, 'ud', 'User', 'settings.json');
 const original = readFileSync(settingsFile, 'utf8');
@@ -150,8 +150,10 @@ test('a tab opened straight onto a protected page is loaded again so the user ca
 });
 
 const proxyPortFile = join(hostDir, 'test-proxy-port');
-if (existsSync(proxyPortFile)) {
-  test('a proxy that asks for a login (407), over HTTP and for an HTTPS tunnel', async () => {
+const proxySkip = !existsSync(proxyPortFile) ? 'start the dev host with --test-proxy to run it' : missingCommand('openssl', 'version');
+test(
+  'a proxy that asks for a login (407), over HTTP and for an HTTPS tunnel',
+  async () => {
     const tls = await startSelfSignedServer();
     // The browser keeps proxy logins for as long as VS Code runs: realms and passwords of this run's own.
     const run = Date.now().toString(36);
@@ -187,10 +189,9 @@ if (existsSync(proxyPortFile)) {
       // The browser may keep its TLS connection open; do not wait for it.
       await Promise.race([tls.close(), sleep(2000)]);
     }
-  });
-} else {
-  test('proxy logins (SKIPPED: start the dev host with --test-proxy to run them)', () => {});
-}
+  },
+  { skip: proxySkip },
+);
 
 test('a saved login is used after a window reload without asking, and can be forgotten', async () => {
   const s = await fresh();

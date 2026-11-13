@@ -5,9 +5,12 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { startSelfSignedServer } from '../fixtures/browser-certs/server.mjs';
-import { agent, assert, hostDir, run, sleep, test } from './harness.mjs';
+import { agent, assert, hostDir, missingCommand, run, sleep, test as testCase } from './harness.mjs';
 
-const server = await startSelfSignedServer();
+// The fixture server makes its certificate with openssl; without it every case is skipped and says so.
+const noOpenssl = missingCommand('openssl', 'version');
+const test = (name, fn) => testCase(name, fn, { skip: noOpenssl });
+const server = noOpenssl ? undefined : await startSelfSignedServer();
 const settingsFile = join(hostDir, 'ud', 'User', 'settings.json');
 const original = readFileSync(settingsFile, 'utf8');
 async function setSettings(values) {

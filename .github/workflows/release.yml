@@ -1,0 +1,78 @@
+# A pushed version tag (v1.2.3) becomes a GitHub release with the VSIX attached and the version's
+# CHANGELOG.md section as notes, after the full checks pass. Pre-release while the version is below 1.0.
+# Publishing to the VS Code Marketplace and Open VSX runs only when the VSCE_PAT / OVSX_PAT secrets exist.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Fails within seconds when the tag and package.json disagree or the changelog has no section for it.
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - run: node scripts/release-notes.mjs "$GITHUB_REF_NAME" --notes release-notes.md
+
+  checks:
+    needs: verify
+    uses: ./.github/workflows/checks.yml
+
+  release:
+    needs: [verify, checks]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - id: meta
+        run: node scripts/release-notes.mjs "$GITHUB_REF_NAME" --notes release-notes.md
+      - run: npm run package
+      - name: The VSIX exists
+        run: test -f "${{ steps.meta.outputs.vsix }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: vsix
+          path: ${{ steps.meta.outputs.vsix }}
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VSIX: ${{ steps.meta.outputs.vsix }}
+          PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            # A re-run: replace the asset, keep the release.
+            gh release upload "$GITHUB_REF_NAME" "$VSIX" --clobber
+          else
+            title="Copane $VERSION"
+            flags=()
+            if [ "$PRERELEASE" = "true" ]; then title="$title (preview)"; flags+=(--prerelease); fi
+            gh release create "$GITHUB_REF_NAME" "$VSIX" --verify-tag --title "$title" --notes-file release-notes.md "${flags[@]}"
+          fi
+      - name: Publish to the VS Code Marketplace
+        if: env.VSCE_PAT != ''
+        # vsce refuses enabledApiProposals unless they are allowed by name.
+        run: npx vsce publish --packagePath "${{ steps.meta.outputs.vsix }}" --skip-duplicate --allow-proposed-apis browser terminalDataWriteEvent terminalDimensions
+      - name: Publish to Open VSX
+        if: env.OVSX_PAT != ''
+        # The token is read from OVSX_PAT. The "saka" namespace must exist on open-vsx.org first.
+        run: npx --yes ovsx@1.4.0 publish --packagePath "${{ steps.meta.outputs.vsix }}" --skip-duplicate

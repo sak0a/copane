@@ -3,7 +3,7 @@
 // VSIX ships the bundles, so the file ships too. Input: esbuild metafiles of the builds.
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // Packages that publish no license file: the text from their repository, kept in scripts/licenses/.
 const FALLBACK = { '@xterm/headless': 'xterm.txt' };
@@ -35,12 +35,15 @@ export function writeThirdPartyNotices(metafiles, root = process.cwd()) {
     ...sorted.map(p => `- ${p.name} ${p.version} (${p.license})`),
     '',
     ...sorted.flatMap(p => ['---', '', `## ${p.name} ${p.version}`, '', ...(p.repository ? [p.repository.replace(/^git\+/, ''), ''] : []), '```', p.text, '```', '']),
-  ].join('\n');
+  ]
+    .join('\n')
+    // Some packages ship CRLF license files: normalized, so a build never leaves the committed file changed.
+    .replace(/\r\n?/g, '\n');
   writeFileSync(join(root, 'THIRD_PARTY_NOTICES.md'), out);
   return sorted.length;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const metas = process.argv.slice(2).map(f => JSON.parse(readFileSync(f, 'utf8')));
   console.log(`${writeThirdPartyNotices(metas)} packages`);
 }

@@ -11,7 +11,7 @@ import type { BridgeServices, TerminalInfo, TerminalService, TerminalState } fro
 import type { AgentSession } from '../core/sessions';
 import { decideAccess, labelPrefix, matchPersisted, renamedFor, type AccessDecision, parsePolicy, parseSessionEndPolicy, type PersistedTerminal } from './access';
 import { assessActivity, looksLikeShellPrompt, type Activity } from './activity';
-import { TerminalMirror, type LinesResult, type Mark, type MirrorFeed, type Region } from './mirror';
+import { sameCommand, TerminalMirror, type LinesResult, type Mark, type MirrorFeed, type Region } from './mirror';
 import { shortCommand } from './render';
 import { TerminalTail } from './tail';
 
@@ -72,6 +72,8 @@ export class Tracked {
   createdCwd: string | undefined;
   pid: number | undefined;
   readonly createdAt = Date.now();
+  /** The shell has finished drawing a prompt since this terminal was tracked (OSC 633;B; stream mode only). */
+  promptDrawn = false;
   readonly granted = new Set<string>();
   readonly refusedUntil = new Map<string, number>();
   readonly consentPending = new Map<string, Promise<boolean>>();
@@ -167,6 +169,11 @@ export class Tracked {
 
 const STATE_KEY = 'copane.terminals.v1';
 const SHELL_INTEGRATION_WAIT_MS = 12_000;
+const FIRST_PROMPT_WAIT_MS = 2_000;
+/** How long a region of output may come before its execution and still be paired with it by order. */
+const REGION_PAIRING_MS = 2_000;
+/** How long after the shell's end marker VS Code may take to report the end of a command. */
+const MISSED_END_MS = 3_000;
 
 export class TerminalManager implements TerminalService, vscode.Disposable {
   private readonly byTerminal = new Map<vscode.Terminal, Tracked>();
@@ -429,6 +436,24 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
 
   /** Starts a command through shell integration and resolves once the shell reports it started. */
   async startWithShellIntegration(session: AgentSession, t: Tracked, commandLine: string, signal: AbortSignal): Promise<Execution> {
+    if (!t.terminal.shellIntegration) throw new ToolError('unavailable', 'Shell integration is not active in this terminal.');
+    // Shell integration can activate before the first prompt is complete (bash). A command sent then
+    // makes VS Code take part of the prompt for typed input: it sends Ctrl+C and reports a bogus
+    // command ("^Cnal/ws") that would be taken for this one. In a terminal just opened for the session,
+    // wait for the end of the first prompt (briefly; a shell without the marker just runs later).
+    if (this.feed === 'stream' && !t.promptDrawn && t.origin === 'agent' && Date.now() - t.createdAt < SHELL_INTEGRATION_WAIT_MS) {
+      await new Promise<void>(resolve => {
+        const done = () => {
+          clearTimeout(timer);
+          sub.dispose();
+          signal.removeEventListener('abort', done);
+          resolve();
+        };
+        const sub = t.mirror.onPromptEnd(done);
+        const timer = setTimeout(done, FIRST_PROMPT_WAIT_MS);
+        signal.addEventListener('abort', done, { once: true });
+      });
+    }
     const si = t.terminal.shellIntegration;
     if (!si) throw new ToolError('unavailable', 'Shell integration is not active in this terminal.');
     const started = new Promise<Execution>(resolve => (t.pendingRun = { resolve }));
@@ -658,9 +683,24 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
    */
   private createMirror(t: Tracked): TerminalMirror {
     const mirror = new TerminalMirror({ feed: this.feed, cols: t.size?.columns, rows: t.size?.rows });
+    mirror.onPromptEnd(() => (t.promptDrawn = true));
+    // VS Code occasionally misses the end of a command (seen with bash when the echoed command line
+    // wraps) and never fires onDidEndTerminalShellExecution: the command would look like it runs
+    // forever. The shell's own end marker (OSC 633;D) is in the stream, so finish with its exit code.
+    mirror.onRegionEnd(region => {
+      if (this.feed !== 'stream') return;
+      setTimeout(() => {
+        const execution = t.current;
+        if (execution && execution.region === region && !execution.ended) this.finish(t, execution, region.exitCode);
+      }, MISSED_END_MS).unref?.();
+    });
     mirror.onRegionStart(region => {
       if (this.feed !== 'stream') return;
-      const i = t.awaitingRegion.findIndex(e => sameCommand(e.commandLine, region.commandLine));
+      let i = t.awaitingRegion.findIndex(e => sameCommand(e.commandLine, region.commandLine));
+      // VS Code starts an execution and the mirror a region on the same OSC 633;C, so output that starts
+      // while a command runs is that command's, even when the shell reported its line differently (bash
+      // reports aliases expanded: "ls --color=auto x" for "ls x").
+      if (i < 0 && t.current && !t.current.ended && !t.current.region) i = t.awaitingRegion.lastIndexOf(t.current);
       if (i >= 0) {
         // Executions before the match will not get a region any more.
         t.awaitingRegion.splice(0, i + 1)[i]!.region = region;
@@ -737,7 +777,11 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
     if (t.current && !t.current.ended) this.finish(t, t.current, undefined);
     t.current = execution;
     if (this.feed === 'stream') {
-      const i = t.unclaimedRegions.findIndex(r => sameCommand(execution.commandLine, r.commandLine));
+      let i = t.unclaimedRegions.findIndex(r => sameCommand(execution.commandLine, r.commandLine));
+      // The output arrived first, under a line reported differently (see onRegionStart): the latest
+      // region, if it started just now.
+      const latest = t.unclaimedRegions.at(-1);
+      if (i < 0 && latest && Date.now() - (latest.startedAt ?? 0) < REGION_PAIRING_MS) i = t.unclaimedRegions.length - 1;
       if (i >= 0) execution.region = t.unclaimedRegions.splice(0, i + 1)[i];
       else t.awaitingRegion.push(execution);
       if (t.awaitingRegion.length > 10) t.awaitingRegion.shift();
@@ -908,11 +952,6 @@ function canHaveShellIntegration(terminal: vscode.Terminal): boolean {
 
 export function shellIntegrationEnabled(): boolean {
   return vscode.workspace.getConfiguration('terminal.integrated').get<boolean>('shellIntegration.enabled', true) !== false;
-}
-
-/** Whether a region's reported command line belongs to an execution (unknown matches anything). */
-function sameCommand(executionLine: string, reported: string | undefined): boolean {
-  return reported === undefined || reported.trim() === executionLine.trim();
 }
 
 function idNumber(id: string): number {

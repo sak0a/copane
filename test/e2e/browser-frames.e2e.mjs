@@ -11,11 +11,14 @@ import { writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startFixtureServer } from '../fixtures/pages/server.mjs';
-import { agent, assert, run, sleep, test, until } from './harness.mjs';
+import { agent, assert, missingIpv6Loopback, offline, run, sleep, test as testCase, until } from './harness.mjs';
 
+// The third site is [::1]; a machine without IPv6 loopback skips the cases with local frames and says so.
+const noIpv6 = await missingIpv6Loopback();
+const test = (name, fn, { skip } = {}) => testCase(name, fn, { skip: skip ?? noIpv6 });
 const site = await startFixtureServer();
 const second = await startFixtureServer({ host: 'localhost' });
-const third = await startFixtureServer({ host: '::1' });
+const third = noIpv6 ? second : await startFixtureServer({ host: '::1' });
 const query = `b=${encodeURIComponent(second.url)}&c=${encodeURIComponent(third.url)}`;
 const xframes = `${site.url}/xframes.html?${query}`;
 const xmany = `${site.url}/xmany.html?${query}`;
@@ -344,6 +347,6 @@ test('real public page: MDN live example in a cross-origin frame, with a map fra
   const clicked = await a.ok('browser_click', { ref: example[1] });
   assert.match(clicked, /^Clicked button/);
   assert.match(await read('[class*=ctrl-zoom-in]', 'el => location.host'), /openstreetmap\.org$/);
-});
+}, { skip: offline ?? false });
 
 await run();
