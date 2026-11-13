@@ -87,7 +87,7 @@ export function logTools(env: PageEnv): ToolDefinition<any>[] {
     defineTool({
       name: 'browser_network_requests',
       title: 'Network requests',
-      description: "Lists the tab's network requests (id, method, status, type, URL, time, size), oldest first; with id, shows one request's headers and bodies.",
+      description: "Lists the tab's network requests, oldest first; with id, shows one request's headers and bodies.",
       input: {
         id: z.string().optional().describe('e.g. "r12", from a list or an action result.'),
         filter: z.string().optional().describe('URL text, glob (*) or /regex/.'),

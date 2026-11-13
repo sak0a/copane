@@ -2,6 +2,7 @@
 // list, and recovers when the window reloads or closes. Free of MCP and of process globals, so it is
 // unit-tested against a real bridge server.
 import { randomUUID } from 'node:crypto';
+import * as fs from 'node:fs';
 import * as net from 'node:net';
 import { RpcError, RpcPeer } from '../shared/jsonrpc';
 import {
@@ -269,6 +270,7 @@ export class BridgeClient {
       ancestors: instances.length > 0 ? await this.ancestorList : [],
       explicit: this.explicit,
       previous: this.previous,
+      realpath: p => fs.realpathSync.native(p),
     });
     if (!found) {
       this.lastProblem = explainNoMatch({ instances, cwd: this.options.cwd, env: this.options.env });

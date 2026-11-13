@@ -10,6 +10,7 @@
 //   mcp-server.js --version
 //
 // stdout carries MCP messages only. Everything else goes to stderr, which agents put in their logs.
+import * as fs from 'node:fs';
 import * as net from 'node:net';
 import * as os from 'node:os';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -68,7 +69,7 @@ function pingWindow(instance: InstanceInfo, timeoutMs = 3000): Promise<{ ok: boo
 async function diagnose(): Promise<void> {
   const instances = readLiveInstances();
   const ancestry = await lookupAncestors();
-  const found = selectInstance({ instances, env: process.env, cwd: process.cwd(), ancestors: ancestry.pids });
+  const found = selectInstance({ instances, env: process.env, cwd: process.cwd(), ancestors: ancestry.pids, realpath: p => fs.realpathSync.native(p) });
   let username: string;
   try {
     username = os.userInfo().username;

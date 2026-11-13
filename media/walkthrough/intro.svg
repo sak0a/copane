@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 340" width="480" height="340" fill="none">
+  <rect fill="var(--vscode-sideBar-background, #f3f3f3)" stroke="var(--vscode-foreground, #3b3b3b)" stroke-opacity=".22" stroke-width="1.5" x="20" y="22" width="440" height="296" rx="12"/>
+  <circle fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".22" cx="38" cy="38" r="4"/><circle fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".22" cx="52" cy="38" r="4"/><circle fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".22" cx="66" cy="38" r="4"/>
+  <path stroke="var(--vscode-foreground, #3b3b3b)" stroke-opacity=".16" fill="none" d="M20 54h440"/>
+  <!-- activity bar -->
+  <path stroke="var(--vscode-foreground, #3b3b3b)" stroke-opacity=".16" fill="none" d="M56 54v264"/>
+  <rect fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".22" x="30" y="68" width="16" height="13" rx="3"/><rect fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".22" x="30" y="94" width="16" height="13" rx="3"/>
+  <g transform="translate(25 116) scale(0.21875)">
+    <rect fill="none" stroke="#8b95a5" x="22" y="26" width="64" height="52" rx="10" stroke-width="6"/>
+    <rect fill="#3794ff" x="42" y="50" width="64" height="52" rx="10"/>
+    <path stroke="#ffffff" fill="none" stroke-linecap="round" stroke-linejoin="round" d="M56 68l10 8-10 8" stroke-width="6"/>
+    <path stroke="#ffffff" fill="none" stroke-linecap="round" stroke-linejoin="round" d="M72 85h18" stroke-width="6"/>
+  </g>
+  <!-- browser tab, driven by Claude 1 -->
+  <rect fill="var(--vscode-editor-background, #ffffff)" stroke="var(--vscode-foreground, #3b3b3b)" stroke-opacity=".16" x="68" y="66" width="250" height="146" rx="7"/>
+  <rect stroke="var(--vscode-terminal-ansiBlue, #3794ff)" fill="none" x="68" y="66" width="250" height="146" rx="7" stroke-width="2.5"/>
+  <rect fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".10" x="80" y="76" width="150" height="16" rx="8"/>
+  <text font-family="var(--vscode-editor-font-family, Menlo, Consolas, monospace)" fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".55" x="90" y="88" font-size="10">localhost:3000</text>
+  <rect fill="var(--vscode-terminal-ansiBlue, #3794ff)" x="238" y="75" width="70" height="18" rx="9"/>
+  <text font-family="var(--vscode-font-family, -apple-system, Segoe UI, sans-serif)" fill="#ffffff" x="273.0" y="87.6" font-size="10.5" font-weight="600" text-anchor="middle">Claude 1</text>
+  <rect fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".22" x="84" y="106" width="120" height="12" rx="3"/>
+  <rect fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".10" x="84" y="126" width="210" height="7" rx="3"/><rect fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".10" x="84" y="139" width="180" height="7" rx="3"/>
+  <rect fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".10" x="84" y="160" width="96" height="30" rx="6"/><rect fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".10" x="190" y="160" width="96" height="30" rx="6"/>
+  <!-- the agent's pointer -->
+  <path fill="var(--vscode-terminal-ansiBlue, #3794ff)" d="M232 170l0 22 6-6 5 10 4-2-5-10 8 0z" stroke="var(--vscode-editor-background, #fff)" stroke-width="1.5"/>
+  <!-- terminal, owned by Claude 1 -->
+  <rect fill="var(--vscode-editor-background, #ffffff)" stroke="var(--vscode-foreground, #3b3b3b)" stroke-opacity=".16" x="68" y="222" width="250" height="84" rx="7"/>
+  <rect fill="var(--vscode-terminal-ansiBlue, #3794ff)" x="80" y="232" width="8" height="8" rx="2"/>
+  <text font-family="var(--vscode-font-family, -apple-system, Segoe UI, sans-serif)" fill="var(--vscode-foreground, #3b3b3b)" x="94" y="240" font-size="10.5" font-weight="600">Claude 1</text>
+  <path stroke="var(--vscode-foreground, #3b3b3b)" stroke-opacity=".16" fill="none" d="M68 248h250"/>
+  <text font-family="var(--vscode-editor-font-family, Menlo, Consolas, monospace)" fill="var(--vscode-foreground, #3b3b3b)" x="80" y="268" font-size="11">$ npm test</text>
+  <text font-family="var(--vscode-editor-font-family, Menlo, Consolas, monospace)" x="80" y="288" font-size="11"><tspan fill="var(--vscode-terminal-ansiGreen, #23a35f)">✓</tspan><tspan fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".55"> 42 passed</tspan></text>
+  <!-- the agent's chat -->
+  <rect fill="var(--vscode-editor-background, #ffffff)" stroke="var(--vscode-foreground, #3b3b3b)" stroke-opacity=".16" x="330" y="66" width="118" height="240" rx="7"/>
+  <rect fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".10" x="342" y="80" width="78" height="24" rx="8"/>
+  <rect fill="var(--vscode-terminal-ansiBlue, #3794ff)" fill-opacity=".14" x="356" y="114" width="80" height="34" rx="8"/>
+  <rect fill="var(--vscode-terminal-ansiBlue, #3794ff)" x="364" y="122" width="58" height="6" rx="3"/><rect fill="var(--vscode-terminal-ansiBlue, #3794ff)" x="364" y="134" width="40" height="6" rx="3"/>
+  <rect fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".10" x="342" y="160" width="86" height="7" rx="3"/><rect fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".10" x="342" y="173" width="70" height="7" rx="3"/>
+  <rect fill="var(--vscode-foreground, #3b3b3b)" fill-opacity=".10" x="342" y="276" width="94" height="20" rx="6"/>
+</svg>

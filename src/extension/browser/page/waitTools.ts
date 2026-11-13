@@ -24,7 +24,7 @@ export function waitTools(env: PageEnv): ToolDefinition<any>[] {
     defineTool({
       name: 'browser_wait_for',
       title: 'Wait for page',
-      description: 'Waits until all given conditions hold (text visible or gone, selector state, URL, load state), or for a time. Text and selectors are looked for in iframes too.',
+      description: 'Waits until all given conditions hold (text visible or gone, selector state, URL, load state; iframes included), or for a time.',
       input: {
         text: z.string().optional().describe('Visible text, case-insensitive.'),
         textGone: z.string().optional(),

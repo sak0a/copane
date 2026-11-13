@@ -406,4 +406,52 @@ test('the status report has what is needed to diagnose remotely, and Copy return
   }
 });
 
+test('the walkthrough follows the real setup state: Turn Off un-checks the agents step, Turn On checks it', async () => {
+  const a = await agent({ session: 'walkthrough-1' });
+  try {
+    // The test's own connection is not "an agent session connected" for the "Try it" step.
+    let state = await command(a, 'copane.registration.setupState', { ignoreSessions: true });
+    assert.equal(state['copane.setup.browser'], 'ready'); // dev hosts start with the proposal enabled
+    assert.equal(state['copane.setup.sessionSeen'], false);
+    await answers(a, [null]);
+    await command(a, 'copane.unregisterAgents');
+    state = await command(a, 'copane.registration.setupState');
+    assert.equal(state['copane.setup.agents'], 'off');
+    assert.equal(state['copane.setup.done'], false);
+    await answers(a, [null]);
+    await command(a, 'copane.registerAgents');
+    state = await command(a, 'copane.registration.setupState');
+    assert.equal(state['copane.setup.agentsReady'], true);
+    assert.equal(state['copane.setup.done'], true);
+    // Opening it (from the palette or the Sessions view) works, also on a given step.
+    await command(a, 'copane.openWalkthrough', 'tryIt');
+    await command(a, 'workbench.action.closeActiveEditor');
+    const prompt = await command(a, 'copane.walkthrough.copyPrompt', { toClipboard: false });
+    assert.match(prompt, /^Use the copane tools: .*example\.com.*node --version/);
+  } finally {
+    await command(a, 'copane.registration.setupState', { ignoreSessions: false });
+    await a.close();
+  }
+});
+
+test('in an editor without the integrated browser nothing offers to enable it, and the status says why', async () => {
+  const a = await agent({ session: 'walkthrough-2' });
+  try {
+    const state = await command(a, 'copane.registration.setupState', { simulateNoIntegratedBrowser: true });
+    assert.equal(state['copane.setup.browser'], 'unsupported');
+    assert.equal(state['copane.setup.done'], true);
+    const before = existsSync(argvFile) ? readFileSync(argvFile, 'utf8') : undefined;
+    await answers(a, [null]);
+    const result = await command(a, 'copane.enableBrowser', { evenIfAvailable: true });
+    assert.equal(result.state, 'unsupported');
+    assert.match(result.error, /has no integrated browser that extensions can drive/);
+    assert.equal(existsSync(argvFile) ? readFileSync(argvFile, 'utf8') : undefined, before, 'argv.json untouched');
+    const report = await command(a, 'copane.showStatus', { show: false });
+    assert.match(report, /Browser API: not supported in this editor\./);
+  } finally {
+    await command(a, 'copane.registration.setupState', { simulateNoIntegratedBrowser: false });
+    await a.close();
+  }
+});
+
 await run();

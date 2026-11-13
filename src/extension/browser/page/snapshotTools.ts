@@ -177,10 +177,10 @@ export function snapshotTools(env: PageEnv): ToolDefinition<any>[] {
       name: 'browser_snapshot',
       title: 'Read page',
       description:
-        'Reads the page: an accessibility snapshot with a ref (e.g. [ref=e12]) on each element you can act on, for the action tools. mode "text" returns just the readable text, find just the matching elements. Covers shadow DOM and iframes, cross-origin ones too.',
+        'Reads the page as an accessibility snapshot with refs (e.g. [ref=e12]) for the action tools, including shadow DOM and iframes (cross-origin too).',
       input: {
-        mode: z.enum(['snapshot', 'text']).optional().describe('text: main content as markdown, no refs; cheapest for reading.'),
-        find: z.string().min(1).optional().describe('Only elements whose text contains this, with where they are.'),
+        mode: z.enum(['snapshot', 'text']).optional().describe('text: main content as markdown, no refs; cheapest to read.'),
+        find: z.string().min(1).optional().describe('Only elements whose text contains this, and where they are.'),
         ...elementArgs,
         urls: z.boolean().optional().describe('Show all link targets.'),
         offset: z.number().int().min(0).optional().describe('Continue a cut result from this character.'),

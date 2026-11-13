@@ -14,6 +14,17 @@
   computer, Copane copies the file to the agent downloads folder on the remote side and gives the
   agent that path. **Enable Integrated Browser** changes your local argv.json directly from a remote
   window. No second extension is needed.
+- **Get Started walkthrough**: opens once after installing (never for someone already set up) and
+  from **Copane: Get Started** or the Copane view. Its steps (enable the browser, turn Copane on for
+  Claude Code and Codex, try it, see sessions) are checked off, and un-checked, from the real state;
+  in a remote window and in editors without the integrated browser it says what applies there.
+- In an editor without VS Code's integrated browser, the status report, the Copane views and
+  **Enable Integrated Browser** say that the browser tools are not available there instead of
+  offering a fix; the terminal tools work as before.
+- Agents started in a folder reached through a symbolic link (macOS `/tmp`, linked project folders)
+  find their window by its folder again. Codex passes such resolved paths.
+- Shorter tool definitions (25,366 → 24,153 characters) and a test that keeps them within budget.
+- README: installing, other editors and Open VSX, and how Codex treats Copane's tools.
 
 ## 0.2.1
 

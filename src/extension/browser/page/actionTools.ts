@@ -249,9 +249,9 @@ export function actionTools(env: PageEnv): ToolDefinition<any>[] {
     defineTool({
       name: 'browser_press_key',
       title: 'Press key',
-      description: 'Presses a key or combination such as "Enter", "Escape", "ArrowDown" or "ControlOrMeta+a" in the focused element, or in ref/selector.',
+      description: 'Presses a key or combination (e.g. "Enter", "ControlOrMeta+a") in the focused element or in ref/selector.',
       input: {
-        key: z.string().min(1).describe('Key names (Tab, PageDown, F2, a character, ...) joined by "+".'),
+        key: z.string().min(1).describe('Key names (Escape, ArrowDown, F2, a character...) joined by "+".'),
         ...elementArgs,
         count: z.number().int().min(1).max(100).optional(),
         tab: tabArg,
