@@ -17,10 +17,16 @@ facts about the VS Code APIs this builds on.
     node scripts/ui.mjs --name <n> shot|text|eval   # look at the dev host's UI (screenshot, DOM) without touching the desktop
     node test/e2e/<module>.e2e.mjs --name <n>       # end-to-end cases against a running dev host
 
+    node scripts/remote-dev-host.mjs --name <n>     # a real remote window: the extension in a Docker container (needs Docker)
+    docker exec copane-remote-<n> node /copane/test/e2e/remote.e2e.mjs --name <n>   # e2e inside it (any suite works)
+    node scripts/remote-dev-host.mjs --name <n> --stop --rm
+    node scripts/perf-terminals.mjs --name <n>      # terminal memory/CPU in a dev host; scripts/bench-terminal.mjs in plain Node
+
 `--session <key>` makes separate calls one agent session; use two keys to act as two agents.
-In a dev host two extra tools exist (`core/debugTools.ts`): `debug_vscode_command` runs any VS Code
+In a dev host extra tools exist (`core/debugTools.ts`): `debug_vscode_command` runs any VS Code
 command (open a tab or terminal "as the user"), `debug_answer_prompts` queues answers for the
-extension's user prompts and returns the prompts shown so far. All user prompts go through
+extension's user prompts and returns the prompts shown so far; `debug_extension_eval`
+(`remote/debug.ts`) runs JavaScript in the extension host (in a remote dev host: the remote side). All user prompts go through
 `services.prompts.ask`, which is what makes them testable.
 After changing extension code, restart the dev host (`--stop`, then start) to load the new build.
 

@@ -16,20 +16,20 @@
 // (default, once per session), "allow" (shown in the status bar) or "deny".
 //
 // In a remote window (WSL, SSH, containers) the extension and the agent run on the remote machine and
-// the browser on the user's: a path the browser saves to is on the user's computer. The bridge does not
-// capture downloads there; VS Code asks the user as usual and the agent is told the file is not
-// reachable from its side.
+// the browser on the user's: a path the browser saves to is on the user's computer. There the staging
+// folder is a private folder on the user's computer, and kept files are copied to the agent downloads
+// folder on the remote side (downloadStaging.ts). When that folder cannot be found, downloads are not
+// captured: VS Code asks the user as usual and the agent is told the file is on the user's computer.
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, readdir, rm, stat } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { ToolError } from '../../core/errors';
 import type { BridgeServices, BrowserTabInfo, CdpPage } from '../../core/services';
 import { sessionDisplayName } from '../../core/sessions';
 import type { PageCall, PageHook } from './call';
-import { moveUnique } from './downloadFiles';
 import { describeDownload, isFinished, resolveDownloadsFolder, sanitizeFileName, systemDownloadsDir, type DownloadEntry } from './downloadLogic';
+import { localStaging, UiStaging, type Staging } from './downloadStaging';
 import type { TabInfoHost } from './emulation';
 
 export type DownloadsSetting = 'ask' | 'allow' | 'deny';
@@ -55,7 +55,11 @@ export class DownloadManager implements PageHook, vscode.Disposable {
   private readonly byGuid = new Map<string, DownloadEntry>();
   private nextNumber = 1;
   private readonly pages = new Map<string, CdpPage>();
-  private readonly staging = join(tmpdir(), 'copane-downloads', String(process.pid));
+  /** Where the browser saves while capturing; undefined in a remote window where no folder was found. */
+  private staging: Staging | undefined;
+  private stagingLookup: Promise<Staging | undefined> | undefined;
+  /** Why downloads are not captured in this remote window. */
+  private stagingProblem: string | undefined;
   /** Capture holds in force (control calls, waits) and the timer that ends the tail after the last one. */
   private holds = 0;
   private armed = false;
@@ -90,12 +94,35 @@ export class DownloadManager implements PageHook, vscode.Disposable {
 
   /** Captures downloads while a control call runs, and for a few seconds after it. */
   async aroundControl(call: PageCall): Promise<(() => void) | undefined> {
-    if (this.remoteName) return undefined;
+    if (!(await this.getStaging())) return undefined;
     await this.hold(call.page);
     return () => this.release(TAIL_MS);
   }
 
+  /** The staging folder; in a remote window found once (and looked for again a minute after a failure). */
+  private getStaging(): Promise<Staging | undefined> {
+    if (this.staging) return Promise.resolve(this.staging);
+    if (!this.remoteName) return Promise.resolve((this.staging = localStaging(readUserDirs)));
+    if (!this.stagingLookup) {
+      const remote = this.services.remote;
+      this.stagingLookup = (remote ? UiStaging.create(remote) : Promise.resolve({ error: 'the remote module is not active' })).then(found => {
+        if ('error' in found) {
+          this.stagingProblem = found.error;
+          this.services.log.warn(`downloads in this remote window are not captured: ${found.error}`);
+          setTimeout(() => (this.stagingLookup = undefined), 60_000).unref?.();
+          return undefined;
+        }
+        this.stagingProblem = undefined;
+        this.services.log.info(`downloads are staged on the user's computer in ${found.browserPath}`);
+        return (this.staging = found);
+      });
+    }
+    return this.stagingLookup;
+  }
+
   private async hold(page: CdpPage): Promise<void> {
+    const staging = await this.getStaging();
+    if (!staging) return;
     this.holds++;
     if (this.disarmTimer) {
       clearTimeout(this.disarmTimer);
@@ -106,8 +133,8 @@ export class DownloadManager implements PageHook, vscode.Disposable {
     await this.serialized(async () => {
       if (this.armed) return;
       try {
-        await mkdir(this.staging, { recursive: true });
-        await page.send('Page.setDownloadBehavior', { behavior: 'allowAndName', downloadPath: this.staging }, { timeoutMs: 5000 });
+        await staging.prepare();
+        await page.send('Page.setDownloadBehavior', { behavior: 'allowAndName', downloadPath: staging.browserPath }, { timeoutMs: 5000 });
         this.armed = true;
         void this.services.context.workspaceState.update(ARMED_KEY, true);
       } catch (err) {
@@ -173,7 +200,7 @@ export class DownloadManager implements PageHook, vscode.Disposable {
   private onWillBegin(tabId: string, p: { guid: string; url: string; suggestedFilename?: string }): void {
     if (this.byGuid.has(p.guid)) return;
     const sessionId = this.services.tabLeases.holder(tabId)?.sessionId;
-    const captured = !this.remoteName && this.armed;
+    const captured = this.armed;
     const entry: DownloadEntry = {
       id: `dl-${this.nextNumber++}`,
       tabId,
@@ -187,8 +214,10 @@ export class DownloadManager implements PageHook, vscode.Disposable {
       received: 0,
       maxReceived: 0,
       total: 0,
-      phase: this.remoteName ? 'remote' : !captured ? 'user-dialog' : 'downloading',
+      phase: captured ? 'downloading' : this.remoteName && !this.staging ? 'remote' : 'user-dialog',
       remoteName: this.remoteName,
+      ...(this.remoteName && this.services.remote ? { remoteWhere: this.services.remote.where } : {}),
+      ...(!captured && this.remoteName && !this.staging && this.stagingProblem ? { notCapturedBecause: this.stagingProblem } : {}),
     };
     this.entries.unshift(entry);
     this.byGuid.set(entry.guid, entry);
@@ -213,16 +242,17 @@ export class DownloadManager implements PageHook, vscode.Disposable {
       if (entry.phase === 'downloading') entry.phase = 'failed';
       else if (entry.phase === 'remote' || entry.phase === 'user-dialog') entry.reason = 'it was cancelled (by the user in the save dialog, or a network error)';
       this.decisions.delete(entry.guid);
-      if (entry.captured) void rm(join(this.staging, entry.guid), { force: true }).catch(() => undefined);
+      if (entry.captured) void this.staging?.remove(entry.guid);
     }
     this.changed();
   }
 
   /** The download is complete in the staging folder: keep it (if allowed) under its own name. */
   private async finish(entry: DownloadEntry): Promise<void> {
-    const staged = join(this.staging, entry.guid);
+    const staging = this.staging!;
+    const staged = this.remoteName ? `${staging.browserPath}${staging.browserPath.includes('\\') ? '\\' : '/'}${entry.guid} (on the user's computer)` : join(staging.browserPath, entry.guid);
     // It began just as capture was being turned off: then the browser asked the user instead.
-    if (!(await exists(staged, 1000))) {
+    if (!(await staging.exists(entry.guid, 1000))) {
       entry.phase = 'user-dialog';
       entry.captured = false;
       this.decisions.delete(entry.guid);
@@ -241,11 +271,11 @@ export class DownloadManager implements PageHook, vscode.Disposable {
     }
     if (!allowed) {
       entry.phase = downloadsSetting() === 'deny' && entry.reason?.includes('"deny"') ? 'blocked' : 'denied';
-      await rm(staged, { force: true }).catch(() => undefined);
+      await staging.remove(entry.guid);
       this.changed();
       return;
     }
-    const target = entry.sessionId ? this.agentFolder() : { folder: systemDownloadsDir(homedir(), process.platform, readUserDirs()) };
+    const target = entry.sessionId ? this.agentFolder() : { folder: undefined };
     if ('error' in target) {
       entry.phase = 'move-failed';
       entry.reason = target.error;
@@ -254,7 +284,7 @@ export class DownloadManager implements PageHook, vscode.Disposable {
       return;
     }
     try {
-      entry.path = await moveUnique(staged, target.folder, entry.name);
+      entry.path = target.folder ? await staging.moveOut(entry.guid, target.folder, entry.name) : await staging.moveToUserDownloads(entry.guid, entry.name);
       entry.phase = 'saved';
       this.services.log.info(`download ${entry.id} saved to ${entry.path}`);
       this.notifySaved(entry);
@@ -335,13 +365,19 @@ export class DownloadManager implements PageHook, vscode.Disposable {
   private notifySaved(entry: DownloadEntry): void {
     const session = entry.sessionId ? this.services.sessions.get(entry.sessionId) : undefined;
     if (!session) {
+      // The user's own download: in their Downloads folder (on their computer, also in a remote window).
+      if (this.remoteName) {
+        void vscode.window.showWarningMessage(`"${entry.name}" was saved to ${entry.path} without asking, because an agent was acting in the browser when it started.`);
+        return;
+      }
       void vscode.window.showWarningMessage(`"${entry.name}" was saved to ${tildify(entry.path!)} without asking, because an agent was acting in the browser when it started.`, 'Show in Folder').then(choice => {
         if (choice) void vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(entry.path!));
       });
       return;
     }
     this.statusMessage?.dispose();
-    this.statusMessage = vscode.window.setStatusBarMessage(`$(cloud-download) ${sessionDisplayName(session)} downloaded ${entry.name} to ${tildify(entry.path!)}`, 15_000);
+    const where = this.remoteName ? ` in ${this.services.remote?.where ?? 'the remote machine'}` : '';
+    this.statusMessage = vscode.window.setStatusBarMessage(`$(cloud-download) ${sessionDisplayName(session)} downloaded ${entry.name} to ${tildify(entry.path!)}${where}`, 15_000);
   }
 
   private agentFolder(): { folder: string } | { error: string } {
@@ -357,22 +393,16 @@ export class DownloadManager implements PageHook, vscode.Disposable {
    * not connected to while capture was on. They are the user's; move them to their Downloads folder.
    */
   private async sweepStaging(): Promise<void> {
-    let names: string[];
-    try {
-      names = await readdir(this.staging);
-    } catch {
-      return;
-    }
-    for (const name of names) {
+    const staging = this.staging;
+    if (!staging) return;
+    for (const { name, mtimeMs } of await staging.list()) {
       if (name.endsWith('.crdownload') || this.byGuid.has(name)) continue;
-      const path = join(this.staging, name);
+      if (Date.now() - mtimeMs < 10_000) continue; // May still be claimed by a late event.
       try {
-        const info = await stat(path);
-        if (Date.now() - info.mtimeMs < 10_000) continue; // May still be claimed by a late event.
-        const saved = await moveUnique(path, systemDownloadsDir(homedir(), process.platform, readUserDirs()), `download-${name.slice(0, 8)}`);
-        void vscode.window.showWarningMessage(`A browser download was saved to ${tildify(saved)} under a generated name, because an agent was acting in the browser when it started.`);
+        const saved = await staging.moveToUserDownloads(name, `download-${name.slice(0, 8)}`);
+        void vscode.window.showWarningMessage(`A browser download was saved to ${this.remoteName ? saved : tildify(saved)} under a generated name, because an agent was acting in the browser when it started.`);
       } catch (err) {
-        this.services.log.warn(`could not move ${path}: ${err instanceof Error ? err.message : String(err)}`);
+        this.services.log.warn(`could not move the staged download ${name}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
   }
@@ -403,7 +433,8 @@ export class DownloadManager implements PageHook, vscode.Disposable {
    * downloads while it waits. Returns the entry, or undefined when none started in time.
    */
   async waitFor(call: PageCall, timeoutMs: number): Promise<{ entry: DownloadEntry | undefined; timedOut: boolean }> {
-    if (!this.remoteName) await this.hold(call.page);
+    const capturing = !!(await this.getStaging());
+    if (capturing) await this.hold(call.page);
     try {
       const startSeq = this.seqOf(call.tab.id);
       const pick = () => this.entries.find(e => e.tabId === call.tab.id && (!isFinished(e) || e.seq > startSeq));
@@ -414,7 +445,7 @@ export class DownloadManager implements PageHook, vscode.Disposable {
       const done = await this.until(() => isFinished(entry), Math.max(0, deadline - Date.now()), call.signal);
       return { entry, timedOut: !done };
     } finally {
-      if (!this.remoteName) this.release(TAIL_MS);
+      if (capturing) this.release(TAIL_MS);
     }
   }
 
@@ -482,19 +513,7 @@ export class DownloadManager implements PageHook, vscode.Disposable {
     this.statusMessage?.dispose();
     if (this.disarmTimer) clearTimeout(this.disarmTimer);
     this.holds = 0;
-    if (this.armed) void this.disarm().then(() => rm(this.staging, { recursive: true, force: true }).catch(() => undefined));
-  }
-}
-
-async function exists(path: string, waitMs: number): Promise<boolean> {
-  for (const deadline = Date.now() + waitMs; ; ) {
-    try {
-      await stat(path);
-      return true;
-    } catch {
-      if (Date.now() >= deadline) return false;
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
+    if (this.armed) void this.disarm().then(() => this.staging?.removeAll());
   }
 }
 

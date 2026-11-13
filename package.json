@@ -340,7 +340,7 @@
           "type": "string",
           "default": "",
           "scope": "machine",
-          "markdownDescription": "Where files that agent sessions download are saved. Empty: a `Copane` folder in your Downloads folder. `~/...` is relative to your home folder, a relative path to the first workspace folder. A file never replaces an existing one: it gets a name like `report (1).csv`. In a remote window (WSL, SSH) this is not used: the browser runs on your computer and VS Code asks you where to save."
+          "markdownDescription": "Where files that agent sessions download are saved. Empty: a `Copane` folder in your Downloads folder. `~/...` is relative to your home folder, a relative path to the first workspace folder. A file never replaces an existing one: it gets a name like `report (1).csv`. In a remote window (WSL, SSH, containers) this folder is on the remote side, where the agent runs: the browser saves on your computer first and Copane copies the file over."
         },
         "copane.browser.loginPrompts": {
           "type": "boolean",

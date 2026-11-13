@@ -49,8 +49,12 @@ export interface DownloadEntry {
   path?: string;
   /** Why it failed, was refused, or could not be moved. */
   reason?: string;
-  /** VS Code's remote name ("ssh-remote", "wsl") for phase "remote". */
+  /** VS Code's remote name ("ssh-remote", "wsl") in a remote window. */
   remoteName?: string;
+  /** In a remote window: where the agent runs, as services.remote says it ("WSL (Ubuntu)"). */
+  remoteWhere?: string;
+  /** Phase "remote": why the bridge could not save it for the agent. */
+  notCapturedBecause?: string;
 }
 
 export const FINAL_PHASES: ReadonlySet<DownloadPhase> = new Set(['saved', 'denied', 'blocked', 'failed', 'move-failed', 'remote', 'user-dialog']);
@@ -132,7 +136,7 @@ export function describeDownload(entry: DownloadEntry): string {
     case 'downloading':
       return `${head}: downloading, ${progress(entry)}.`;
     case 'saved':
-      return `${head}: saved to ${entry.path} (${size(entry)})${entry.path && basename(entry.path) !== entry.name ? `; renamed because ${entry.name} already existed there` : ''}.`;
+      return `${head}: saved to ${entry.path}${entry.remoteName && !entry.sessionId ? " on the user's computer (it was the user's own download)" : ''} (${size(entry)})${entry.path && basename(entry.path.replace(/\\/g, '/')) !== entry.name ? `; renamed because ${entry.name} already existed there` : ''}.`;
     case 'awaiting-user':
       return `${head}: downloaded (${size(entry)}); waiting for the user to allow saving it.`;
     case 'denied':
@@ -146,11 +150,13 @@ export function describeDownload(entry: DownloadEntry): string {
     }
     case 'user-dialog': {
       const state = entry.endedAt === undefined ? `still ${progress(entry)}` : entry.reason ? `failed: ${entry.reason}` : `finished (${size(entry)})`;
-      return `${head}: VS Code asked the user where to save it, so its path is unknown to you (${state}). It started outside the moments the bridge saves downloads for you; to capture a download that starts late, call browser_downloads with wait: true right after the action that triggers it.`;
+      const where = entry.remoteName ? ' on their computer (not where you run)' : '';
+      return `${head}: VS Code asked the user where to save it${where}, so its path is unknown to you (${state}). It started outside the moments the bridge saves downloads for you; to capture a download that starts late, call browser_downloads with wait: true right after the action that triggers it.`;
     }
     case 'remote': {
       const state = entry.endedAt === undefined ? `still ${progress(entry)}` : entry.reason ? `failed: ${entry.reason}` : `finished (${size(entry)})`;
-      return `${head}: this is a remote window (${entry.remoteName ?? 'remote'}): the browser runs on the user's computer, VS Code asked the user where to save it there, and the file is not reachable from where you run (${state}). Ask the user to copy it into the workspace if you need it.`;
+      const why = entry.notCapturedBecause ? ` The bridge could not save it for you: ${entry.notCapturedBecause}.` : '';
+      return `${head}: this is a remote window (${entry.remoteName ?? 'remote'}; you run in ${entry.remoteWhere ?? 'the remote machine'}): the browser runs on the user's computer, VS Code asked the user where to save it there, and the file is not reachable from where you run (${state}).${why} If you need it, ask the user to save it into the workspace folder, or to copy it there.`;
     }
     case 'move-failed':
       return `${head}: downloaded (${size(entry)}) but could not be moved to the downloads folder (${entry.reason}); it is at ${entry.path}.`;

@@ -23,6 +23,44 @@ export interface BridgeServices {
   browser: BrowserService;
   /** Set by the terminal module during activation. */
   terminals: TerminalService;
+  /** Set by the remote module during activation: the user's machine as seen from a remote window. */
+  remote?: RemoteService;
+}
+
+// ---------------------------------------------------------------- Remote windows
+
+/**
+ * In a remote window (WSL, SSH, containers) this extension host runs on the remote machine, next to the
+ * agent, while VS Code's UI and the integrated browser run on the user's machine. Files there are
+ * reached through `vscode.workspace.fs` with the scheme `vscode-local` (VS Code maps it to the UI side's
+ * `file` scheme); this service finds the folders on that side.
+ */
+export interface RemoteService {
+  /** `vscode.env.remoteName` ("wsl", "ssh-remote", "dev-container" ...); undefined in a local window. */
+  readonly remoteName: string | undefined;
+  /** Where this extension host (and the agent) runs, for messages: "WSL (Ubuntu)", "the SSH host build-1", "the container". */
+  readonly where: string;
+  /** The user's machine: their home folder and its platform, or why it could not be found. */
+  uiHome(): Promise<UiMachine | { error: string }>;
+  /** A private folder on the user's machine (created on demand) the browser can save files into. */
+  uiFolder(kind: 'download-staging' | 'downloads'): Promise<UiFolder | { error: string }>;
+  /** argv.json of the user's VS Code (it may not exist yet), or why it could not be found. */
+  uiArgvJson(): Promise<UiFolder | { error: string }>;
+  /** Records where VS Code itself opened argv.json ("Configure Runtime Arguments"), which tells the home folder. */
+  learnArgvJson(uri: vscode.Uri): void;
+}
+
+export interface UiMachine {
+  platform: 'win32' | 'darwin' | 'linux';
+  home: UiFolder;
+}
+
+/** A file or folder on the user's machine. */
+export interface UiFolder {
+  /** As this extension host addresses it (scheme `vscode-local`). */
+  readonly uri: vscode.Uri;
+  /** As the user's machine writes it, e.g. `C:\Users\me\Downloads`: for the browser and for messages. */
+  readonly nativePath: string;
 }
 
 // ---------------------------------------------------------------- Browser
