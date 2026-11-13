@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Upload fixture</title></head>
+<body>
+<h1>Upload</h1>
+<form id="f" action="/upload" method="post" enctype="multipart/form-data">
+  <label>Documents <input type="file" id="docs" name="docs" multiple></label>
+  <input type="file" id="hidden" name="avatar" style="display:none">
+  <button type="button" id="pick">Choose avatar…</button>
+  <button type="submit">Upload</button>
+</form>
+<p id="chosen" role="status"></p>
+<script>
+  const show = () => (document.getElementById('chosen').textContent = 'Chosen: ' + [...document.querySelectorAll('input[type=file]')].flatMap(i => [...i.files].map(f => f.name + ' (' + f.size + ' B)')).join(', '));
+  document.querySelectorAll('input[type=file]').forEach(i => i.addEventListener('change', show));
+  document.getElementById('pick').onclick = () => document.getElementById('hidden').click();
+</script>
+</body></html>
