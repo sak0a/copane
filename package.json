@@ -300,6 +300,11 @@
           "group": "1_agentBridge"
         },
         {
+          "command": "agentBridge.showStatus",
+          "when": "view == agentBridge.sessions",
+          "group": "9_diagnostics@1"
+        },
+        {
           "command": "agentBridge.showLog",
           "when": "view == agentBridge.sessions",
           "group": "9_diagnostics@2"
@@ -486,7 +491,7 @@
     "check": "npm run typecheck && npm run test && npm run build",
     "dev:host": "node scripts/dev-host.mjs",
     "mcp": "node scripts/mcp-call.mjs",
-    "package": "npm run build && vsce package --no-dependencies"
+    "package": "npm run build && vsce package --no-dependencies --allow-missing-repository"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

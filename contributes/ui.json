@@ -56,6 +56,7 @@
       { "command": "agentBridge.ui.resumeSessionTabs", "when": "agentBridge.ui.hasSessions && !agentBridge.ui.browserUnavailable" }
     ],
     "view/title": [
+      { "command": "agentBridge.showStatus", "when": "view == agentBridge.sessions", "group": "9_diagnostics@1" },
       { "command": "agentBridge.showLog", "when": "view == agentBridge.sessions", "group": "9_diagnostics@2" }
     ],
     "view/item/context": [
