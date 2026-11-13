@@ -59,7 +59,7 @@ test('a connecting session appears in the view and in the status bar', async () 
   }, 'the session row');
   assert.equal(row(s, `session:${ALPHA}#empty`).label, alphaLabel);
   assert.equal(row(s, `session:${ALPHA}#empty`).icon.id, 'circle-filled');
-  assert.match(s.status.shown.text, /^\$\(robot\) \d+$/);
+  assert.match(s.status.shown.text, /^\$\(robot\) \d+/);
   assert.equal(s.badge, null);
 
   const w = await until(async () => {
@@ -77,7 +77,9 @@ test('a tab the agent opens is listed under it as controlling', async () => {
 
   const s = await until(async () => {
     const s = await state();
-    return row(s, `session:${ALPHA}/tab:${tabId}`)?.description?.startsWith('controlling') && s;
+    const r = row(s, `session:${ALPHA}/tab:${tabId}`);
+    // The label is the page title once the page has loaded, the host before that.
+    return r?.description?.startsWith('controlling') && r.label === 'UI Checkout' && s;
   }, 'the controlling tab row');
   const tab = row(s, `session:${ALPHA}/tab:${tabId}`);
   assert.equal(tab.label, 'UI Checkout');

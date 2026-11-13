@@ -527,7 +527,7 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
       const where = `the terminal "${t.name}"`;
       let choices = ['Show Terminal', 'Done', "Won't Do"];
       for (;;) {
-        const answer = await this.services.prompts.ask({ message: `${session.label} needs you in ${where}: ${options.message}`, choices, signal: promptAbort.signal });
+        const answer = await this.services.prompts.ask({ message: `${session.label} needs you in ${where}: ${options.message}`, choices, signal: promptAbort.signal, autoClose: true });
         if (promptAbort.signal.aborted) return;
         if (answer === 'Show Terminal') {
           t.terminal.show(false);

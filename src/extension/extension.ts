@@ -47,6 +47,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // `browser` and `terminals` are assigned by their modules below, before anything can call them.
   const prompts = new VscodePrompts(log);
+  context.subscriptions.push(prompts.register());
   const services: BridgeServices = {
     context,
     log,
