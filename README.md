@@ -107,6 +107,12 @@ terminals it uses. A session may freely use the tabs and terminals it opened. Us
 terminal *you* opened needs your permission. When two sessions want the same tab, one controls
 it and the other can still read it.
 
+The **Sessions** view in the activity bar lists each session with its tabs and terminals. The
+**Agent Tabs** view in the bottom panel, next to Terminal and Ports, lists every browser tab an
+agent uses, marked with its session's color and label: click one to bring it to the front, or use the
+row's buttons to pause or release the agent, close the tab, or go to the session (the agent's own
+terminal if it runs in one of this window, otherwise its row in the Sessions view).
+
 A session is identified by Claude Code's conversation id, so it keeps its identity when the window
 reloads (the server reconnects by itself and calls wait for the window to come back) and when you
 resume the conversation with `claude --resume`. Sub-agents of a conversation share its session.

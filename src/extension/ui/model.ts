@@ -472,10 +472,13 @@ function buildStatus(
 
 // ------------------------------------------------------------------------------------- updates
 
+/** The part of a model a tree renders. */
+export type TreeModel = Pick<ViewModel, 'roots' | 'nodes'>;
+
 /** Which tree elements changed between two models: the whole tree (`full`) or these node ids. */
-export function diffModels(prev: ViewModel | undefined, next: ViewModel): { full: boolean; changed: string[] } {
+export function diffModels(prev: TreeModel | undefined, next: TreeModel): { full: boolean; changed: string[] } {
   if (!prev) return { full: true, changed: [] };
-  const rootIds = (m: ViewModel) => m.roots.map(r => r.id).join('\n');
+  const rootIds = (m: TreeModel) => m.roots.map(r => r.id).join('\n');
   if (rootIds(prev) !== rootIds(next)) return { full: true, changed: [] };
   const changed: string[] = [];
   for (const [id, node] of next.nodes) {

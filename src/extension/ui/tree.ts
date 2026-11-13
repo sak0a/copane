@@ -49,9 +49,9 @@ export class SessionsTree implements vscode.TreeDataProvider<NodeHandle>, vscode
   }
 
   /** Selects and reveals the row of a node, e.g. after the user picked it from the status bar. */
-  async reveal(nodeId: string): Promise<void> {
+  async reveal(nodeId: string, options: { focus?: boolean } = {}): Promise<void> {
     if (!this.state.model.nodes.has(nodeId)) return;
-    await this.view.reveal(this.handle(nodeId), { select: true, focus: false, expand: true });
+    await this.view.reveal(this.handle(nodeId), { select: true, focus: options.focus ?? false, expand: true });
   }
 
   private apply(update: UiUpdate): void {
@@ -81,7 +81,7 @@ export class SessionsTree implements vscode.TreeDataProvider<NodeHandle>, vscode
   }
 }
 
-function toTreeItem(node: ViewNode, expanded: boolean | undefined): vscode.TreeItem {
+export function toTreeItem(node: ViewNode, expanded: boolean | undefined): vscode.TreeItem {
   const item = new vscode.TreeItem(
     node.label,
     expanded === undefined ? vscode.TreeItemCollapsibleState.None : expanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed,
