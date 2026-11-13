@@ -76,6 +76,26 @@
         "category": "Agent Bridge"
       },
       {
+        "command": "agentBridge.registerAgents",
+        "title": "Register with Claude Code and Codex",
+        "category": "Agent Bridge"
+      },
+      {
+        "command": "agentBridge.unregisterAgents",
+        "title": "Unregister from Claude Code and Codex",
+        "category": "Agent Bridge"
+      },
+      {
+        "command": "agentBridge.enableBrowser",
+        "title": "Enable Integrated Browser",
+        "category": "Agent Bridge"
+      },
+      {
+        "command": "agentBridge.showStatus",
+        "title": "Show Status",
+        "category": "Agent Bridge"
+      },
+      {
         "command": "agentBridge.terminal.finishRequest",
         "title": "Done: Hand Terminal Back to Agent",
         "category": "Agent Bridge",
@@ -194,6 +214,34 @@
           "type": "boolean",
           "default": true,
           "description": "Show a small indicator in the page (and a thin frame in the session's color) while an agent session controls a browser tab, with a button to take over."
+        },
+        "agentBridge.registration.mode": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "automatic",
+            "manual"
+          ],
+          "enumDescriptions": [
+            "Ask once before adding the \"vscode\" MCP server to Claude Code's and Codex's user configuration. Afterwards only Agent Bridge's own entry is kept up to date.",
+            "Add and keep the \"vscode\" MCP server in Claude Code's and Codex's user configuration without asking.",
+            "Never change agent configuration on its own. Use the commands \"Agent Bridge: Register with Claude Code and Codex\" and \"Agent Bridge: Unregister from Claude Code and Codex\"."
+          ],
+          "default": "ask",
+          "scope": "machine",
+          "markdownDescription": "How Agent Bridge makes its tools available to agents. It adds an MCP server named `vscode` to the user configuration of Claude Code (`~/.claude.json`) and Codex (`~/.codex/config.toml`), and never changes or removes a `vscode` server it did not add."
+        },
+        "agentBridge.registration.claudeCode": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine",
+          "markdownDescription": "Register the `vscode` MCP server with Claude Code (the `claude` CLI and the Claude Code VS Code extension)."
+        },
+        "agentBridge.registration.codex": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine",
+          "markdownDescription": "Register the `vscode` MCP server with Codex, when Codex is installed."
         },
         "agentBridge.terminal.userTerminals": {
           "type": "string",

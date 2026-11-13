@@ -51,7 +51,15 @@ export interface HelloParams {
   matchedBy: InstanceMatch;
 }
 
-export type InstanceMatch = 'env' | 'ancestor' | 'cwd' | 'single' | 'explicit';
+/**
+ * - `ancestor`: an ancestor process is the window's extension host (an extension started the agent).
+ * - `env`: `AGENT_BRIDGE_INSTANCE` from an integrated terminal of the window.
+ * - `reconnect`: the window this server was connected to was reloaded; same workspace folders.
+ * - `cwd`: the working directory is inside one of the window's workspace folders.
+ * - `single`: the only open window.
+ * - `explicit`: the agent chose the window (`window_select`).
+ */
+export type InstanceMatch = 'env' | 'ancestor' | 'cwd' | 'single' | 'explicit' | 'reconnect';
 
 export interface HelloResult {
   protocolVersion: number;

@@ -1,7 +1,7 @@
 // Agent sessions of this window. One session = one MCP server process = one conversation of an agent
 // (a Claude Code chat tab, a `claude` CLI run in a terminal, a Codex session ...). Each gets a label,
 // a badge and a color, which is how the user tells them apart on tabs, terminals and in the UI.
-import type { AgentKind, SessionDescriptor } from '../../shared/protocol';
+import type { AgentKind, InstanceMatch, SessionDescriptor } from '../../shared/protocol';
 import { Emitter, type Event } from './events';
 
 export interface SessionColor {
@@ -47,6 +47,8 @@ export interface AgentSession {
   lastActivityAt: number;
   /** False while the MCP server is disconnected and the grace period is running. */
   connected: boolean;
+  /** How the MCP server found this window on its latest connection (for diagnostics). */
+  matchedBy?: InstanceMatch;
 }
 
 export interface SessionConnectInfo {
@@ -54,6 +56,7 @@ export interface SessionConnectInfo {
   client: SessionClient;
   pid?: number;
   cwd?: string;
+  matchedBy?: InstanceMatch;
 }
 
 export type SessionChange =
@@ -97,6 +100,7 @@ export class SessionManager {
     if (existing) {
       existing.connected = true;
       existing.lastActivityAt = this.now();
+      if (info.matchedBy) existing.matchedBy = info.matchedBy;
       this.changeEmitter.fire({ type: 'updated', session: existing });
       return existing;
     }
@@ -115,6 +119,7 @@ export class SessionManager {
       createdAt: this.now(),
       lastActivityAt: this.now(),
       connected: true,
+      ...(info.matchedBy ? { matchedBy: info.matchedBy } : {}),
     };
     this.sessions.set(session.id, session);
     this.changeEmitter.fire({ type: 'added', session });

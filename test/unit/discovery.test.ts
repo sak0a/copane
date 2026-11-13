@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { isInside, selectInstance } from '../../src/mcp/discovery';
+import { explainNoMatch, isInside, sameFolders, selectInstance } from '../../src/mcp/discovery';
 import type { InstanceInfo } from '../../src/shared/protocol';
 
-function instance(id: string, folders: string[], lastFocusedAt = 0): InstanceInfo {
+function instance(id: string, folders: string[], lastFocusedAt = 0, startedAt = 0): InstanceInfo {
   return {
     id,
     pid: Number(id),
@@ -14,7 +14,7 @@ function instance(id: string, folders: string[], lastFocusedAt = 0): InstanceInf
     workspaceFolders: folders,
     remoteName: null,
     appName: 'Visual Studio Code',
-    startedAt: 0,
+    startedAt,
     lastFocusedAt,
   };
 }
@@ -27,9 +27,33 @@ describe('selectInstance', () => {
     expect(selectInstance({ instances: [], env: {}, cwd: '/work/a', ancestors: [] })).toBeUndefined();
   });
 
-  it('prefers the terminal environment variable', () => {
-    const r = selectInstance({ instances: [a, b], env: { AGENT_BRIDGE_INSTANCE: '200' }, cwd: '/work/a', ancestors: [100] });
+  it('prefers the terminal environment variable over the working directory', () => {
+    const r = selectInstance({ instances: [a, b], env: { AGENT_BRIDGE_INSTANCE: '200' }, cwd: '/work/a', ancestors: [] });
     expect(r).toMatchObject({ instance: b, matchedBy: 'env' });
+  });
+
+  it('trusts the extension-host ancestor over an inherited environment variable', () => {
+    // VS Code started from a terminal of another VS Code inherits that window's id.
+    const r = selectInstance({ instances: [a, b], env: { AGENT_BRIDGE_INSTANCE: '200' }, cwd: '/work/b', ancestors: [55, 100] });
+    expect(r).toMatchObject({ instance: a, matchedBy: 'ancestor' });
+  });
+
+  it('an explicit choice wins while that window is open', () => {
+    expect(selectInstance({ instances: [a, b], env: {}, cwd: '/work/a', ancestors: [100], explicit: '200' })).toMatchObject({ instance: b, matchedBy: 'explicit' });
+    expect(selectInstance({ instances: [a, b], env: {}, cwd: '/work/a', ancestors: [], explicit: '999' })).toMatchObject({ instance: a, matchedBy: 'cwd' });
+  });
+
+  it('after a reload finds the window with the same folders before looking at the cwd', () => {
+    // A terminal keeps the old window id in its environment; the reloaded window has a new id.
+    const reloaded = instance('300', ['/work/b', '/work/a/packages/web'], 0, 10);
+    const r = selectInstance({
+      instances: [a, reloaded],
+      env: { AGENT_BRIDGE_INSTANCE: '200' },
+      cwd: '/work/a',
+      ancestors: [],
+      previous: { id: '200', workspaceFolders: ['/work/a/packages/web', '/work/b'] },
+    });
+    expect(r).toMatchObject({ instance: reloaded, matchedBy: 'reconnect' });
   });
 
   it('ignores an environment variable that points at a window that is gone', () => {
@@ -47,15 +71,34 @@ describe('selectInstance', () => {
     expect(r).toMatchObject({ instance: b, matchedBy: 'cwd' });
   });
 
-  it('breaks a tie between equal folders by most recent focus', () => {
+  it('breaks a tie between equal folders by most recent focus, and says so', () => {
     const older = instance('300', ['/work/c'], 1);
     const newer = instance('400', ['/work/c'], 2);
-    expect(selectInstance({ instances: [older, newer], env: {}, cwd: '/work/c', ancestors: [] })?.instance).toBe(newer);
+    const r = selectInstance({ instances: [older, newer], env: {}, cwd: '/work/c', ancestors: [] });
+    expect(r?.instance).toBe(newer);
+    expect(r?.note).toMatch(/2 windows/);
+    expect(selectInstance({ instances: [a, b], env: {}, cwd: '/work/a/x', ancestors: [] })?.note).toBeUndefined();
   });
 
   it('falls back to the only window, but never guesses between several', () => {
     expect(selectInstance({ instances: [a], env: {}, cwd: '/elsewhere', ancestors: [] })).toMatchObject({ matchedBy: 'single' });
     expect(selectInstance({ instances: [a, b], env: {}, cwd: '/elsewhere', ancestors: [] })).toBeUndefined();
+  });
+});
+
+describe('explainNoMatch', () => {
+  it('distinguishes no window from several unrelated windows and names a stale terminal id', () => {
+    expect(explainNoMatch({ instances: [], cwd: '/x', env: {} })).toMatch(/No VS Code window/);
+    const text = explainNoMatch({ instances: [instance('1', ['/a']), instance('2', ['/b'])], cwd: '/x', env: { AGENT_BRIDGE_INSTANCE: '9' } });
+    expect(text).toMatch(/2 VS Code windows/);
+    expect(text).toMatch(/AGENT_BRIDGE_INSTANCE=9/);
+  });
+});
+
+describe('sameFolders', () => {
+  it('compares folder sets regardless of order', () => {
+    expect(sameFolders(['/a', '/b'], ['/b', '/a/'])).toBe(true);
+    expect(sameFolders(['/a'], ['/a', '/b'])).toBe(false);
   });
 });
 
