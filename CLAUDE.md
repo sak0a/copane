@@ -14,6 +14,9 @@ facts about the VS Code APIs this builds on.
     node scripts/mcp-call.mjs --name <n> --session s1 <tool> '<json>'
     node scripts/mcp-call.mjs --name <n> --session s1 --repl < calls.txt
 
+    node scripts/ui.mjs --name <n> shot|text|eval   # look at the dev host's UI (screenshot, DOM) without touching the desktop
+    node test/e2e/<module>.e2e.mjs --name <n>       # end-to-end cases against a running dev host
+
 `--session <key>` makes separate calls one agent session; use two keys to act as two agents.
 In a dev host two extra tools exist (`core/debugTools.ts`): `debug_vscode_command` runs any VS Code
 command (open a tab or terminal "as the user"), `debug_answer_prompts` queues answers for the
@@ -40,4 +43,7 @@ After changing extension code, restart the dev host (`--stop`, then start) to lo
   Behaviour that depends on VS Code is verified against a dev host through `scripts/mcp-call.mjs`.
 - Tool descriptions, tool results and error messages are read by a model. Say what happened and what
   to do next; return compact text, not raw protocol dumps.
+- Every module leaves a repeatable `test/e2e/<module>.e2e.mjs` built on `test/e2e/harness.mjs`
+  (see `core.e2e.mjs`) that passes against a fresh dev host. Fixture pages and servers it needs live
+  in `test/fixtures/` and are started by the test itself on a free port.
 - TypeScript strict, no new runtime dependencies without a reason (they are bundled into the VSIX).

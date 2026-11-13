@@ -3,12 +3,15 @@
 // own user-data dir, extensions dir and bridge home, so the user's real VS Code, settings and agent
 // configuration are never touched, and several dev hosts (one per --name) can run side by side.
 //
-//   node scripts/dev-host.mjs --name <name> [--folder <dir>] [--no-build] [--no-proposed]
+//   node scripts/dev-host.mjs --name <name> [--folder <dir>] [--no-build] [--no-proposed] [--no-ui-port]
 //   node scripts/dev-host.mjs --name <name> --stop
 //
 // --folder may be repeated to open several windows. Prints the bridge home and live instances.
+// The workbench UI is inspectable through scripts/ui.mjs (screenshots, DOM) unless --no-ui-port.
+// State (open tabs, terminals) persists per name; delete /tmp/agent-bridge-dev/<name> for a clean start.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -59,6 +62,20 @@ if (!existsSync(settingsFile)) {
 }
 
 const folders = values('folder').length ? values('folder') : [dirs.workspace];
+
+// A Chrome DevTools port on the workbench itself, so its UI can be inspected without desktop automation.
+const uiPortFile = join(base, 'ui-port');
+rmSync(uiPortFile, { force: true });
+let uiPort;
+if (!flag('no-ui-port')) {
+  uiPort = await new Promise(resolve => {
+    const probe = createServer().listen(0, '127.0.0.1', () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+  writeFileSync(uiPortFile, String(uiPort));
+}
 const env = { ...process.env, AGENT_BRIDGE_HOME: dirs.home };
 // Variables that would make `code` talk to the VS Code this script was started from.
 for (const k of ['VSCODE_IPC_HOOK_CLI', 'ELECTRON_RUN_AS_NODE', 'AGENT_BRIDGE_INSTANCE', 'VSCODE_PID', 'VSCODE_CWD']) delete env[k];
@@ -70,6 +87,7 @@ for (const folder of folders) {
     '--extensions-dir', dirs.extensions,
     `--extensionDevelopmentPath=${root}`,
     ...(flag('no-proposed') ? [] : [`--enable-proposed-api=${extensionId}`]),
+    ...(uiPort ? [`--remote-debugging-port=${uiPort}`] : []),
     '--new-window',
     folder,
   ];
@@ -87,6 +105,7 @@ while (Date.now() < deadline) {
 }
 console.log(`dev host "${name}"`);
 console.log(`  AGENT_BRIDGE_HOME=${dirs.home}`);
+if (uiPort) console.log(`  UI inspection: node scripts/ui.mjs --name ${name} shot|eval|text`);
 for (const f of found) {
   const i = JSON.parse(readFileSync(join(instances, f), 'utf8'));
   console.log(`  window ${i.id}: ${i.workspaceFolders.join(', ') || '(no folder)'}`);
