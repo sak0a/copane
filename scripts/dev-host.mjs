@@ -55,6 +55,8 @@ if (!existsSync(settingsFile)) {
         'update.mode': 'none',
         'extensions.autoUpdate': false,
         'window.restoreWindows': 'none',
+        // Native macOS sheets cannot be seen or answered through scripts/ui.mjs; custom dialogs are in the DOM.
+        'window.dialogStyle': 'custom',
       },
       null,
       2,
