@@ -69,5 +69,5 @@ describe('process ancestry', () => {
   it('finds the real parent of this process', async () => {
     const ancestors = await ancestorPids();
     expect(ancestors[0]).toBe(process.ppid);
-  });
+  }, 30_000); // On Windows this starts PowerShell and queries WMI, which can take seconds on a cold CI runner.
 });

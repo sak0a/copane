@@ -168,7 +168,8 @@ describe('an update can never lose the entry (the Windows "it got removed" repor
     };
   };
 
-  it.skipIf(process.platform === 'win32')('a failed update leaves the previous entry in place and never calls `claude mcp remove`', async () => {
+  // Runs on Windows too: the fake CLI is never started here, and this is the Windows report's regression test.
+  it('a failed update leaves the previous entry in place and never calls `claude mcp remove`', async () => {
     const old = { type: 'stdio', command: 'C:\\Old VS Code\\Code.exe', args: ['C:\\Users\\u\\.copane\\bin\\mcp-server.js'], env: { ELECTRON_RUN_AS_NODE: '1' } };
     fs.writeFileSync(file, JSON.stringify({ ...existing, mcpServers: { ...existing.mcpServers, copane: old } }));
     const { cli, calls } = fakeCli();

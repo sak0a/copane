@@ -114,7 +114,7 @@ describe('installServer', () => {
     expect(execFileSync(launcher, [], { encoding: 'utf8', env })).toMatch(/^server/);
   });
 
-  it.skipIf(process.platform === 'win32')('quotes paths with spaces and quotes in the launcher', () => {
+  it('quotes paths with spaces and quotes in the launcher', () => {
     const text = unixLauncher(["/Applications/Visual Studio Code.app/it's/Code Helper"], '/h/bin/mcp-server.js');
     expect(text).toContain(`'/Applications/Visual Studio Code.app/it'\\''s/Code Helper'`);
   });
