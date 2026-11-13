@@ -3,6 +3,7 @@
 import * as esbuild from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { writeThirdPartyNotices } from './scripts/third-party-notices.mjs';
 
 const watch = process.argv.includes('--watch');
 execFileSync(process.execPath, ['scripts/gen-manifest.mjs'], { stdio: 'inherit' });
@@ -20,6 +21,7 @@ const common = {
   format: 'cjs',
   sourcemap: true,
   logLevel: 'info',
+  metafile: true,
 };
 const builds = [
   { ...common, entryPoints: ['src/extension/extension.ts'], outfile: 'dist/extension.js', external: ['vscode'] },
@@ -28,5 +30,6 @@ const builds = [
 if (watch) {
   for (const b of builds) (await esbuild.context(b)).watch();
 } else {
-  await Promise.all(builds.map(b => esbuild.build(b)));
+  const results = await Promise.all(builds.map(b => esbuild.build(b)));
+  writeThirdPartyNotices(results.map(r => r.metafile));
 }

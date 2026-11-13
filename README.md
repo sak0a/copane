@@ -1,4 +1,20 @@
-# Copane
+<p align="center">
+  <img src="https://raw.githubusercontent.com/sak0a/copane/main/media/icon.png" width="128" height="128" alt="Copane logo">
+</p>
+
+<h1 align="center">Copane</h1>
+
+<p align="center">
+  <b>Your VS Code browser tabs and terminals, shared with Claude Code and other AI agents.</b>
+</p>
+
+<p align="center">
+  <a href="https://marketplace.visualstudio.com/items?itemName=saka.copane"><img src="https://vsmarketplacebadges.dev/version-short/saka.copane.svg" alt="VS Marketplace version"></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=saka.copane"><img src="https://vsmarketplacebadges.dev/installs-short/saka.copane.svg" alt="VS Marketplace installs"></a>
+  <a href="https://github.com/sak0a/copane/releases"><img src="https://img.shields.io/github/v/release/sak0a/copane?include_prereleases&label=release" alt="Latest release"></a>
+  <a href="https://github.com/sak0a/copane/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Shield%201.0.0-blue" alt="License: PolyForm Shield 1.0.0"></a>
+  <img src="https://img.shields.io/badge/VS%20Code-1.140%2B-007ACC?logo=visualstudiocode&logoColor=white" alt="VS Code 1.140 or newer">
+</p>
 
 Copane gives Claude Code (and Codex, and other MCP agents) the VS Code window they run in:
 its **integrated browser tabs** and its **integrated terminals**. The agent and you work in the
@@ -294,4 +310,13 @@ server to a stable location outside the extension folder.
 
 ## License
 
-MIT © sak0a. See the LICENSE file.
+Copane is licensed under the [PolyForm Shield License 1.0.0](LICENSE). In plain words, and not
+replacing the license text:
+
+- You may use Copane for anything, including at work in a company, and change and share it.
+- You may not use it to offer a product that competes with Copane, for example by repackaging or
+  selling it.
+
+Versions up to and including 0.2.0 were published under the MIT license and remain available under
+it. The open-source packages Copane bundles keep their own licenses; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

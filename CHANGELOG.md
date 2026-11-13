@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- License changed from MIT to the PolyForm Shield License 1.0.0: use, change and share it freely,
+  including at work, but do not offer a competing product. Versions up to 0.2.0 stay MIT.
+- The package includes THIRD_PARTY_NOTICES.md with the licenses of the bundled open-source packages.
+
 ## 0.2.0
 
 Agents use far fewer tokens for the same work, and reach more of a page.
