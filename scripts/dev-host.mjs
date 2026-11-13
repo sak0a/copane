@@ -3,10 +3,11 @@
 // own user-data dir, extensions dir and bridge home, so the user's real VS Code, settings and agent
 // configuration are never touched, and several dev hosts (one per --name) can run side by side.
 //
-//   node scripts/dev-host.mjs --name <name> [--folder <dir>] [--no-build] [--no-proposed] [--no-ui-port]
+//   node scripts/dev-host.mjs --name <name> [--folder <dir>] [--no-build] [--no-proposed] [--no-ui-port] [--foreground]
 //   node scripts/dev-host.mjs --name <name> --stop
 //
-// --folder may be repeated to open several windows. Prints the bridge home and live instances.
+// --folder may be repeated to open several windows. On macOS the windows open in the background
+// (they do not take focus) unless --foreground. Prints the bridge home and live instances.
 // The workbench UI is inspectable through scripts/ui.mjs (screenshots, DOM) unless --no-ui-port.
 // State (open tabs, terminals) persists per name; delete /tmp/agent-bridge-dev/<name> for a clean start.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
@@ -80,6 +81,23 @@ const env = { ...process.env, AGENT_BRIDGE_HOME: dirs.home };
 // Variables that would make `code` talk to the VS Code this script was started from.
 for (const k of ['VSCODE_IPC_HOOK_CLI', 'ELECTRON_RUN_AS_NODE', 'AGENT_BRIDGE_INSTANCE', 'VSCODE_PID', 'VSCODE_CWD']) delete env[k];
 
+// macOS: VS Code activates itself when a window opens, even when started in the background. Remember
+// who had focus and give it back, so a dev host never interrupts whoever is working on this machine.
+const frontmost = () => {
+  if (process.platform !== 'darwin' || flag('foreground')) return undefined;
+  try {
+    return execFileSync('osascript', ['-e', 'tell application "System Events" to get unix id of first application process whose frontmost is true'], { encoding: 'utf8', timeout: 5000 }).trim();
+  } catch {
+    return undefined;
+  }
+};
+const previousFront = frontmost();
+const restoreFocus = () => {
+  const now = frontmost();
+  if (!previousFront || !now || now === previousFront) return;
+  spawnSync('osascript', ['-e', `tell application "System Events" to set frontmost of (first application process whose unix id is ${previousFront}) to true`], { timeout: 5000 });
+};
+
 for (const folder of folders) {
   mkdirSync(folder, { recursive: true });
   const codeArgs = [
@@ -91,8 +109,17 @@ for (const folder of folders) {
     '--new-window',
     folder,
   ];
-  spawn('code', codeArgs, { env, stdio: 'ignore', detached: true, shell: process.platform === 'win32' }).unref();
-  await new Promise(r => setTimeout(r, 2500));
+  if (process.platform === 'darwin' && !flag('foreground')) {
+    // `open -g` starts the window in the background, so it does not take focus from whoever is working.
+    const app = execFileSync('sh', ['-c', 'dirname "$(dirname "$(dirname "$(dirname "$(dirname "$(readlink -f "$(command -v code)" 2>/dev/null || python3 -c "import os,sys;print(os.path.realpath(sys.argv[1]))" "$(command -v code)")")")")")"'], { encoding: 'utf8' }).trim();
+    spawn('open', ['-g', '-n', '-a', app, '--env', `AGENT_BRIDGE_HOME=${dirs.home}`, '--args', ...codeArgs], { env, stdio: 'ignore', detached: true }).unref();
+  } else {
+    spawn('code', codeArgs, { env, stdio: 'ignore', detached: true, shell: process.platform === 'win32' }).unref();
+  }
+  for (let i = 0; i < 5; i++) {
+    await new Promise(r => setTimeout(r, 500));
+    restoreFocus();
+  }
 }
 
 const instances = join(dirs.home, 'instances');
@@ -102,7 +129,9 @@ while (Date.now() < deadline) {
   found = existsSync(instances) ? readdirSync(instances).filter(f => f.endsWith('.json')) : [];
   if (found.length >= folders.length) break;
   await new Promise(r => setTimeout(r, 500));
+  restoreFocus();
 }
+restoreFocus();
 console.log(`dev host "${name}"`);
 console.log(`  AGENT_BRIDGE_HOME=${dirs.home}`);
 if (uiPort) console.log(`  UI inspection: node scripts/ui.mjs --name ${name} shot|eval|text`);
