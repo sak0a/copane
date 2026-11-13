@@ -40,7 +40,7 @@ export class SetupTracker implements vscode.Disposable {
   /** Testing only: the test's own MCP connections do not count as "an agent session connected". */
   private ignoreSessions = false;
   private current: SetupContext | undefined;
-  private refreshing: Promise<SetupContext> | undefined;
+  private refreshing: Promise<unknown> | undefined;
   /** Step states last given to VS Code; a step is set again only when its state changes. */
   private readonly steps = new Map<string, boolean>();
   private stepRetry: ReturnType<typeof setTimeout> | undefined;
@@ -112,10 +112,21 @@ export class SetupTracker implements vscode.Disposable {
     });
   }
 
-  /** Recomputes the setup state and publishes it as context keys. Calls in flight are shared. */
+  /**
+   * Recomputes the setup state and publishes it as context keys. Computations run one after another,
+   * and each call gets a result computed after it was made: a computation already in flight may have
+   * read the state before the change that prompted this call.
+   */
   refresh(): Promise<SetupContext> {
-    this.refreshing ??= this.compute().finally(() => (this.refreshing = undefined));
-    return this.refreshing;
+    const run = (this.refreshing ?? Promise.resolve()).then(
+      () => this.compute(),
+      () => this.compute(),
+    );
+    this.refreshing = run;
+    void run.finally(() => {
+      if (this.refreshing === run) this.refreshing = undefined;
+    }).catch(() => {});
+    return run;
   }
 
   private async compute(): Promise<SetupContext> {
