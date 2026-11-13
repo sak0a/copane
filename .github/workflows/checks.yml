@@ -1,0 +1,105 @@
+# Typecheck, unit tests and build on Linux, macOS and Windows for every push and pull request, and the
+# end-to-end suites against a real VS Code where they pay off. Called by release.yml before a release.
+name: Checks
+
+on:
+  push:
+    branches: ['**']
+    tags-ignore: ['**'] # release.yml runs these checks for version tags
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      vscode:
+        description: 'VS Code for the e2e suites: stable, insiders or a version like 1.146.0'
+        default: stable
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.event_name }}-${{ github.ref }}
+  # A newer push to the same branch supersedes a running check; every commit on main is checked.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - name: Generated files are committed
+        if: runner.os == 'Linux'
+        # The build merges contributes/*.json into package.json and writes THIRD_PARTY_NOTICES.md.
+        run: |
+          if ! git diff --exit-code -- package.json THIRD_PARTY_NOTICES.md; then
+            echo "::error::package.json or THIRD_PARTY_NOTICES.md is out of date: run npm run build and commit the result."
+            exit 1
+          fi
+
+  # The suites that are reliable on a Linux runner (scripts/e2e.mjs, SUITES), each against a fresh dev
+  # host with a downloaded VS Code under a virtual display. Pull requests, main, releases and manual runs;
+  # other branch pushes only get the unit checks.
+  e2e-linux:
+    name: e2e (linux)
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04 # pinned: the apt package names below are those of 24.04
+    timeout-minutes: 45
+    env:
+      COPANE_E2E_OFFLINE: '1' # cases that load real public sites would be flaky here
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Packages VS Code needs on a bare runner
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb libgbm1 libnss3 libasound2t64 libxkbfile1 libsecret-1-0 libgtk-3-0
+      - name: End-to-end suites
+        run: xvfb-run -a --server-args="-screen 0 1600x1000x24" node scripts/e2e.mjs --set ci --vscode "${{ inputs.vscode || 'stable' }}" --report .dev/e2e/report.json
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: e2e-linux
+          path: .dev/e2e/
+          include-hidden-files: true # .dev/ is a hidden folder, skipped by default
+          retention-days: 14
+
+  # Windows is where most users are and where nothing else exercises a real VS Code. Experimental: the
+  # suites that run here are listed per platform in scripts/e2e.mjs; a failure does not fail the run.
+  e2e-windows:
+    name: e2e (windows, experimental)
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    env:
+      COPANE_E2E_OFFLINE: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: End-to-end suites
+        run: node scripts/e2e.mjs --set ci --vscode "${{ inputs.vscode || 'stable' }}" --report .dev/e2e/report.json
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: e2e-windows
+          path: .dev/e2e/
+          include-hidden-files: true # .dev/ is a hidden folder, skipped by default
+          retention-days: 14
