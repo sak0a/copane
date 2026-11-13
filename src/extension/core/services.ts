@@ -116,6 +116,16 @@ export interface TerminalInfo {
   /** The command line currently running, if any. */
   currentCommand: string | undefined;
   lastExitCode: number | undefined;
+  /**
+   * Optional (added for the UI). Sessions the user allowed to use this terminal, for terminals the
+   * user created (origin "user"). The UI lists such a terminal under each of these sessions.
+   */
+  allowedSessions?: string[];
+  /**
+   * Optional (added for the UI). While `state` is "waiting-for-user": what the agent asked the user
+   * to do, in its own words (e.g. "Log in to npm"). Shown in the Sessions view and the status bar.
+   */
+  userInputRequest?: string;
 }
 
 export interface TerminalService {
