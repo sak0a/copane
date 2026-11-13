@@ -12,7 +12,7 @@ import { startPageServer } from '../fixtures/ui-pages.mjs';
 import { agent, assert, hostName, root, run, test, until } from './harness.mjs';
 
 const exec = promisify(execFile);
-const STATUS_ID = 'sak0a.copane.copane.status';
+const STATUS_ID = 'saka.copane.copane.status';
 
 /** Evaluates a JS expression in the dev host's workbench page and returns its (JSON) value. */
 async function dom(expression) {

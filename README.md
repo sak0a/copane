@@ -36,7 +36,7 @@ Sessions that were already running before step 2 do not see the new server; star
 
 VS Code's integrated browser is controlled through an API that is still marked *proposed*. VS Code
 lets an extension use a proposed API only when you allow it by name, with
-`"enable-proposed-api": ["sak0a.copane"]` in VS Code's `argv.json` (the file behind
+`"enable-proposed-api": ["saka.copane"]` in VS Code's `argv.json` (the file behind
 **Preferences: Configure Runtime Arguments**). VS Code reads that file only when it starts, so
 reloading the window is not enough. The command edits the file for you, keeps everything else in
 it, and offers to quit VS Code. Until then, everything except the browser tools works.

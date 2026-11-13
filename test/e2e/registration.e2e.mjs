@@ -203,7 +203,7 @@ test('enabling the browser adds the extension to argv.json, keeps comments, and 
     assert.equal(result.state, 'enabled');
     assert.equal(result.changed, true);
     let text = readFileSync(argvFile, 'utf8');
-    assert.match(text, /"enable-proposed-api": \[\s*"sak0a\.copane"\s*\]/);
+    assert.match(text, /"enable-proposed-api": \[\s*"saka\.copane"\s*\]/);
     assert.match(text, /\/\/ Allows to disable crash reporting\./);
     assert.match(text, /"locale": "en"/);
     const restart = (await shownPrompts(a)).at(-1);
@@ -220,7 +220,7 @@ test('enabling the browser adds the extension to argv.json, keeps comments, and 
     result = await command(a, 'copane.enableBrowser', { evenIfAvailable: true, viaEditor: true });
     assert.equal(result.changed, true);
     text = readFileSync(argvFile, 'utf8');
-    assert.match(text, /"other\.extension",\s*"sak0a\.copane"/);
+    assert.match(text, /"other\.extension",\s*"saka\.copane"/);
     await command(a, 'workbench.action.closeActiveEditor');
   } finally {
     await a.close();

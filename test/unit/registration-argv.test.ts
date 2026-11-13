@@ -12,7 +12,7 @@ import {
   newArgvJson,
 } from '../../src/extension/registration/argv';
 
-const ID = 'sak0a.copane';
+const ID = 'saka.copane';
 
 // What VS Code writes on first start (abridged).
 const DEFAULT_ARGV = `// This configuration file allows you to pass permanent command line arguments to VS Code.
