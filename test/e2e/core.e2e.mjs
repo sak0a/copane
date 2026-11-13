@@ -5,8 +5,9 @@ test('two agent sessions get their own label and see each other', async () => {
   const a = await agent({ session: 'core-a' });
   const b = await agent({ session: 'core-b' });
   try {
-    const infoA = JSON.parse(await a.ok('session_info'));
+    // B first: a session exists in the window once its MCP server has connected, which its first call ensures.
     const infoB = JSON.parse(await b.ok('session_info'));
+    const infoA = JSON.parse(await a.ok('session_info'));
     assert.notEqual(infoA.you.label, infoB.you.label);
     assert.notEqual(infoA.you.color, infoB.you.color);
     assert.ok(infoA.otherSessions.some(s => s.label.startsWith(infoB.you.label)));
