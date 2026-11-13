@@ -27,7 +27,7 @@ export function activateDebugTools(services: BridgeServices, prompts: VscodeProm
       defineTool({
         name: 'debug_answer_prompts',
         description:
-          'Development only. Queues answers for the next prompts the extension would show the user (consent, hand-off, login), in order. Each answer is the exact button label, or for an input prompt the text to type; null dismisses. Also returns the prompts shown so far (typed passwords are shown as "(hidden)").',
+          'Development only. Queues answers for the next prompts the extension would show the user (consent, hand-off, login), in order. Each answer is the exact button label, or for an input prompt the text to type; null dismisses. Also returns the prompts shown so far (typed passwords are shown as "(hidden)"), and the questions waiting in the status bar unanswered (`waiting`; answer one as the user would with the command "copane.answerQuestion").',
         input: {
           answers: z.array(z.string().nullable()).optional().describe('Answers to queue. Omit to only read the history.'),
           clear: z.boolean().optional().describe('Drop answers that are still queued first.'),
@@ -35,7 +35,7 @@ export function activateDebugTools(services: BridgeServices, prompts: VscodeProm
         handler: args => {
           if (args.clear) prompts.queuedAnswers.length = 0;
           prompts.queuedAnswers.push(...(args.answers ?? []));
-          return [json({ queued: prompts.queuedAnswers, shown: prompts.history })];
+          return [json({ queued: prompts.queuedAnswers, shown: prompts.history, waiting: prompts.statusBar.list() })];
         },
       }),
     ]),

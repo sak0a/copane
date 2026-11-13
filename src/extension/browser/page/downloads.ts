@@ -298,6 +298,8 @@ export class DownloadManager implements PageHook, vscode.Disposable {
           choices: ['Allow', 'Always Allow', 'Deny'],
           signal: timeout.signal,
           autoClose: true,
+          placement: 'statusBar',
+          summary: `${sessionDisplayName(session)} wants to download a file`,
         })
         .then(async answer => {
           if (answer === 'Always Allow') {

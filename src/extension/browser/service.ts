@@ -423,7 +423,8 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
       const prompt = consentPrompt(sessionDisplayName(session), record.tab, siteOf(url));
       this.log.info(`asking the user whether ${session.label} may use ${record.id} (${url})`);
       const promise = this.services.prompts
-        .ask({ message: prompt.message, choices: prompt.choices, signal: controller.signal })
+        // In the status bar, not a notification: a notification over the browser pauses the very tab it asks about.
+        .ask({ message: prompt.message, choices: prompt.choices, signal: controller.signal, placement: 'statusBar', summary: `${sessionDisplayName(session)} asks to use ${record.id}${siteOf(url) ? ` (${siteOf(url)})` : ''}` })
         .then(
           answer => {
             if (controller.signal.aborted) return;
@@ -446,7 +447,7 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
     if (outcome === 'timeout') {
       throw new ToolError(
         'timeout',
-        `The user has not answered whether you may use ${record.id} yet; the request stays open in VS Code. Do not retry in a loop: continue with other work or ask the user in chat, then call again (it will not ask twice).`,
+        `The user has not answered whether you may use ${record.id} yet; the question waits in VS Code's status bar (bottom left, "${sessionDisplayName(session)} asks to use ${record.id}"). Do not retry in a loop: continue with other work or ask the user in chat to answer it there, then call again (it will not ask twice).`,
       );
     }
   }

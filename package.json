@@ -42,6 +42,11 @@
         "category": "Copane"
       },
       {
+        "command": "copane.answerQuestion",
+        "title": "Answer Agent Question",
+        "category": "Copane"
+      },
+      {
         "command": "copane.browser.pauseTab",
         "title": "Pause Agent Access to Browser Tab",
         "shortTitle": "Take Over",

@@ -66,7 +66,22 @@ agent and its MCP server also run; the browser itself stays on the UI side and V
   that holds, answers or changes requests (login prompts in `credentials.ts`, request mocking in
   `routes.ts`) is a `FetchClient` registered there; never call `Fetch.*` directly. `Fetch` is enabled
   only while some client needs it on that tab, and every paused request is answered. It covers the
-  tab's page target only, not out-of-process iframes or workers.
+  tab's page target and every out-of-process iframe (nested and later ones too): the frame registry
+  holds a new frame before its document runs (`waitForDebuggerOnStart`, bounded, always released)
+  until interception is in place there, so even a frame's first request is covered. At most 100
+  frames per tab; workers are not covered.
+- **Tab ids across a window reload**: every tab is remembered with its id and URL, and with VS Code's
+  view id once the bridge has attached to it. After a reload a tab gets its id back by view id, or by
+  URL when that is unambiguous (`browser/tabRestore.ts`); the bridge never attaches to a tab nobody
+  shared just to recognise it. Tabs that cannot be told apart (same URL) get new ids; their old ids
+  are retired, never reused, and a call with one says what happened.
+- **Prompts and the browser**: VS Code pauses a browser view while a notification toast or the
+  notification centre overlaps it (it hides the view and shows a dimmed screenshot; screenshots of
+  it take seconds, a tab opened meanwhile keeps a 1024×768 placeholder size). So questions about a
+  tab (consent, certificate errors, logins, downloads) use `placement: "statusBar"` in
+  `services.prompts.ask`: a status bar item, which covers nothing, that opens the question in VS
+  Code's modal dialog when clicked (`core/promptStatus.ts`, command `copane.answerQuestion`). Only
+  the user can answer it: the command takes no arguments and only shows the dialog.
 
 ## Terminal rules
 

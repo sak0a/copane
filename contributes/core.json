@@ -1,6 +1,7 @@
 {
   "commands": [
-    { "command": "copane.showLog", "title": "Show Log", "category": "Copane" }
+    { "command": "copane.showLog", "title": "Show Log", "category": "Copane" },
+    { "command": "copane.answerQuestion", "title": "Answer Agent Question", "category": "Copane" }
   ],
   "configuration": {
     "title": "Copane",

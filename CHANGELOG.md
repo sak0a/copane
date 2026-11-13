@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Request mocking and login prompts reach into iframes from other sites**, nested ones and frames
+  added later included, from a frame's very first request on.
+- **Tabs keep their ids across a window reload** also when no agent has used them yet. Tabs that
+  cannot be told apart (two tabs on the same page) get new ids, and their old ids fail with a clear
+  message instead of reaching another tab.
+- **Questions about a browser tab wait in the status bar** instead of a notification, because VS
+  Code pauses a browser view while a notification covers it. Click the item (or run "Copane: Answer
+  Agent Question") to answer in a dialog.
+
 ## 0.2.1
 
 - License changed from MIT to the PolyForm Shield License 1.0.0: use, change and share it freely,

@@ -203,21 +203,14 @@ test('consent: two calls waiting on the same question share one prompt', async (
   try {
     const id = await userOpens(a, fresh());
     await prompts(a, [], true);
-    // No queued answer: a real notification shows and stays open while both calls wait on it.
+    // No queued answer: a real question waits (in the status bar, see browser-prompts.e2e.mjs) while both calls wait on it.
     const calls = [a.call('browser_select_tab', { tab: id }, { timeoutMs: 60_000 }), evaluate(a, id, '6')];
-    const notifications = () =>
-      JSON.parse(
-        execFileSync(process.execPath, [join(root, 'scripts', 'ui.mjs'), '--name', hostName, 'eval', "JSON.stringify([...document.querySelectorAll('.notification-list-item-message')].map(e => e.textContent))"], { encoding: 'utf8' }),
-      );
-    // The notification appears a moment after the calls start; a fixed wait was flaky on a busy host.
-    let seen = [];
-    await until(() => (seen = notifications()).some(n => n.includes('wants to use your browser tab')), 'the consent notification', { timeoutMs: 10_000 }).catch(async err => {
-      const state = JSON.parse(await a.ok('debug_answer_prompts', {}));
-      throw new Error(`${err.message}; notifications on screen: ${JSON.stringify(seen)}; last prompts: ${JSON.stringify(state.shown.slice(-2))}; tabs: ${await a.ok('browser_list_tabs')}`);
-    });
-    await sleep(800); // Time for a second, wrongly stacked prompt to show up if there were one.
-    const shown = notifications();
-    assert.equal(shown.filter(n => n.includes('wants to use your browser tab')).length, 1, `notifications: ${shown.join(' | ')}`);
+    const waiting = async () => JSON.parse(await a.ok('debug_answer_prompts', {})).waiting.filter(w => w.message.includes('wants to use your browser tab'));
+    // The question appears a moment after the calls start; a fixed wait was flaky on a busy host.
+    await until(async () => (await waiting()).length > 0, 'the consent question', { timeoutMs: 10_000 });
+    await sleep(800); // Time for a second, wrongly stacked question to show up if there were one.
+    const shown = await waiting();
+    assert.equal(shown.length, 1, `questions: ${JSON.stringify(shown)}`);
     // The user shares the tab from the command palette instead of answering: both calls go ahead.
     await a.ok('debug_vscode_command', { command: 'copane.browser.shareTab', args: [id, 'bt-stack'] });
     const [selected, evaluated] = await Promise.all(calls);

@@ -144,6 +144,8 @@ export class CertificateGate implements vscode.Disposable {
           choices: ['Proceed', always, 'Cancel'],
           signal: timeout.signal,
           autoClose: true,
+          placement: 'statusBar',
+          summary: `${sessionDisplayName(session)}: untrusted certificate of ${host}`,
         })
         .then(async answer => {
           if (answer === always) {
