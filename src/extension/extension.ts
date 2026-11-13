@@ -46,7 +46,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // `browser` and `terminals` are assigned by their modules below, before anything can call them.
   const prompts = new VscodePrompts(log);
-  const services = { context, log, window: describeWindow(), sessions, tools, prompts, tabLeases } as BridgeServices;
+  const services: BridgeServices = {
+    context,
+    log,
+    window: describeWindow(),
+    sessions,
+    tools,
+    prompts,
+    tabLeases,
+    browser: undefined!,
+    terminals: undefined!,
+  };
 
   // Order matters: the UI and registration modules read the browser and terminal services.
   activateSessionTools(services);
