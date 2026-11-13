@@ -3,11 +3,12 @@ import { z } from 'zod';
 import { ToolError } from '../../core/errors';
 import { defineTool, type ToolDefinition } from '../../core/tools';
 import { dialogMessage, withPage, type PageEnv } from './call';
+import { checkAcrossFrames } from './frameQuery';
 import { urlMatcher } from './networkLog';
 import { DialogInterrupt } from './pageState';
 import { clip, formatMs } from './ringBuffer';
 import { tabArg } from './schema';
-import { CHECK_CONDITIONS, PAGE_TEXT_EXCERPT } from './scripts';
+import { PAGE_TEXT_EXCERPT } from './scripts';
 
 interface Checks {
   text?: boolean;
@@ -24,7 +25,7 @@ export function waitTools(env: PageEnv): ToolDefinition<any>[] {
       name: 'browser_wait_for',
       title: 'Wait for page',
       description:
-        'Waits until all given conditions hold: text appears or disappears (visible text, case-insensitive, including shadow DOM and same-origin iframes), a CSS selector becomes visible/hidden/attached/detached, the URL matches, the page reaches a load state or the network goes idle. With only `time` it simply waits. Fails with what the page shows when the timeout passes.',
+        'Waits until all given conditions hold: text appears or disappears (visible text, case-insensitive, including shadow DOM and iframes), a CSS selector becomes visible/hidden/attached/detached, the URL matches, the page reaches a load state or the network goes idle. With only `time` it simply waits. Fails with what the page shows when the timeout passes.',
       input: {
         text: z.string().optional().describe('Wait until this text is visible on the page.'),
         textGone: z.string().optional().describe('Wait until this text is no longer visible.'),
@@ -80,7 +81,8 @@ export function waitTools(env: PageEnv): ToolDefinition<any>[] {
             if (state.dialog) throw new ToolError('failed', `Stopped waiting: ${dialogMessage(call.tab.id, state.dialog)}`);
             if (needsDom && state.lifecycleOf().has('DOMContentLoaded')) {
               try {
-                last = await call.evaluate<Checks>(CHECK_CONDITIONS, [{ text: args.text, textGone: args.textGone, selector: args.selector, state: args.state }], { timeoutMs: 5000 });
+                // The page and its cross-origin frames (frameQuery.ts).
+                last = await checkAcrossFrames(call, { text: args.text, textGone: args.textGone, selector: args.selector, state: args.state });
               } catch (err) {
                 if (err instanceof DialogInterrupt) continue;
                 if (err instanceof ToolError) throw err;

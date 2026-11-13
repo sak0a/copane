@@ -66,6 +66,13 @@ export interface CdpPage {
   /** Subscribes to a CDP event of the page target, e.g. `on('Runtime.consoleAPICalled', ...)`. */
   on(event: string, listener: (params: any) => void): vscode.Disposable;
   readonly onDidClose: Event<void>;
+  /**
+   * The same connection scoped to a child target session: an out-of-process (cross-origin) iframe the
+   * page session attached to with `Target.setAutoAttach` (flatten), announced by `Target.attachedToTarget`.
+   * `send` and `on` then address that session only; its failures never close the page connection. It
+   * closes when the child detaches or this connection closes. Optional so test fakes stay valid.
+   */
+  childSession?(sessionId: string): CdpPage;
 }
 
 export interface BrowserService {

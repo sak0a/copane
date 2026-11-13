@@ -8,6 +8,8 @@ import { ToolError } from '../../core/errors';
 import { defineTool, type ToolDefinition } from '../../core/tools';
 import { withPage, type PageCall, type PageEnv } from './call';
 import { markAction, report, settle } from './effects';
+import { focusedAcrossFrames } from './frameQuery';
+import { frameLabel, pointerIntoFrame } from './frameTargets';
 import { click, mouseMove, prepareInput, pressChord, typeText, wheel } from './input';
 import { chordLabel, parseChord, type Modifier } from './keys';
 import { DialogInterrupt } from './pageState';
@@ -48,7 +50,7 @@ async function act(call: PageCall, target: Target | undefined, summary: string |
   let now = '';
   if (target?.kind === 'element' && target.ref && !call.state.dialog && call.state.loaderId === mark.loaderId) {
     const entry = call.refs.get(target.ref);
-    const ax = await call.describeAx(target.backendNodeId).catch(() => undefined);
+    const ax = await target.call.describeAx(target.backendNodeId).catch(() => undefined);
     if (entry && ax && !ax.ignored && (ax.role !== entry.role || ax.name !== entry.name)) {
       call.refs.update(target.ref, ax.role, ax.name);
       now = ` It is now ${ax.role}${ax.name ? ` "${clip(ax.name, 80)}"` : ''}.`;
@@ -60,12 +62,14 @@ async function act(call: PageCall, target: Target | undefined, summary: string |
 
 async function focusedDescription(call: PageCall): Promise<string | undefined> {
   try {
-    const handle = await call.evaluateHandle(DEEP_ACTIVE_ELEMENT);
-    if (!handle.objectId || handle.subtype === 'null') return undefined;
-    const { node } = await call.send('DOM.describeNode', { objectId: handle.objectId });
-    const ax = await call.describeAx(node.backendNodeId);
+    // Followed into cross-origin frames (frameQuery.ts).
+    const focused = await focusedAcrossFrames(call, DEEP_ACTIVE_ELEMENT);
+    if (!focused) return undefined;
+    const { at, objectId } = focused;
+    const { node } = await at.send('DOM.describeNode', { objectId });
+    const ax = await at.describeAx(node.backendNodeId);
     if (ax && !ax.ignored && ax.role !== 'generic') return `${ax.role}${ax.name ? ` "${clip(ax.name, 80)}"` : ''}`;
-    return await call.callOn<string>(handle.objectId, DESCRIBE);
+    return await at.callOn<string>(objectId, DESCRIBE);
   } catch (err) {
     if (err instanceof DialogInterrupt || (err instanceof ToolError && err.code === 'cancelled')) throw err;
     return undefined;
@@ -75,7 +79,7 @@ async function focusedDescription(call: PageCall): Promise<string | undefined> {
 /** Puts text into a field the way a user would: focus, select the old text (clear), type. */
 async function fillField(call: PageCall, target: ElementTarget, info: ElementInfo, value: string, options: { clear: boolean; slowly: boolean }): Promise<string | void> {
   if (info.kind === 'value') {
-    const now = await call.callOn<string>(target.objectId, SET_INPUT_VALUE, [value]);
+    const now = await target.call.callOn<string>(target.objectId, SET_INPUT_VALUE, [value]);
     if (now !== value) return `The field rejected it and holds "${clip(now, 100)}" (expected format for ${info.type} inputs, e.g. ${info.type === 'date' ? '2024-12-31' : info.type === 'time' ? '13:45' : info.type === 'color' ? '#ff0000' : 'a valid value'}).`;
     return;
   }
@@ -83,23 +87,24 @@ async function fillField(call: PageCall, target: ElementTarget, info: ElementInf
     const suggestion = info.kind === 'select' ? 'use browser_select_option' : info.kind === 'checkbox' || info.kind === 'radio' ? 'use browser_click' : info.kind === 'file' ? 'use browser_upload_file' : 'click it, or target the text field itself';
     throw new ToolError('invalid_input', `${target.label} is not a text field (it is ${info.kind === 'other' ? `a <${info.tag}>` : `a ${info.kind}`}); ${suggestion}.`);
   }
-  const focused = await call.callOn<boolean>(target.objectId, FOCUS_FOR_TYPING, [options.clear]);
+  const focused = await target.call.callOn<boolean>(target.objectId, FOCUS_FOR_TYPING, [options.clear]);
   if (!focused) {
     // Some widgets only take focus from a real click.
     const point = await actionPoint(call, target, { verb: 'focus', enabled: true });
+    await pointerIntoFrame(call, target.call, point);
     await click(call, point.x, point.y);
-    await call.callOn(target.objectId, FOCUS_FOR_TYPING, [options.clear]);
+    await target.call.callOn(target.objectId, FOCUS_FOR_TYPING, [options.clear]);
   }
   if (value === '') {
     if (options.clear) await pressChord(call, parseChord('Backspace', call.state.isMac));
   } else {
     await typeText(call, value, options.slowly);
   }
-  const now = await call.callOn<string>(target.objectId, READ_VALUE);
+  const now = await target.call.callOn<string>(target.objectId, READ_VALUE);
   if (options.clear && info.kind === 'text' && now !== value) {
     if (now === '' && value !== '' && !options.slowly) {
       // The text did not arrive (an editor that ignores inserted text): fall back to setting the value.
-      const set = await call.callOn<string>(target.objectId, SET_INPUT_VALUE, [value]);
+      const set = await target.call.callOn<string>(target.objectId, SET_INPUT_VALUE, [value]);
       if (set === value) return;
     }
     return `The field now holds "${clip(now, 200)}", not exactly what was typed (the page reformatted or limited it).`;
@@ -129,7 +134,8 @@ export function actionTools(env: PageEnv): ToolDefinition<any>[] {
           const kind = `${args.doubleClick ? 'Double-clicked' : args.button === 'right' ? 'Right-clicked' : args.button === 'middle' ? 'Middle-clicked' : 'Clicked'}`;
           const withMods = modifiers.length ? ` with ${modifiers.join('+')}` : '';
           return act(call, target, `${kind} ${target.label}${withMods}.`, async () => {
-            if (args.button === 'right') await call.evaluate(SUPPRESS_NATIVE_CONTEXT_MENU);
+            if (args.button === 'right') await (target.kind === 'element' ? target.call : call).evaluate(SUPPRESS_NATIVE_CONTEXT_MENU);
+            if (target.kind === 'element') await pointerIntoFrame(call, target.call, point);
             await click(call, point.x, point.y, { button: args.button ?? 'left', clickCount: args.doubleClick ? 2 : 1, modifiers });
           });
         }),
@@ -209,6 +215,7 @@ export function actionTools(env: PageEnv): ToolDefinition<any>[] {
                 if (info.checked !== field.value) {
                   if (info.kind === 'radio' && !field.value) throw new ToolError('invalid_input', `${target.label} is a radio button; set another option of its group to true instead of unchecking it.`);
                   const point = await actionPoint(call, target, { verb: 'click', enabled: true });
+                  await pointerIntoFrame(call, target.call, point);
                   await click(call, point.x, point.y);
                 }
                 done.push(`${target.label} → ${field.value ? 'checked' : 'unchecked'}`);
@@ -257,7 +264,7 @@ export function actionTools(env: PageEnv): ToolDefinition<any>[] {
           const target = (await resolveTarget(call, args)) as ElementTarget | undefined;
           if (target) {
             await actionPoint(call, target, { verb: 'focus', enabled: false });
-            await call.callOn(target.objectId, FOCUS);
+            await target.call.callOn(target.objectId, FOCUS);
           }
           const count = args.count ?? 1;
           const result = await act(call, undefined, `Pressed ${chordLabel(chord)}${count > 1 ? ` ${count} times` : ''}${target ? ` in ${target.label}` : ''}.`, async () => {
@@ -277,7 +284,10 @@ export function actionTools(env: PageEnv): ToolDefinition<any>[] {
         withPage(env, ctx, args.tab, { access: 'control' }, async call => {
           const target = requireTarget(await resolveTarget(call, args, { allowPoint: true }), 'point');
           const point = await actionPoint(call, target, { verb: 'hover', enabled: false });
-          return act(call, target, `Hovering over ${target.label}.`, () => mouseMove(call, point.x, point.y));
+          return act(call, target, `Hovering over ${target.label}.`, async () => {
+            if (target.kind === 'element') await pointerIntoFrame(call, target.call, point);
+            await mouseMove(call, point.x, point.y);
+          });
         }),
     }),
     defineTool({
@@ -317,6 +327,9 @@ export function actionTools(env: PageEnv): ToolDefinition<any>[] {
           if (args.direction && args.to) throw new ToolError('invalid_input', 'Pass either direction or to, not both.');
           const vp = await viewport(call);
           let point = { x: vp.width / 2, y: vp.height / 2 };
+          // Scroll state is read where the element is: in its cross-origin frame, at the frame's own point.
+          let scope = call;
+          let local = point;
           if (target) {
             await scrollIntoView(call, target);
             if (!args.direction && !args.to) {
@@ -325,13 +338,17 @@ export function actionTools(env: PageEnv): ToolDefinition<any>[] {
             }
             const p = await actionPoint(call, target, { verb: 'scroll', enabled: false });
             point = { x: p.x, y: p.y };
+            scope = target.call;
+            local = p.local ?? point;
           }
           if (!args.direction && !args.to) throw new ToolError('invalid_input', 'Say how to scroll: direction, to, or an element (ref/selector) to bring into view.');
           let state: ScrollState | undefined;
           const how = args.to ? `Scrolled to the ${args.to}` : `Scrolled ${args.direction}`;
-          return act(call, undefined, () => `${how}.${state ? ` ${describeScroll(state)}` : ''}`, async () => {
+          // In a cross-origin frame, "the page" that scrolled is the frame's document.
+          const where = (st: ScrollState) => (scope.frame && st.label === 'page' ? { ...st, label: `document of ${frameLabel(scope.frame)}` } : st);
+          return act(call, undefined, () => `${how}.${state ? ` ${describeScroll(where(state))}` : ''}`, async () => {
             if (args.to) {
-              state = await call.evaluate<ScrollState>(SCROLL_STATE, [point.x, point.y, args.to, 0, 0]);
+              state = await scope.evaluate<ScrollState>(SCROLL_STATE, [local.x, local.y, args.to, 0, 0]);
               return;
             }
             const vertical = args.direction === 'up' || args.direction === 'down';
@@ -341,13 +358,13 @@ export function actionTools(env: PageEnv): ToolDefinition<any>[] {
             const dy = vertical ? sign * amount : 0;
             // A real wheel event first. A tab that is not on screen may not answer it or not scroll
             // (no frames are drawn); then scroll the same container from script instead.
-            const before = await call.evaluate<ScrollState>(SCROLL_STATE, [point.x, point.y, null, 0, 0]);
+            const before = await scope.evaluate<ScrollState>(SCROLL_STATE, [local.x, local.y, null, 0, 0]);
             if (await wheelWorks(call, point.x, point.y, dx, dy)) {
               await call.sleep(150);
-              state = await call.evaluate<ScrollState>(SCROLL_STATE, [point.x, point.y, null, 0, 0]);
+              state = await scope.evaluate<ScrollState>(SCROLL_STATE, [local.x, local.y, null, 0, 0]);
             }
             if (!state || (state.top === before.top && state.left === before.left)) {
-              state = await call.evaluate<ScrollState>(SCROLL_STATE, [point.x, point.y, null, dx, dy]);
+              state = await scope.evaluate<ScrollState>(SCROLL_STATE, [local.x, local.y, null, dx, dy]);
             }
           });
         }),
@@ -375,7 +392,10 @@ export function actionTools(env: PageEnv): ToolDefinition<any>[] {
           if (to.kind === 'element') await scrollIntoView(call, to);
           const start = await actionPoint(call, from, { verb: 'drag', enabled: true });
           const end = await actionPoint(call, to, { verb: 'drop onto', enabled: false });
-          return act(call, from, `Dragged ${from.label} to ${to.label}.`, () => drag(call, start, end));
+          return act(call, from, `Dragged ${from.label} to ${to.label}.`, async () => {
+            if (from.kind === 'element') await pointerIntoFrame(call, from.call, start);
+            await drag(call, start, end);
+          });
         }),
     }),
     defineTool({
@@ -399,35 +419,38 @@ export function actionTools(env: PageEnv): ToolDefinition<any>[] {
           const info = await inspect(call, target);
           const names = files.map(f => f.split(/[\\/]/).pop()).join(', ');
           let input: number | undefined;
+          // A target in a cross-origin frame is addressed through that frame's session.
+          const at = target.call;
           if (info.kind === 'file') input = target.backendNodeId;
           else if (info.hasFileInput) {
-            const handle = await call.callOn(target.objectId, `function () { const c = this.tagName === 'LABEL' ? this.control : this.querySelector('input[type=file]'); return c; }`, [], { returnByValue: false });
-            input = (await call.send('DOM.describeNode', { objectId: handle.objectId })).node.backendNodeId;
+            const handle = await at.callOn(target.objectId, `function () { const c = this.tagName === 'LABEL' ? this.control : this.querySelector('input[type=file]'); return c; }`, [], { returnByValue: false });
+            input = (await at.send('DOM.describeNode', { objectId: handle.objectId })).node.backendNodeId;
           }
           if (input !== undefined) {
             const multiple = info.kind === 'file' ? info.multiple : true;
             if (!multiple && files.length > 1) throw new ToolError('invalid_input', `${target.label} accepts one file; pass a single path.`);
             return act(call, target, `Set ${files.length} file${files.length > 1 ? 's' : ''} on ${target.label}: ${names}.`, async () => {
-              await call.send('DOM.setFileInputFiles', { files, backendNodeId: input });
+              await at.send('DOM.setFileInputFiles', { files, backendNodeId: input });
             });
           }
           // Not a file input: click it with the file chooser intercepted, and answer the chooser.
           const point = await actionPoint(call, target, { verb: 'click', enabled: true });
           let chooser: { backendNodeId: number; mode: string } | undefined;
-          const sub = call.page.on('Page.fileChooserOpened', p => (chooser = p));
-          await call.send('Page.setInterceptFileChooserDialog', { enabled: true });
+          const sub = at.cdp.on('Page.fileChooserOpened', p => (chooser = p));
+          await at.send('Page.setInterceptFileChooserDialog', { enabled: true });
           try {
             const summary = `Clicked ${target.label} and chose ${names} in the file chooser.`;
             return await act(call, target, summary, async () => {
+              await pointerIntoFrame(call, at, point);
               await click(call, point.x, point.y);
               await call.state.waitFor(() => chooser !== undefined, { timeoutMs: 3000, signal: call.signal });
               if (!chooser) throw new ToolError('failed', `Clicking ${target.label} did not open a file chooser. Target the <input type="file"> itself (try selector 'input[type=file]').`);
               if (chooser.mode !== 'selectMultiple' && files.length > 1) throw new ToolError('invalid_input', 'The file chooser accepts one file; pass a single path.');
-              await call.send('DOM.setFileInputFiles', { files, backendNodeId: chooser.backendNodeId });
+              await at.send('DOM.setFileInputFiles', { files, backendNodeId: chooser.backendNodeId });
             });
           } finally {
             sub.dispose();
-            if (!call.page.closed) await call.page.send('Page.setInterceptFileChooserDialog', { enabled: false }, { timeoutMs: 5000 }).catch(() => undefined);
+            if (!at.cdp.closed) await at.cdp.send('Page.setInterceptFileChooserDialog', { enabled: false }, { timeoutMs: 5000 }).catch(() => undefined);
           }
         }),
     }),
@@ -466,7 +489,7 @@ async function wheelWorks(call: PageCall, x: number, y: number, dx: number, dy: 
 }
 
 async function selectOptions(call: PageCall, target: ElementTarget, values: string[]): Promise<string[]> {
-  const r = await call.callOn<any>(target.objectId, SELECT_OPTIONS, [values]);
+  const r = await target.call.callOn<any>(target.objectId, SELECT_OPTIONS, [values]);
   if (r.error === 'not-select') throw new ToolError('invalid_input', `${target.label} is not a <select>. For a custom dropdown, click it open and click the option.`);
   if (r.error === 'single') throw new ToolError('invalid_input', `${target.label} allows only one selected option; pass one value.`);
   if (r.missing) throw new ToolError('invalid_input', `${target.label} has no option ${r.missing.map((m: string) => `"${m}"`).join(', ')}. Options: ${r.available.join(', ')}${r.total > r.available.length ? `, … (${r.total} in total)` : ''}.`);

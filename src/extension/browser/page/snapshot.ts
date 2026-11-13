@@ -34,6 +34,8 @@ export interface SnapshotInput {
   maxChars: number;
   /** The page URL; links on the same origin are printed as paths. */
   pageUrl?: string;
+  /** Why an iframe's content is not in `frames` (frame id from `frameOwners`, if known); printed in its place. */
+  frameNote?(frameId: string | undefined): string | undefined;
 }
 
 export interface SnapshotOutput {
@@ -163,7 +165,7 @@ export function renderSnapshot(input: SnapshotInput): SnapshotOutput {
     if (role === 'iframe') {
       const childFrame = backend !== undefined ? input.frameOwners.get(backend) : undefined;
       if (childFrame && byFrame.has(childFrame)) children = convertFrame(childFrame);
-      else note = 'cross-origin frame: its content cannot be read; use browser_screenshot and click by x/y';
+      else note = input.frameNote?.(childFrame) ?? 'cross-origin frame: its content cannot be read; use browser_screenshot and click by x/y';
     } else if (!LEAF.has(role) && !(role === 'combobox' && props.editable !== undefined)) {
       children = mergeText(childViews());
     }

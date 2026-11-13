@@ -56,6 +56,12 @@ agent and its MCP server also run; the browser itself stays on the UI side and V
   session color, never in screenshots the agent takes) and on the editor tab where VS Code allows it.
 - Tools take an optional `tab`; without it they act on the session's current tab (the one it last
   opened or used), never on "whatever is focused".
+- **Frames**: cross-origin iframes are separate CDP targets (site isolation). Each tab's page session
+  auto-attaches to them (`page/frames.ts`; nested ones through each frame's session) and records
+  their console and network into the tab's logs. Snapshots read them in place (bounded,
+  `page/frameSnapshot.ts`), refs remember their frame and its document, and input still goes to the
+  page target at coordinates mapped out through each `<iframe>` (`page/frameTargets.ts`). The page
+  indicator and certificate handling stay on the page target only.
 
 ## Terminal rules
 

@@ -7,8 +7,8 @@ export const refArg = z.string().optional().describe('Element ref from your late
 export const selectorArg = z
   .string()
   .optional()
-  .describe('CSS selector, instead of ref. Searches open shadow roots and same-origin iframes too; the first visible match is used.');
-export const xArg = z.number().optional().describe('Viewport x coordinate in CSS pixels, instead of ref/selector (e.g. for canvas or a cross-origin iframe; see browser_screenshot).');
+  .describe('CSS selector, instead of ref. Searches open shadow roots and iframes too; "iframe-selector >>> selector" searches inside that iframe only. The first visible match is used.');
+export const xArg = z.number().optional().describe('Viewport x coordinate in CSS pixels, instead of ref/selector (e.g. for a canvas; see browser_screenshot).');
 export const yArg = z.number().optional().describe('Viewport y coordinate in CSS pixels, with x.');
 
 export const elementArgs = { ref: refArg, selector: selectorArg };

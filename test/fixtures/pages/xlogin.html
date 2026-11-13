@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Login frame</title>
+<style>
+  body { font: 13px sans-serif; margin: 8px; }
+  label { display: block; margin: 3px 0; }
+  #hover { display: inline-block; padding: 4px; border: 1px dashed #999; }
+  #drop { display: inline-block; width: 90px; height: 24px; border: 1px solid #66a; }
+</style></head>
+<body>
+<form id="form" onsubmit="event.preventDefault(); signIn();">
+  <label>Username <input id="user" name="user" autocomplete="off"></label>
+  <label>Password <input id="pass" type="password"></label>
+  <label>Role <select id="role"><option>Viewer</option><option>Editor</option><option>Admin</option></select></label>
+  <label><input id="remember" type="checkbox"> Remember me</label>
+  <label>Keys <input id="keys" onkeydown="document.getElementById('keylog').textContent += event.key + ' '"></label>
+  <button id="signin">Sign in</button>
+</form>
+<p id="result">Not signed in</p>
+<p id="keylog"></p>
+<div id="notes" contenteditable="true" aria-label="Notes" style="border:1px solid #ccc;min-height:18px"></div>
+<span id="hover" onmouseenter="this.textContent='Hovered'">Hover me</span>
+<button id="alert" onclick="alert('frame alert')">Frame alert</button>
+<label>Attachment <input id="file" type="file" onchange="document.getElementById('files').textContent = [...this.files].map(f => f.name).join(', ')"></label>
+<span id="files"></span>
+<button id="pick" onclick="document.getElementById('hidden-file').click()">Pick a file</button>
+<input id="hidden-file" type="file" hidden onchange="document.getElementById('picked').textContent = [...this.files].map(f => f.name).join(', ')">
+<span id="picked"></span>
+<span id="drag" draggable="true" ondragstart="event.dataTransfer.setData('text/plain', 'dragged')">Drag me</span>
+<span id="drop" ondragover="event.preventDefault()" ondrop="event.preventDefault(); this.textContent = 'Dropped ' + event.dataTransfer.getData('text/plain')">Drop here</span>
+<script>
+  function signIn() {
+    const user = document.getElementById('user').value;
+    const role = document.getElementById('role').value;
+    const remember = document.getElementById('remember').checked;
+    document.getElementById('result').textContent = `Signed in as ${user} (${role}, remember=${remember})`;
+    console.log('frame login', user);
+    console.error('frame error after login');
+    fetch('/status/503').then(r => r.text()).catch(() => {});
+  }
+</script>
+</body></html>

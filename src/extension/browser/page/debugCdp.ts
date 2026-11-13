@@ -12,8 +12,9 @@ export function debugCdpTools(services: BridgeServices): ToolDefinition<any>[] {
       description: 'Development only. Sends raw CDP commands to a tab page target in order and collects events for `listenMs`.',
       input: {
         tab: z.string().optional(),
-        commands: z.array(z.object({ method: z.string(), params: z.record(z.string(), z.any()).optional(), timeoutMs: z.number().optional(), noWait: z.boolean().optional() })),
+        commands: z.array(z.object({ method: z.string(), params: z.record(z.string(), z.any()).optional(), timeoutMs: z.number().optional(), noWait: z.boolean().optional(), session: z.string().optional() })),
         events: z.array(z.string()).optional(),
+        watch: z.array(z.string()).optional().describe('Child session ids whose events to collect too.'),
         listenMs: z.number().optional(),
         maxChars: z.number().optional(),
       },
@@ -21,11 +22,23 @@ export function debugCdpTools(services: BridgeServices): ToolDefinition<any>[] {
         const { page } = await services.browser.acquire(ctx.session, args.tab, 'control', ctx.signal);
         const seen: unknown[] = [];
         const subs = (args.events ?? []).map(e => page.on(e, p => seen.push({ event: e, params: p, t: Date.now() })));
+        // Child sessions (out-of-process iframes): the same events, tagged with the session.
+        const watchChild = (sessionId: string) => {
+          const child = page.childSession?.(sessionId);
+          if (!child) return;
+          for (const e of [...(args.events ?? []), 'Target.attachedToTarget']) subs.push(child.on(e, p => {
+            if (e === 'Target.attachedToTarget') watchChild(p.sessionId);
+            if ((args.events ?? []).includes(e)) seen.push({ session: sessionId, event: e, params: p, t: Date.now() });
+          }));
+        };
+        subs.push(page.on('Target.attachedToTarget', p => watchChild(p.sessionId)));
+        for (const id of args.watch ?? []) watchChild(id);
         const out: unknown[] = [];
         try {
           for (const c of args.commands) {
             const t = Date.now();
-            const p = page.send(c.method, c.params ?? {}, { timeoutMs: c.timeoutMs ?? 15000 });
+            const target = c.session ? page.childSession?.(c.session) ?? page : page;
+            const p = target.send(c.method, c.params ?? {}, { timeoutMs: c.timeoutMs ?? 15000 });
             if (c.noWait) {
               p.then(r => out.push({ late: c.method, ms: Date.now() - t, r }), e => out.push({ late: c.method, error: String(e) }));
               continue;

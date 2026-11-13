@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ToolError } from '../../core/errors';
 import { defineTool, image, text, type ToolDefinition } from '../../core/tools';
 import { withPage, type PageCall, type PageEnv } from './call';
+import { addCrossOriginFrames } from './frameSnapshot';
 import { DialogInterrupt } from './pageState';
 import { clip } from './ringBuffer';
 import { elementArgs, tabArg } from './schema';
@@ -15,14 +16,14 @@ const DEFAULT_SNAPSHOT_CHARS = 20_000;
 const MAX_SNAPSHOT_CHARS = 60_000;
 const MAX_FRAMES = 25;
 
-interface DomFacts {
+export interface DomFacts {
   pointer: Set<number>;
   hidden: Set<number>;
   frameOwners: Map<number, string>;
 }
 
 /** Reads cursor styles, the bridge's own UI elements and iframe → frame ids from one DOM snapshot. */
-async function domFacts(call: PageCall): Promise<DomFacts | undefined> {
+export async function domFacts(call: PageCall): Promise<DomFacts | undefined> {
   let ds: any;
   try {
     ds = await call.send('DOMSnapshot.captureSnapshot', { computedStyles: ['cursor'], includeDOMRects: false });
@@ -80,7 +81,7 @@ export async function snapshotText(call: PageCall, root: ElementTarget | undefin
       }
     }
   }
-  const pending = [...new Set(facts.frameOwners.values())].filter(id => id !== mainFrameId).slice(0, MAX_FRAMES);
+  const pending = [...new Set(facts.frameOwners.values())].filter(id => id !== mainFrameId && !state.frames.get(id)).slice(0, MAX_FRAMES);
   await Promise.all(
     pending.map(async frameId => {
       try {
@@ -92,6 +93,9 @@ export async function snapshotText(call: PageCall, root: ElementTarget | undefin
     }),
   );
 
+  // Cross-origin frames (frameSnapshot.ts): their trees join the input with node ids made unique.
+  const remote = await addCrossOriginFrames(call, { frames, facts, root, collectFacts: domFacts, viewport: await viewport(call) });
+
   const loaderId = state.loaderId;
   const output = renderSnapshot({
     frames,
@@ -99,10 +103,11 @@ export async function snapshotText(call: PageCall, root: ElementTarget | undefin
     frameOwners: facts.frameOwners,
     pointer: facts.pointer,
     hidden: facts.hidden,
-    root: root?.backendNodeId,
+    root: root ? remote.idOf(root) : undefined,
     maxChars,
     pageUrl: state.url,
-    refFor: node => call.refs.assign(node, loaderId),
+    refFor: node => call.refs.assign(remote.refNode(node), loaderId),
+    frameNote: frameId => remote.note(frameId),
   });
   const title = String(main.nodes.find(n => n.role?.value === 'RootWebArea')?.name?.value ?? '');
   const scope = root ? `- Part of the page: ${root.label}\n` : '';
@@ -119,7 +124,7 @@ export function snapshotTools(env: PageEnv): ToolDefinition<any>[] {
       name: 'browser_snapshot',
       title: 'Read page (accessibility snapshot)',
       description:
-        'Returns a text snapshot of the page from its accessibility tree: roles, names, values and states, one element per line, each with a ref (e.g. [ref=e12]) that browser_click, browser_type and the other action tools accept. Better than a screenshot for finding and acting on elements. Includes same-origin iframes and shadow DOM. Large pages are cut at maxChars with a list of the parts left out; pass ref or selector to read just one part.',
+        'Returns a text snapshot of the page from its accessibility tree: roles, names, values and states, one element per line, each with a ref (e.g. [ref=e12]) that browser_click, browser_type and the other action tools accept. Better than a screenshot for finding and acting on elements. Includes iframes (cross-origin ones too, up to 10) and shadow DOM. Large pages are cut at maxChars with a list of the parts left out; pass ref or selector to read just one part.',
       input: {
         ...elementArgs,
         maxChars: z.number().int().min(2000).max(MAX_SNAPSHOT_CHARS).optional().describe(`Size budget in characters. Default ${DEFAULT_SNAPSHOT_CHARS}.`),
@@ -154,7 +159,7 @@ export function snapshotTools(env: PageEnv): ToolDefinition<any>[] {
           let what: string;
           let cut = '';
           if (target) {
-            const box = await elementBox(call, target.backendNodeId);
+            const box = await elementBox(target.call, target.backendNodeId);
             if (!box || box.width < 1 || box.height < 1) throw new ToolError('failed', `${target.label} has no visible box to capture (it is hidden or empty).`);
             region = { x: box.x + vp.pageX, y: box.y + vp.pageY, width: box.width, height: box.height };
             what = target.label;

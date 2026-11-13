@@ -42,6 +42,10 @@ export async function settle(call: PageCall, mark: ActionMark, options: { naviga
       { timeoutMs: options.navigationTimeoutMs ?? 10_000, signal: call.signal },
     );
   }
+  if (!state.dialog && state.frames.loadingSince(mark.seq).length > 0) {
+    // A navigation inside a cross-origin frame (a login form posting in its frame): let it land.
+    await state.waitFor(() => state.frames.loadingSince(mark.seq).length === 0, { timeoutMs: options.navigationTimeoutMs ?? 10_000, signal: call.signal });
+  }
   if (!state.dialog) {
     // Requests the action started: wait a little for them to finish so failures can be reported.
     await state.waitFor(
@@ -70,6 +74,8 @@ export async function describeEffects(call: PageCall, mark: ActionMark): Promise
   } else if (navs.length > 0 || state.url !== mark.url) {
     lines.push(`URL changed to ${clip(state.url, 300)} (same page, no reload).`);
   }
+
+  lines.push(...state.frames.describeSince(mark.seq));
 
   if (state.dialog) {
     const d = state.dialog;

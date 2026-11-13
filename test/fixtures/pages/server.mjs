@@ -61,7 +61,7 @@ export async function startFixtureServer({ port = 0, host = '127.0.0.1' } = {}) 
   const actual = server.address().port;
   return {
     port: actual,
-    url: `http://${host}:${actual}`,
+    url: `http://${host.includes(':') ? `[${host}]` : host}:${actual}`,
     close: () =>
       new Promise(resolve => {
         for (const res of hanging) res.destroy();
@@ -75,5 +75,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const port = Number(process.argv[2] ?? 0);
   const a = await startFixtureServer({ port });
   const b = await startFixtureServer({ host: 'localhost' });
-  console.log(`fixtures: ${a.url}  (second origin: ${b.url})`);
+  const c = await startFixtureServer({ host: '::1' });
+  console.log(`fixtures: ${a.url}  (second origin: ${b.url}, third: ${c.url})`);
+  console.log(`cross-origin frames: ${a.url}/xframes.html?b=${encodeURIComponent(b.url)}&c=${encodeURIComponent(c.url)}`);
 }

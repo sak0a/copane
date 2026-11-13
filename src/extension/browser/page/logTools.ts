@@ -144,6 +144,8 @@ export function logTools(env: PageEnv): ToolDefinition<any>[] {
           const e = state.network.byId(id);
           if (!e) throw new ToolError('not_found', `No request "${args.id}" is recorded for ${call.tab.id} (the buffer keeps the last ${state.network.entries.capacity}). List them with browser_network_requests.`);
           const max = args.maxBodyChars ?? 4000;
+          // A request of a cross-origin frame: its bodies are kept by that frame's target.
+          const at = call.at(state.frames.targetOf(e.frameId));
           const lines: string[] = [formatNetworkEntry(e, Date.now()), `Started ${new Date(e.startedAt).toTimeString().slice(0, 8)}${e.end !== undefined ? `, took ${formatMs((e.end - e.start) * 1000)}` : ''}${e.mimeType ? `, ${e.mimeType}` : ''}${e.size !== undefined ? `, ${formatBytes(e.size)} transferred` : ''}.`];
           if (e.redirectedTo) lines.push(`Redirected to ${clip(e.redirectedTo, 500)}.`);
           if (e.statusText) lines.push(`Status text: ${e.statusText}`);
@@ -156,7 +158,7 @@ export function logTools(env: PageEnv): ToolDefinition<any>[] {
             let post = e.postData;
             if (e.hasPostData && post === undefined && !state.dialog) {
               try {
-                post = (await call.send('Network.getRequestPostData', { requestId: e.requestId }, { timeoutMs: 5000 })).postData;
+                post = (await at.send('Network.getRequestPostData', { requestId: e.requestId }, { timeoutMs: 5000 })).postData;
               } catch {
                 post = undefined;
               }
@@ -168,7 +170,7 @@ export function logTools(env: PageEnv): ToolDefinition<any>[] {
             else if (state.dialog) lines.push('Response body: (cannot be read while a dialog blocks the page)');
             else {
               try {
-                const r = await call.send('Network.getResponseBody', { requestId: e.requestId }, { timeoutMs: 10_000 });
+                const r = await at.send('Network.getResponseBody', { requestId: e.requestId }, { timeoutMs: 10_000 });
                 if (r.base64Encoded) {
                   const bytes = Buffer.from(r.body, 'base64');
                   const textual = /^(text\/|application\/(json|javascript|xml|x-www-form-urlencoded|.*\+json|.*\+xml))/.test(e.mimeType ?? '');

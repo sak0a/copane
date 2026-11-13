@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Cross-origin frames fixture</title>
+<style>
+  body { font: 14px sans-serif; margin: 12px; }
+  iframe { display: block; }
+  #spacer { height: 900px; background: linear-gradient(#fff, #eef); }
+  #offset { margin-left: 150px; transform: scale(0.75) rotate(4deg); transform-origin: 0 0; }
+  #scaled { border: 7px solid #888; padding: 5px; }
+</style></head>
+<body>
+<!-- Every frame comes from another origin: ?b=<second origin>&c=<third origin> (see server.mjs). -->
+<h1>Cross-origin frames</h1>
+<p id="top-status">Top page ready</p>
+<iframe id="login" title="Login frame" width="440" height="360"></iframe>
+<div id="spacer">Spacer</div>
+<div id="offset"><iframe id="scaled" title="Scaled frame" width="400" height="200"></iframe></div>
+<iframe id="nested" title="Nested frame" width="480" height="300"></iframe>
+<iframe id="nav" title="Navigating frame" width="440" height="140"></iframe>
+<div style="height: 400px"></div>
+<script>
+  const q = new URLSearchParams(location.search);
+  const b = q.get('b'), c = q.get('c'), a = location.origin;
+  document.getElementById('login').src = b + '/xlogin.html';
+  document.getElementById('scaled').src = b + '/xlong.html';
+  document.getElementById('nested').src = b + '/xnest.html?c=' + encodeURIComponent(c);
+  document.getElementById('nav').src = b + '/xnav.html?a=' + encodeURIComponent(a) + '&c=' + encodeURIComponent(c);
+</script>
+</body></html>

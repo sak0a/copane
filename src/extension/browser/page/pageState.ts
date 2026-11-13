@@ -7,6 +7,7 @@ import { Emitter, type Disposable } from '../../core/events';
 import type { Logger } from '../../core/log';
 import type { CdpPage } from '../../core/services';
 import { ConsoleLog } from './consoleLog';
+import { FrameRegistry } from './frames';
 import { NetworkLog } from './networkLog';
 import { RingBuffer } from './ringBuffer';
 
@@ -81,6 +82,8 @@ export class PageState {
   /** Focus emulation is on (while an agent controls the tab; see prepareInput in input.ts). */
   focusEmulation = false;
   lastNetworkActivity = Date.now();
+  /** Cross-origin (out-of-process) iframes of the page, re-created with every CDP connection. */
+  frames!: FrameRegistry;
 
   private readonly lifecycle = new Map<string, Set<string>>();
   private readonly worlds = new Map<string, number>();
@@ -241,6 +244,15 @@ export class PageState {
 
     this.subscriptions.push(page.onDidClose(() => this.changeEmitter.fire()));
     this.ready = this.initialize(page);
+    this.frames?.dispose();
+    this.frames = new FrameRegistry(page, {
+      log: this.log,
+      console: this.console,
+      network: this.network,
+      nextSeq: () => this.nextSeq(),
+      activity,
+      changed: () => this.changeEmitter.fire(),
+    });
   }
 
   private addLifecycle(name: string): void {
@@ -371,6 +383,7 @@ export class PageState {
 
   dispose(): void {
     for (const s of this.subscriptions.splice(0)) s.dispose();
+    this.frames.dispose();
     this.changeEmitter.dispose();
   }
 }

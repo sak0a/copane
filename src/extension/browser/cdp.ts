@@ -8,6 +8,12 @@
 // service closes the connection from the tab-close event, and a send that the browser answers with
 // "session/target not found" closes it too: every later send then fails at once with a message for
 // the agent, and the next `acquire` attaches a fresh connection if the tab still exists.
+//
+// Child sessions: the page session can auto-attach to its out-of-process iframes (`Target.setAutoAttach`
+// with flatten); VS Code's proxy forwards that to Chromium and announces each child with
+// `Target.attachedToTarget` on the session that asked. `childSession(id)` gives a CdpPage scoped to
+// such a session: commands carry its session id, its events go only to its own listeners, and its
+// failures never close the page connection.
 import type * as vscode from 'vscode';
 import { ToolError } from '../core/errors';
 import { Emitter, type Event } from '../core/events';
@@ -34,6 +40,7 @@ export class CdpConnection implements CdpPage {
   private readonly listeners = new Map<string, Set<(params: any) => void>>();
   private readonly closeEmitter = new Emitter<void>();
   private readonly subscriptions: vscode.Disposable[] = [];
+  private readonly children = new Map<string, ChildSession>();
   private closeReason: CloseReason = 'closed';
 
   readonly onDidClose: Event<void> = this.closeEmitter.event;
@@ -117,6 +124,23 @@ export class CdpConnection implements CdpPage {
     return { dispose: () => void set.delete(listener) };
   }
 
+  /** See `CdpPage.childSession`. */
+  childSession(sessionId: string): CdpPage {
+    let child = this.children.get(sessionId);
+    if (!child) {
+      child = new ChildSession(
+        this.tabId,
+        sessionId,
+        (method, params, timeoutMs) => this.raw(method, params, sessionId, timeoutMs),
+        id => this.childSession(id),
+        () => this.children.delete(sessionId),
+      );
+      this.children.set(sessionId, child);
+      if (this.isClosed) child.close();
+    }
+    return child;
+  }
+
   /** Closes the connection. The tab itself stays open. `tab-closed` and `lost` only change the error later sends get. */
   close(reason: CloseReason = 'closed'): void {
     if (this.isClosed) return;
@@ -129,6 +153,8 @@ export class CdpConnection implements CdpPage {
     }
     this.pending.clear();
     this.listeners.clear();
+    for (const child of [...this.children.values()]) child.close();
+    this.children.clear();
     void Promise.resolve(this.session.close()).then(undefined, () => {});
     this.closeEmitter.fire();
     this.closeEmitter.dispose();
@@ -176,7 +202,13 @@ export class CdpConnection implements CdpPage {
       this.close('lost');
       return;
     }
-    if (message.sessionId !== this.pageSessionId) return;
+    if (message.method === 'Target.detachedFromTarget' && typeof message.params?.sessionId === 'string') {
+      this.children.get(message.params.sessionId)?.close();
+    }
+    if (message.sessionId !== this.pageSessionId) {
+      if (message.sessionId) this.children.get(message.sessionId)?.dispatch(message.method, message.params);
+      return;
+    }
     for (const listener of [...(this.listeners.get(message.method) ?? [])]) {
       try {
         listener(message.params);
@@ -199,5 +231,80 @@ export class CdpConnection implements CdpPage {
       default:
         return false;
     }
+  }
+}
+
+/** A child target session (out-of-process iframe) of a CdpConnection; see `CdpPage.childSession`. */
+class ChildSession implements CdpPage {
+  private isClosed = false;
+  private readonly listeners = new Map<string, Set<(params: any) => void>>();
+  private readonly closeEmitter = new Emitter<void>();
+  readonly onDidClose: Event<void> = this.closeEmitter.event;
+
+  constructor(
+    readonly tabId: string,
+    readonly sessionId: string,
+    private readonly rawSend: (method: string, params: Record<string, unknown>, timeoutMs: number | undefined) => Promise<any>,
+    private readonly sibling: (sessionId: string) => CdpPage,
+    private readonly onClosed: () => void,
+  ) {}
+
+  get closed(): boolean {
+    return this.isClosed;
+  }
+
+  async send<T = any>(method: string, params: Record<string, unknown> = {}, options: { timeoutMs?: number } = {}): Promise<T> {
+    if (this.isClosed) throw this.goneError();
+    let sub: { dispose(): void } | undefined;
+    try {
+      // A command to a frame that detaches meanwhile is never answered: end it with the detach.
+      const gone = new Promise<never>((_, reject) => (sub = this.onDidClose(() => reject(this.goneError()))));
+      gone.catch(() => {});
+      return await Promise.race([this.rawSend(method, params, options.timeoutMs), gone]);
+    } catch (err) {
+      if (!(err instanceof ToolError) && err instanceof Error && GONE.test(err.message)) {
+        this.close();
+        throw this.goneError();
+      }
+      throw err;
+    } finally {
+      sub?.dispose();
+    }
+  }
+
+  on(event: string, listener: (params: any) => void): vscode.Disposable {
+    let set = this.listeners.get(event);
+    if (!set) this.listeners.set(event, (set = new Set()));
+    set.add(listener);
+    return { dispose: () => void set.delete(listener) };
+  }
+
+  /** Nested frames: all sessions are flat, so this is the page connection's child too. */
+  childSession(sessionId: string): CdpPage {
+    return this.sibling(sessionId);
+  }
+
+  dispatch(method: string, params: unknown): void {
+    if (this.isClosed) return;
+    for (const listener of [...(this.listeners.get(method) ?? [])]) {
+      try {
+        listener(params);
+      } catch {
+        // A failing listener must not break event delivery to the others.
+      }
+    }
+  }
+
+  close(): void {
+    if (this.isClosed) return;
+    this.isClosed = true;
+    this.listeners.clear();
+    this.onClosed();
+    this.closeEmitter.fire();
+    this.closeEmitter.dispose();
+  }
+
+  private goneError(): ToolError {
+    return new ToolError('not_found', `A frame in ${this.tabId} went away while the tool was using it (it navigated, reloaded or was removed). Take a new snapshot.`);
   }
 }

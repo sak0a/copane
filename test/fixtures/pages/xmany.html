@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Many frames fixture</title>
+<style>body { font: 13px sans-serif; margin: 8px; } .ad { display: inline-block; margin: 2px; }</style></head>
+<body>
+<h1>Many frames</h1>
+<p>A page with twenty visible ad frames, three invisible tracking frames and one login frame.</p>
+<div id="ads"></div>
+<iframe id="login" title="Login frame" width="440" height="360"></iframe>
+<script>
+  const b = new URLSearchParams(location.search).get('b');
+  const ads = document.getElementById('ads');
+  for (let i = 1; i <= 20; i++) {
+    const f = document.createElement('iframe');
+    f.className = 'ad'; f.title = 'Ad ' + i; f.width = 300; f.height = 60; f.src = b + '/xad.html?n=' + i;
+    ads.appendChild(f);
+  }
+  for (let i = 1; i <= 3; i++) {
+    const f = document.createElement('iframe');
+    f.src = b + '/xad.html?n=pixel' + i;
+    if (i === 1) f.style.display = 'none'; else { f.width = 1; f.height = 1; f.style.border = '0'; }
+    ads.appendChild(f);
+  }
+  document.getElementById('login').src = b + '/xlogin.html';
+</script>
+</body></html>

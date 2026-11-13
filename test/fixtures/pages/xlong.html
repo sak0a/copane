@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Long frame</title>
+<style>body { font: 13px sans-serif; margin: 8px; } #deep { margin-left: 60px; }</style></head>
+<body>
+<p>Top of the long frame</p>
+<div style="height: 1400px; background: linear-gradient(#efe, #fee)"></div>
+<button id="deep" onclick="this.textContent = 'Deep clicked'">Deep button</button>
+<p id="where">No click yet</p>
+<div style="height: 300px"></div>
+<script>
+  // Where the last click landed relative to the button's box (proves coordinate mapping).
+  document.addEventListener('click', e => {
+    const r = document.getElementById('deep').getBoundingClientRect();
+    document.getElementById('where').textContent = `click at ${Math.round(e.clientX - r.left)},${Math.round(e.clientY - r.top)} of ${Math.round(r.width)}x${Math.round(r.height)}`;
+  });
+</script>
+</body></html>
