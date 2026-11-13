@@ -57,7 +57,9 @@ export function selectInstance(input: DiscoveryInput): DiscoveryResult | undefin
     if (instance) return { instance, matchedBy: 'env' };
   }
 
-  if (previous && previous.workspaceFolders.length > 0) {
+  // Only when the previous window is gone: if it is still open, it ended the session itself, and
+  // another window with the same folders is not its successor.
+  if (previous && previous.workspaceFolders.length > 0 && !instances.some(i => i.id === previous.id)) {
     const same = instances
       .filter(i => i.id !== previous.id && sameFolders(i.workspaceFolders, previous.workspaceFolders))
       .sort((a, b) => b.startedAt - a.startedAt);

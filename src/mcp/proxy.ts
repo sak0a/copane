@@ -74,7 +74,8 @@ export function createProxyServer(bridge: BridgeClient, options: ProxyOptions): 
   server.setRequestHandler(InitializeRequestSchema, async request => {
     const info = request.params.clientInfo;
     bridge.client = { name: info?.name ?? 'unknown', ...(info?.version ? { version: info.version } : {}) };
-    await bridge.ensure(options.initWaitMs);
+    // Bounded even when a window accepts the socket but answers slowly.
+    await Promise.race([bridge.ensure(options.initWaitMs), new Promise(resolve => setTimeout(resolve, options.initWaitMs).unref?.())]);
     bridge.start();
     const result =
       typeof sdkInitialize === 'function'
@@ -83,7 +84,14 @@ export function createProxyServer(bridge: BridgeClient, options: ProxyOptions): 
     return { ...result, instructions: buildInstructions(bridge) } as any;
   });
 
-  bridge.onToolsChanged = () => void server.sendToolListChanged().catch(() => {});
+  // Not before the handshake is complete: the client lists the tools right after it anyway.
+  let initialized = false;
+  server.oninitialized = () => {
+    initialized = true;
+  };
+  bridge.onToolsChanged = () => {
+    if (initialized) void server.sendToolListChanged().catch(() => {});
+  };
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const remote = (await bridge.listTools()).filter(t => !LOCAL_NAMES.has(t.name));

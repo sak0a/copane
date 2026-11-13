@@ -87,6 +87,40 @@ describe('editing config.toml', () => {
     expect(removeCodexEntry(after)).toBe(`${USER_CONFIG}\n[profiles.fast]\nmodel = "x"\n`);
   });
 
+  it('keeps comments that sit between its table and the next one', () => {
+    const before = `${renderCodexEntry(spec)}\n\n# My GitHub server\n[mcp_servers.github]\ncommand = "gh"\n\n# trailing note\n`;
+    expect(inspectCodexText(before, spec)).toMatchObject({ kind: 'ours', current: true });
+    expect(upsertCodexEntry(before, spec)).toBe(before);
+    const updated = upsertCodexEntry(before, devSpec);
+    expect(updated).toContain('\n\n# My GitHub server\n[mcp_servers.github]');
+    expect(removeCodexEntry(before)).toBe('# My GitHub server\n[mcp_servers.github]\ncommand = "gh"\n\n# trailing note\n');
+    const atEnd = `model = "x"\n\n${renderCodexEntry(spec)}\n# a comment at the end\n`;
+    expect(removeCodexEntry(atEnd)).toBe('model = "x"\n\n# a comment at the end\n');
+  });
+
+  it('keeps keys the user added to its table, and updates only what makes it start', () => {
+    const custom = renderCodexEntry(devSpec).replace('tool_timeout_sec = 600', 'tool_timeout_sec = 900\nenabled = false # paused for now');
+    expect(inspectCodexText(custom, devSpec)).toMatchObject({ kind: 'ours', current: true });
+    expect(upsertCodexEntry(custom, devSpec)).toBe(custom);
+    const moved = upsertCodexEntry(custom, spec);
+    expect(inspectCodexText(moved, spec)).toMatchObject({ kind: 'ours', current: true });
+    expect(moved).toContain('enabled = false # paused for now');
+    expect(moved).toContain('tool_timeout_sec = 900');
+    expect(moved).not.toContain('AGENT_BRIDGE_HOME');
+    // And back: the env table is added after the user's keys.
+    const back = upsertCodexEntry(moved, devSpec);
+    expect(inspectCodexText(back, devSpec)).toMatchObject({ kind: 'ours', current: true });
+    expect(back).toContain('enabled = false');
+  });
+
+  it('updates an entry whose last line is args without bringing the old line back', () => {
+    const minimal = `[mcp_servers.vscode]\ncommand = "/old/.vscode-agent-bridge/bin/mcp-server"\nargs = [\n  "x",\n]\n`;
+    const next = upsertCodexEntry(minimal, devSpec);
+    expect(inspectCodexText(next, devSpec)).toMatchObject({ kind: 'ours', current: true });
+    expect(next).not.toContain('/old/');
+    expect(next).not.toContain('"x"');
+  });
+
   it('treats a user-defined vscode server as theirs, in table and in inline form', () => {
     const table = `${USER_CONFIG}\n[mcp_servers.vscode]\ncommand = "npx"\nargs = ["their-server"]\n`;
     expect(inspectCodexText(table, spec)).toEqual({ kind: 'foreign', command: 'npx their-server' });

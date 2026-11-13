@@ -180,6 +180,8 @@ export class BridgeClient {
       return { ok: false, text: `There is no open window "${choice}".\n${this.windowListText(instances)}` };
     }
     this.explicit = found.id;
+    // An attempt already under way targets the window chosen before; let it finish, then switch.
+    if (this.connecting) await this.connecting.catch(() => undefined);
     const current = this.current;
     if (current && current.instance.id !== found.id) {
       this.switching = true;
@@ -294,6 +296,8 @@ export class BridgeClient {
       };
       const hello = await peer.request<HelloResult>(Methods.hello, params, { timeoutMs: this.timing.helloTimeoutMs });
       const connection: Connection = { peer, hello, instance, matchedBy, note };
+      // Another window's tools must not stay visible if this window's list cannot be fetched.
+      if (this.previous && this.previous.id !== instance.id && matchedBy !== 'reconnect') this.tools = undefined;
       peer.onNotification(Methods.toolsChanged, () => void this.refreshTools(connection));
       peer.onClose(() => this.handleClose(connection));
       this.connection = connection;
@@ -329,8 +333,11 @@ export class BridgeClient {
     this.connection = undefined;
     const windowStillOpen = this.options.readInstances().some(i => i.id === connection.instance.id);
     if (this.switching) {
+      // select() connects to the new window right away; the tool list changes once, from there.
       this.options.log(`left window ${connection.instance.id}`);
-    } else if (windowStillOpen) {
+      return;
+    }
+    if (windowStillOpen) {
       // The window ended this session (the user stopped it) or its bridge restarted. Do not come back
       // on our own; the next tool call reconnects, which is the agent deciding to continue.
       this.endedByWindow = true;

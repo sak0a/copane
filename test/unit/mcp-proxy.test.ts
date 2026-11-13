@@ -246,6 +246,31 @@ describe('MCP server', () => {
     expect((await call('whoami')).text).toBe('Claude 1 in 100');
   });
 
+  it('after the window ended the session, reconnects to that window, not to another with the same folder', async () => {
+    const win = await openWindow('100', ['/work/a']);
+    await openWindow('200', ['/work/a'], { startedAt: Date.now() + 1000 });
+    const { call, bridge } = await agent({ ancestors: [100] });
+    await call('whoami');
+    win.sessions.remove(win.sessions.list()[0]!.id);
+    await until(() => !bridge.current, 'disconnect');
+    expect((await call('whoami')).text).toBe('Claude 1 in 100');
+  });
+
+  it('switches windows cleanly: one tool list change, no empty list in between', async () => {
+    await openWindow('100', ['/work/a']);
+    await openWindow('200', ['/work/b'], { extraTool: true });
+    const { call, client, toolNames } = await agent();
+    await call('whoami');
+    const lists: string[][] = [];
+    client.setNotificationHandler(ToolListChangedNotificationSchema, async () => {
+      lists.push(await toolNames());
+    });
+    expect((await call('window_select', { window: '200' })).isError).toBe(false);
+    await until(() => lists.length > 0, 'tools/list_changed');
+    await new Promise(r => setTimeout(r, 100));
+    expect(lists).toEqual([['extra', 'whoami', 'window_select', 'window_status']]);
+  });
+
   it('records how the session matched its window, in the window', async () => {
     const win = await openWindow('100', ['/work/a']);
     const { call } = await agent();

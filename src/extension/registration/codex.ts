@@ -137,54 +137,93 @@ function safeJson(raw: string): string {
 
 const isOurs = (p: string[] | undefined) => !!p && p.length >= 2 && p[0] === 'mcp_servers' && p[1] === MCP_SERVER_NAME;
 
+interface Table {
+  path: string[];
+  /** First line: the header, or our marker comment right above it. */
+  start: number;
+  /** Exclusive. Blank lines and comments before the next table belong to what follows. */
+  end: number;
+}
+
+interface KeySpan {
+  key: string;
+  start: number;
+  /** Exclusive: a value can continue on later lines. */
+  end: number;
+  value: string;
+}
+
 interface Located {
-  /** [start, end) line ranges of our tables, including a marker comment right above. */
-  ranges: Array<[number, number]>;
+  /** Our tables: `[mcp_servers.vscode]` and its sub-tables. */
+  tables: Table[];
+  main: Table | undefined;
+  env: Table | undefined;
+  /** Keys of `[mcp_servers.vscode]`. */
+  keys: KeySpan[];
+  /** Keys of `[mcp_servers.vscode.env]`, raw TOML values. */
+  envValues: Map<string, string>;
   /** The server is (also) defined with dotted keys or an inline table, which this editor does not touch. */
   inline: boolean;
-  /** Values found in `[mcp_servers.vscode]`, as raw TOML. */
-  values: Map<string, string>;
 }
 
 function locate(lines: Line[]): Located {
-  const ranges: Array<[number, number]> = [];
-  const values = new Map<string, string>();
+  const tables: Table[] = [];
+  const keys: KeySpan[] = [];
+  const envValues = new Map<string, string>();
   let inline = false;
   let table: string[] = [];
-  let start = -1;
+  let current: Table | undefined;
+  const close = (at: number) => {
+    if (!current) return;
+    let end = at;
+    while (end > current.start + 1 && /^\s*(#.*)?\r?$/.test(lines[end - 1]!.text)) end--;
+    current.end = end;
+    tables.push(current);
+    current = undefined;
+  };
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
     if (line.header) {
-      if (start >= 0) ranges.push([start, i]);
-      start = -1;
+      close(i);
       table = line.header;
       if (isOurs(table)) {
-        start = i > 0 && lines[i - 1]!.text.trim() === MARKER ? i - 1 : i;
+        const start = i > 0 && lines[i - 1]!.text.trim() === MARKER ? i - 1 : i;
+        current = { path: table, start, end: lines.length };
       }
       continue;
     }
-    if (line.key) {
-      const full = [...table, ...line.key];
-      if (start < 0 && full.length >= 2 && full[0] === 'mcp_servers' && full[1] === MCP_SERVER_NAME) inline = true;
-      if (start >= 0 && table.length === 2) values.set(line.key.join('.'), valueText(lines, i));
+    if (!line.key) continue;
+    const full = [...table, ...line.key];
+    if (!current && full.length >= 2 && full[0] === 'mcp_servers' && full[1] === MCP_SERVER_NAME) inline = true;
+    if (current && table.length === 2) {
+      const end = valueEnd(lines, i);
+      keys.push({ key: line.key.join('.'), start: i, end, value: valueText(lines, i, end) });
     }
+    if (current && table.length === 3 && table[2] === 'env') envValues.set(line.key.join('.'), valueText(lines, i, valueEnd(lines, i)));
   }
-  if (start >= 0) ranges.push([start, lines.length]);
-  // Do not swallow the blank lines that separate our table from the next one.
-  const trimmed = ranges.map(([s, e]): [number, number] => {
-    let end = e;
-    while (end > s + 1 && lines[end - 1]!.text.trim() === '') end--;
-    return [s, end];
-  });
-  return { ranges: trimmed, inline, values };
+  close(lines.length);
+  return {
+    tables,
+    main: tables.find(t => t.path.length === 2),
+    env: tables.find(t => t.path.length === 3 && t.path[2] === 'env'),
+    keys,
+    envValues,
+    inline,
+  };
 }
 
-/** The raw value of the key on line `i`, following it onto later lines while brackets are open. */
-function valueText(lines: Line[], i: number): string {
+/** Line after the value of the key on line `i` (values with open brackets continue on later lines). */
+function valueEnd(lines: Line[], i: number): number {
   const first = lines[i]!.text;
   let text = first.slice(findTopLevelEquals(first) + 1);
-  for (let j = i + 1; j < lines.length && !balanced(text); j++) text += `\n${lines[j]!.text}`;
-  return text.trim();
+  let j = i + 1;
+  for (; j < lines.length && !balanced(text); j++) text += `\n${lines[j]!.text}`;
+  return j;
+}
+
+function valueText(lines: Line[], i: number, end: number): string {
+  const first = lines[i]!.text;
+  return [first.slice(findTopLevelEquals(first) + 1), ...lines.slice(i + 1, end).map(l => l.text)].join('\n').trim();
 }
 
 function balanced(text: string): boolean {
@@ -230,52 +269,69 @@ export function parseTomlStrings(value: string): string | string[] | undefined {
 }
 
 const tomlString = (s: string) => JSON.stringify(s);
+const tomlKey = (k: string) => (/^[A-Za-z0-9_-]+$/.test(k) ? k : tomlString(k));
+
+function commandLines(spec: ServerSpec): string[] {
+  return [`command = ${tomlString(spec.command)}`, `args = [${spec.args.map(tomlString).join(', ')}]`];
+}
+
+function envTable(spec: ServerSpec): string[] {
+  const env = Object.entries(spec.env);
+  return env.length ? [`[mcp_servers.${MCP_SERVER_NAME}.env]`, ...env.map(([k, v]) => `${tomlKey(k)} = ${tomlString(v)}`)] : [];
+}
 
 export function renderCodexEntry(spec: ServerSpec): string {
   const lines = [
     MARKER,
     `[mcp_servers.${MCP_SERVER_NAME}]`,
-    `command = ${tomlString(spec.command)}`,
-    `args = [${spec.args.map(tomlString).join(', ')}]`,
+    ...commandLines(spec),
     `env_vars = [${PASS_THROUGH.map(tomlString).join(', ')}]`,
     `tool_timeout_sec = ${TOOL_TIMEOUT_SEC}`,
   ];
-  const env = Object.entries(spec.env);
-  if (env.length > 0) {
-    lines.push('', `[mcp_servers.${MCP_SERVER_NAME}.env]`, ...env.map(([k, v]) => `${/^[A-Za-z0-9_-]+$/.test(k) ? k : tomlString(k)} = ${tomlString(v)}`));
-  }
+  const env = envTable(spec);
+  if (env.length) lines.push('', ...env);
   return lines.join('\n');
+}
+
+function entryOf(found: Located): { command: string | undefined; args: string[]; env: Record<string, string> | undefined } {
+  const value = (key: string) => found.keys.find(k => k.key === key)?.value;
+  const command = parseTomlStrings(value('command') ?? '');
+  const args = parseTomlStrings(value('args') ?? '[]');
+  let env: Record<string, string> | undefined = {};
+  if (value('env') !== undefined) env = undefined; // An inline env table: not in the form we write.
+  for (const [k, raw] of found.envValues) {
+    const v = parseTomlStrings(raw);
+    if (env && typeof v === 'string') env[splitKey(k).join('.')] = v;
+    else env = undefined;
+  }
+  return { command: typeof command === 'string' ? command : undefined, args: Array.isArray(args) ? args : [], env };
 }
 
 export function inspectCodexText(text: string | undefined, spec: ServerSpec): EntryState {
   if (text === undefined) return { kind: 'absent' };
-  const lines = scanToml(text);
-  const found = locate(lines);
+  const found = locate(scanToml(text));
   if (found.inline) return { kind: 'foreign', command: `"${MCP_SERVER_NAME}" defined with dotted keys or an inline table` };
-  if (found.ranges.length === 0) return { kind: 'absent' };
-  const command = parseTomlStrings(found.values.get('command') ?? '');
-  const args = parseTomlStrings(found.values.get('args') ?? '[]');
-  const entry = { command: typeof command === 'string' ? command : undefined, args: Array.isArray(args) ? args : [] };
+  if (!found.main) return found.tables.length ? { kind: 'foreign', command: `only sub-tables of "${MCP_SERVER_NAME}"` } : { kind: 'absent' };
+  const entry = entryOf(found);
   const described = [entry.command ?? '(no command)', ...entry.args].join(' ');
   if (!isOurEntry(entry)) return { kind: 'foreign', command: described };
-  // Ours: current when the exact block we would write is there.
-  const current = found.ranges.length > 0 && rangesText(lines, found.ranges) === renderCodexEntry(spec);
+  // Current when what makes it start is right. Other keys (timeouts, enabled, ...) are the user's.
+  const sameEnv = !!entry.env && JSON.stringify(sortObject(entry.env)) === JSON.stringify(sortObject(spec.env));
+  const current = entry.command === spec.command && JSON.stringify(entry.args) === JSON.stringify(spec.args) && sameEnv;
   return { kind: 'ours', current, command: described };
 }
 
-function rangesText(lines: Line[], ranges: Array<[number, number]>): string {
-  return ranges
-    .map(([s, e]) => lines.slice(s, e).map(l => l.text.replace(/\r$/, '')).join('\n'))
-    .join('\n\n');
+function sortObject(o: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(o).sort(([a], [b]) => a.localeCompare(b)));
 }
 
 /** The document with our tables removed (and no other change). */
 export function removeCodexEntry(text: string): string {
   const lines = scanToml(text);
-  const { ranges } = locate(lines);
-  if (ranges.length === 0) return text;
+  const { tables } = locate(lines);
+  if (tables.length === 0) return text;
   const drop = new Set<number>();
-  for (const [s, e] of ranges) {
+  for (const { start: s, end: e } of tables) {
     for (let i = s; i < e; i++) drop.add(i);
     // One blank line that separated the removed table from what follows goes with it.
     if (lines[e] && lines[e]!.text.trim() === '' && (s === 0 || lines[s - 1]!.text.trim() === '')) drop.add(e);
@@ -285,31 +341,52 @@ export function removeCodexEntry(text: string): string {
   return kept.join('\n');
 }
 
-/** The document with our tables replaced by the current entry, appended at the end if absent. */
+/**
+ * The document with the current entry: appended when there is none; our own entry updated in
+ * place (command, args and env only, so keys the user added stay); someone else's replaced whole
+ * (only called for that after the user agreed).
+ */
 export function upsertCodexEntry(text: string, spec: ServerSpec): string {
   const lines = scanToml(text);
-  const { ranges } = locate(lines);
-  const block = renderCodexEntry(spec);
-  if (ranges.length > 0) {
-    const [first] = ranges;
-    const out: string[] = [];
-    let inserted = false;
-    for (let i = 0; i < lines.length; i++) {
-      const range = ranges.find(([s, e]) => i >= s && i < e);
-      if (!range) {
-        out.push(lines[i]!.text);
-        continue;
-      }
-      if (!inserted && range === first) {
-        out.push(block);
-        inserted = true;
-      }
-      if (range !== first && i === range[0] && out[out.length - 1]?.trim() === '') out.pop();
-    }
-    return out.join('\n');
+  const found = locate(lines);
+  if (!found.main) {
+    const base = text.replace(/\s*$/, '');
+    if (found.tables.length === 0) return base ? `${base}\n\n${renderCodexEntry(spec)}\n` : `${renderCodexEntry(spec)}\n`;
   }
-  const base = text.replace(/\s*$/, '');
-  return base ? `${base}\n\n${block}\n` : `${block}\n`;
+  const replace = new Map<number, string[]>(); // line index → lines to put there instead
+  const drop = new Set<number>();
+  const dropRange = (s: number, e: number) => {
+    for (let i = s; i < e; i++) drop.add(i);
+  };
+  if (found.main && isOurEntry(entryOf(found))) {
+    const main = found.main;
+    const header = lines.findIndex((l, i) => i >= main.start && l.header);
+    const managed = found.keys.filter(k => k.key === 'command' || k.key === 'args' || k.key === 'env');
+    for (const k of managed) dropRange(k.start, k.end);
+    replace.set(header, [lines[header]!.text, ...commandLines(spec)]);
+    const env = envTable(spec);
+    if (found.env) {
+      dropRange(found.env.start, found.env.end);
+      if (env.length) replace.set(found.env.start, env);
+      else if (lines[found.env.end]?.text.trim() === '') drop.add(found.env.end);
+    } else if (env.length) {
+      const last = main.end - 1;
+      const base = replace.get(last) ?? (drop.has(last) ? [] : [lines[last]!.text]);
+      replace.set(last, [...base, '', ...env]);
+    }
+  } else {
+    // Someone else's server, which the user chose to replace: our block where theirs started.
+    const first = found.tables[0]!;
+    for (const t of found.tables) dropRange(t.start, t.end);
+    replace.set(first.start, renderCodexEntry(spec).split('\n'));
+  }
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const instead = replace.get(i);
+    if (instead) out.push(...instead);
+    else if (!drop.has(i)) out.push(lines[i]!.text);
+  }
+  return out.join('\n');
 }
 
 export interface CodexTarget {

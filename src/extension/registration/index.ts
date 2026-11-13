@@ -86,17 +86,18 @@ export function activateRegistration(services: BridgeServices): void {
       return text;
     }),
     vscode.commands.registerCommand('agentBridge.registration.runStartupCheck', () => registration.startup()),
-    vscode.workspace.onDidChangeConfiguration(e => {
-      if (e.affectsConfiguration('agentBridge.registration')) void registration.startup({ browserNotice: false });
-    }),
   );
 
   registration.installServerSafely();
   // A development host must not ask on its own: tests queue answers for the prompts they expect, and
   // an unexpected one would take them. Tests run the check with the internal command instead.
-  if (context.extensionMode === vscode.ExtensionMode.Production) {
-    setTimeout(() => void registration.startup().catch(err => registration.log.error('startup check failed', err)), 1500);
-  }
+  if (context.extensionMode !== vscode.ExtensionMode.Production) return;
+  setTimeout(() => void registration.startup().catch(err => registration.log.error('startup check failed', err)), 1500);
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration(e => {
+      if (e.affectsConfiguration('agentBridge.registration')) void registration.startup({ browserNotice: false });
+    }),
+  );
 }
 
 class Registration {
