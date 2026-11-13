@@ -205,10 +205,14 @@ test('consent: two calls waiting on the same question share one prompt', async (
     await prompts(a, [], true);
     // No queued answer: a real notification shows and stays open while both calls wait on it.
     const calls = [a.call('browser_select_tab', { tab: id }, { timeoutMs: 60_000 }), evaluate(a, id, '6')];
-    await sleep(1500);
-    const shown = JSON.parse(
-      execFileSync(process.execPath, [join(root, 'scripts', 'ui.mjs'), '--name', hostName, 'eval', "JSON.stringify([...document.querySelectorAll('.notification-list-item-message')].map(e => e.textContent))"], { encoding: 'utf8' }),
-    );
+    const notifications = () =>
+      JSON.parse(
+        execFileSync(process.execPath, [join(root, 'scripts', 'ui.mjs'), '--name', hostName, 'eval', "JSON.stringify([...document.querySelectorAll('.notification-list-item-message')].map(e => e.textContent))"], { encoding: 'utf8' }),
+      );
+    // The notification appears a moment after the calls start; a fixed wait was flaky on a busy host.
+    await until(() => notifications().some(n => n.includes('wants to use your browser tab')), 'the consent notification', { timeoutMs: 10_000 });
+    await sleep(800); // Time for a second, wrongly stacked prompt to show up if there were one.
+    const shown = notifications();
     assert.equal(shown.filter(n => n.includes('wants to use your browser tab')).length, 1, `notifications: ${shown.join(' | ')}`);
     // The user shares the tab from the command palette instead of answering: both calls go ahead.
     await a.ok('debug_vscode_command', { command: 'copane.browser.shareTab', args: [id, 'bt-stack'] });
