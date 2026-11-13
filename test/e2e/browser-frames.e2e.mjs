@@ -61,9 +61,9 @@ test('snapshot: cross-origin frames in place, nested ones too, with refs', async
   const ms = Date.now() - started;
   assert.doesNotMatch(snap, /cannot be read|not read|not available/);
   assert.match(snap, /- iframe "Login frame" \[ref=e\d+\]:\n {2}- form \[ref=e\d+\]:\n {4}- textbox "Username" \[ref=e\d+\]/);
-  assert.match(snap, /- iframe "Scaled frame" \[ref=e\d+\]:\n {2}- paragraph \[ref=e\d+\]: Top of the long frame\n {2}- button "Deep button"/);
-  assert.match(snap, /- iframe "Nested frame" \[ref=e\d+\]:\n(?: {2}.*\n)*? {2}- iframe "Inner frame" \[ref=e\d+\]:\n {4}- paragraph \[ref=e\d+\]: Innermost text/);
-  assert.match(snap, /- iframe "Navigating frame" \[ref=e\d+\]:\n {2}- paragraph \[ref=e\d+\]: Navigating frame start/);
+  assert.match(snap, /- iframe "Scaled frame" \[ref=e\d+\]:\n {2}- paragraph: Top of the long frame\n {2}- button "Deep button"/);
+  assert.match(snap, /- iframe "Nested frame" \[ref=e\d+\]:\n(?: {2}.*\n)*? {2}- iframe "Inner frame" \[ref=e\d+\]:\n {4}- paragraph: Innermost text/);
+  assert.match(snap, /- iframe "Navigating frame" \[ref=e\d+\]:\n {2}- paragraph: Navigating frame start/);
   // Refs are unique although each frame target numbers its nodes from 1.
   const refs = [...snap.matchAll(/\[ref=(e\d+)\]/g)].map(m => m[1]);
   assert.equal(new Set(refs).size, refs.length, 'duplicate refs');
@@ -97,7 +97,7 @@ test('forms inside a frame: fill, select, check, submit; effects come back', asy
   assert.match(clicked, /Request failed: GET http:\/\/localhost:\d+\/status\/503 → HTTP 503/);
   assert.equal(await read('#login >>> #result'), 'Signed in as alice (Admin, remember=true)');
   // select_option on a ref in the frame.
-  assert.match(await a.ok('browser_select_option', { ref: refOf(snap, 'combobox "Role"'), values: ['Editor'] }), /Selected "Editor"/);
+  assert.match(await a.ok('browser_fill_form', { fields: [{ ref: refOf(snap, 'combobox "Role"'), value: 'Editor' }] }), /Editor/);
   assert.equal(await read('#login >>> #role', 'el => el.value'), 'Editor');
 });
 
@@ -120,7 +120,7 @@ test('clicks land on the element in a scaled, rotated, offset and scrolled frame
   await open(xframes);
   const snap = await a.ok('browser_snapshot');
   // Use another frame first: input routing into a frame right after a scroll is what goes wrong.
-  await a.ok('browser_click', { ref: refOf(snap, 'paragraph') });
+  await a.ok('browser_click', { selector: '#scaled >>> p' });
   await a.ok('browser_click', { ref: refOf(snap, 'button "Sign in"') });
   const clicked = await a.ok('browser_click', { ref: refOf(snap, 'button "Deep button"') });
   assert.match(clicked, /It is now button "Deep clicked"/);
@@ -142,7 +142,7 @@ test('nested cross-origin frames: click and type in the innermost one', async ()
   await a.ok('browser_type', { ref: refOf(snap, 'textbox "Inner field"'), text: 'three levels down' });
   assert.equal(await read('#nested >>> #inner >>> #inner-field', 'el => el.value'), 'three levels down');
   // A same-origin child of a cross-origin frame lives in that frame's target.
-  assert.match(snap, /- iframe "Same-site child" \[ref=e\d+\]:\n {4}- paragraph \[ref=e\d+\]: Inside frame/);
+  assert.match(snap, /- iframe "Same-site child" \[ref=e\d+\]:\n {4}- paragraph: Inside frame/);
   const childButton = /- iframe "Same-site child"[\s\S]*?button "Frame button" \[ref=(e\d+)\]/.exec(snap)[1];
   assert.match(await a.ok('browser_click', { ref: childButton }), /It is now button "Frame clicked"/);
   assert.equal(await read('#nested >>> #same-site >>> button'), 'Frame clicked');
@@ -226,7 +226,7 @@ test('console and network of frames are recorded; request bodies come from the f
   const failed = await a.ok('browser_network_requests', { status: 'failed' });
   const id = /(r\d+) +GET 503/.exec(failed)?.[1];
   assert.ok(id, failed);
-  const detail = await a.ok('browser_network_request', { id });
+  const detail = await a.ok('browser_network_requests', { id });
   assert.match(detail, /Response body[^\n]*:\n {2}\{\n {4}"status": "503"/);
   // Documents of frames are listed too.
   assert.match(await a.ok('browser_network_requests', { filter: 'xinner.html', types: ['document'] }), /GET 200 document {2}http:\/\/\[::1\]:\d+\/xinner\.html/);
@@ -243,7 +243,7 @@ test('refs into a frame that navigated, went same-origin or was removed are stal
   assert.match(nav, /A frame navigated to http:\/\/\[::1\]:\d+\/xinner\.html/);
   await fails('browser_click', { ref: reloadSoon }, /Ref e\d+ \(button "Reload soon"\) belongs to a document that is gone: the frame http:\/\/\[::1\]:\d+\/xinner\.html has navigated since your snapshot/);
   snap = await a.ok('browser_snapshot');
-  assert.match(snap, /- iframe "Navigating frame" \[ref=e\d+\]:\n {2}- paragraph \[ref=e\d+\]: Innermost text/);
+  assert.match(snap, /- iframe "Navigating frame" \[ref=e\d+\]:\n {2}- paragraph: Innermost text/);
   const inner = /- iframe "Navigating frame"[\s\S]*?button "Innermost button" \[ref=(e\d+)\]/.exec(snap)[1];
 
   // To the page's own site: the frame leaves its target and is read through the page instead.
@@ -252,7 +252,7 @@ test('refs into a frame that navigated, went same-origin or was removed are stal
   assert.ok(moved !== undefined);
   await fails('browser_click', { ref: inner }, /was inside a frame that is gone/);
   snap = await a.ok('browser_snapshot');
-  assert.match(snap, /- iframe "Navigating frame" \[ref=e\d+\]:\n {2}- paragraph \[ref=e\d+\]: Innermost text/);
+  assert.match(snap, /- iframe "Navigating frame" \[ref=e\d+\]:\n {2}- paragraph: Innermost text/);
   assert.match(await a.ok('browser_click', { ref: /- iframe "Navigating frame"[\s\S]*?button "Innermost button" \[ref=(e\d+)\]/.exec(snap)[1] }), /It is now button "Innermost clicked"/);
 
   // Removed: refs inside it fail, the snapshot no longer shows it.
