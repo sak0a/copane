@@ -5,6 +5,7 @@ import type { WindowDescriptor } from '../../shared/protocol';
 import type { Event } from './events';
 import type { LeaseManager } from './leases';
 import type { Logger } from './log';
+import type { PromptService } from './prompts';
 import type { AgentSession, SessionManager } from './sessions';
 import type { ToolRegistry } from './tools';
 
@@ -14,6 +15,8 @@ export interface BridgeServices {
   readonly window: WindowDescriptor;
   readonly sessions: SessionManager;
   readonly tools: ToolRegistry;
+  /** Asks the user a question. Use this instead of `vscode.window.show*Message` for anything an agent waits on. */
+  readonly prompts: PromptService;
   /** Control leases for browser tabs. Resource id = tab id. */
   readonly tabLeases: LeaseManager;
   /** Set by the browser module during activation. */

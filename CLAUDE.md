@@ -15,6 +15,10 @@ facts about the VS Code APIs this builds on.
     node scripts/mcp-call.mjs --name <n> --session s1 --repl < calls.txt
 
 `--session <key>` makes separate calls one agent session; use two keys to act as two agents.
+In a dev host two extra tools exist (`core/debugTools.ts`): `debug_vscode_command` runs any VS Code
+command (open a tab or terminal "as the user"), `debug_answer_prompts` queues answers for the
+extension's user prompts and returns the prompts shown so far. All user prompts go through
+`services.prompts.ask`, which is what makes them testable.
 After changing extension code, restart the dev host (`--stop`, then start) to load the new build.
 
 ## Rules

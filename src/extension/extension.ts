@@ -3,10 +3,12 @@
 import * as vscode from 'vscode';
 import { activateBrowser } from './browser';
 import { BridgeServer } from './core/bridgeServer';
+import { activateDebugTools } from './core/debugTools';
 import { describeWindow, InstanceRegistration } from './core/instance';
 import { buildInstructions } from './core/instructions';
 import { LeaseManager } from './core/leases';
 import type { Logger } from './core/log';
+import { VscodePrompts } from './core/prompts';
 import type { BridgeServices } from './core/services';
 import { SessionManager } from './core/sessions';
 import { ToolRegistry } from './core/tools';
@@ -43,10 +45,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   // `browser` and `terminals` are assigned by their modules below, before anything can call them.
-  const services = { context, log, window: describeWindow(), sessions, tools, tabLeases } as BridgeServices;
+  const prompts = new VscodePrompts(log);
+  const services = { context, log, window: describeWindow(), sessions, tools, prompts, tabLeases } as BridgeServices;
 
   // Order matters: the UI and registration modules read the browser and terminal services.
   activateSessionTools(services);
+  activateDebugTools(services, prompts);
   activateBrowser(services);
   activateTerminals(services);
   activateUi(services);
