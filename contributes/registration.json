@@ -1,20 +1,52 @@
 {
   "commands": [
-    { "command": "agentBridge.registerAgents", "title": "Register with Claude Code and Codex", "category": "Agent Bridge" },
-    { "command": "agentBridge.unregisterAgents", "title": "Unregister from Claude Code and Codex", "category": "Agent Bridge" },
-    { "command": "agentBridge.enableBrowser", "title": "Enable Integrated Browser", "category": "Agent Bridge" },
-    { "command": "agentBridge.showStatus", "title": "Show Status", "category": "Agent Bridge" }
+    {
+      "command": "agentBridge.repair",
+      "title": "Check and Repair Setup",
+      "category": "Agent Bridge",
+      "icon": "$(tools)"
+    },
+    {
+      "command": "agentBridge.registerAgents",
+      "title": "Turn On (Register with Claude Code and Codex)",
+      "category": "Agent Bridge"
+    },
+    {
+      "command": "agentBridge.unregisterAgents",
+      "title": "Turn Off (Unregister from Claude Code and Codex)",
+      "category": "Agent Bridge"
+    },
+    {
+      "command": "agentBridge.enableBrowser",
+      "title": "Enable Integrated Browser",
+      "category": "Agent Bridge"
+    },
+    {
+      "command": "agentBridge.showStatus",
+      "title": "Show Status",
+      "category": "Agent Bridge"
+    },
+    {
+      "command": "agentBridge.copyStatus",
+      "title": "Copy Status Report",
+      "category": "Agent Bridge",
+      "icon": "$(copy)"
+    }
   ],
   "configuration": {
     "title": "Agent Bridge",
     "properties": {
       "agentBridge.registration.mode": {
         "type": "string",
-        "enum": ["ask", "automatic", "manual"],
+        "enum": [
+          "ask",
+          "automatic",
+          "manual"
+        ],
         "enumDescriptions": [
-          "Ask once before adding the \"vscode\" MCP server to Claude Code's and Codex's user configuration. Afterwards only Agent Bridge's own entry is kept up to date.",
+          "Ask once before adding the \"vscode\" MCP server to Claude Code's and Codex's user configuration. Afterwards Agent Bridge keeps its own entry present and up to date (it re-adds it if something removes it) until you run \"Agent Bridge: Turn Off\".",
           "Add and keep the \"vscode\" MCP server in Claude Code's and Codex's user configuration without asking.",
-          "Never change agent configuration on its own. Use the commands \"Agent Bridge: Register with Claude Code and Codex\" and \"Agent Bridge: Unregister from Claude Code and Codex\"."
+          "Never change agent configuration on its own; only report problems. Use \"Agent Bridge: Turn On\", \"Agent Bridge: Turn Off\" and \"Agent Bridge: Check and Repair Setup\"."
         ],
         "default": "ask",
         "scope": "machine",
@@ -33,5 +65,14 @@
         "markdownDescription": "Register the `vscode` MCP server with Codex, when Codex is installed."
       }
     }
+  },
+  "menus": {
+    "editor/title": [
+      {
+        "command": "agentBridge.copyStatus",
+        "when": "resourceScheme == agent-bridge-status",
+        "group": "navigation"
+      }
+    ]
   }
 }

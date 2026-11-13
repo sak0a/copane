@@ -10,6 +10,12 @@
 // SSH window. `node` need not be on the PATH of a VS Code started from the Dock or Start menu.
 // Several VS Code builds (Stable, Insiders) may share the bridge home, so the launcher remembers a
 // few runtimes and uses the first that still exists, then `node` from the PATH as a last resort.
+//
+// Windows is different: agents start their servers without a shell and cannot run a .cmd file, so
+// they are registered with a runtime directly (`Code.exe` with ELECTRON_RUN_AS_NODE=1). Every VS Code
+// build has its own runtime, so an entry naming another build's runtime that is still installed counts
+// as current (`alternativeCommands`); otherwise Stable and Insiders would rewrite each other's entry on
+// every start. It is rewritten only when the runtime it names is gone.
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { ensurePrivateDir } from '../../shared/paths';
@@ -20,6 +26,50 @@ export interface ServerSpec {
   command: string;
   args: string[];
   env: Record<string, string>;
+  /**
+   * Other commands an existing registration may name and still be current: on Windows, the runtimes
+   * of other VS Code builds on this machine that ran Agent Bridge and are still installed.
+   */
+  alternativeCommands?: string[];
+  /** Compare paths ignoring case and slash direction, as Windows does. */
+  windowsPaths?: boolean;
+}
+
+/** The path module for `platform`, so Windows paths can be built and tested on any OS. */
+export function pathFor(platform: NodeJS.Platform): typeof path.posix {
+  return platform === 'win32' ? path.win32 : path.posix;
+}
+
+export function samePath(a: string, b: string, windows: boolean): boolean {
+  if (!windows) return a === b;
+  const norm = (p: string) => path.win32.normalize(p).replace(/[\\/]+$/, '').toLowerCase();
+  return norm(a) === norm(b);
+}
+
+/** Whether a registered entry starts the server the way `spec` would, and if not, why not. */
+export function compareEntry(
+  entry: { type?: unknown; command?: unknown; args?: unknown; env?: unknown },
+  spec: ServerSpec,
+  exists: (file: string) => boolean = fs.existsSync,
+): { current: true } | { current: false; reason: string } {
+  const windows = !!spec.windowsPaths;
+  if (entry.type !== undefined && entry.type !== 'stdio') return { current: false, reason: `it is a "${String(entry.type)}" server, not a stdio command` };
+  const command = typeof entry.command === 'string' ? entry.command : '';
+  const accepted = [spec.command, ...(spec.alternativeCommands ?? [])];
+  if (!accepted.some(c => samePath(c, command, windows))) {
+    if (windows && command && !exists(command)) return { current: false, reason: `the runtime it starts no longer exists (${command})` };
+    return { current: false, reason: `it starts ${command || '(no command)'} instead of ${spec.command}` };
+  }
+  const args = Array.isArray(entry.args) ? entry.args.map(String) : [];
+  if (args.length !== spec.args.length || args.some((a, i) => !samePath(a, spec.args[i]!, windows))) {
+    return { current: false, reason: `its arguments are [${args.join(', ')}] instead of [${spec.args.join(', ')}]` };
+  }
+  const env = entry.env && typeof entry.env === 'object' ? (entry.env as Record<string, unknown>) : {};
+  const want = spec.env;
+  const keys = new Set([...Object.keys(env), ...Object.keys(want)]);
+  const differing = [...keys].filter(k => String(env[k] ?? '') !== (want[k] ?? '') || !(k in env) !== !(k in want));
+  if (differing.length) return { current: false, reason: `its environment differs in ${differing.join(', ')}` };
+  return { current: true };
 }
 
 export interface LauncherOptions {
@@ -44,21 +94,35 @@ interface Manifest {
 
 const MAX_RUNTIMES = 4;
 
-export function scriptPath(binDir: string): string {
-  return path.join(binDir, 'mcp-server.js');
+export function scriptPath(binDir: string, platform: NodeJS.Platform = process.platform): string {
+  return pathFor(platform).join(binDir, 'mcp-server.js');
 }
 
 export function launcherPath(binDir: string, platform: NodeJS.Platform): string {
-  return path.join(binDir, platform === 'win32' ? 'mcp-server.cmd' : 'mcp-server');
+  return pathFor(platform).join(binDir, platform === 'win32' ? 'mcp-server.cmd' : 'mcp-server');
+}
+
+export interface SpecOptions extends Pick<LauncherOptions, 'binDir' | 'runtime' | 'platform' | 'bridgeHomeOverride'> {
+  /** Runtimes recorded in the manifest (other VS Code builds using this bridge home). */
+  knownRuntimes?: string[];
+  exists?: (file: string) => boolean;
 }
 
 /** The command agents are registered with. */
-export function serverSpec(options: Pick<LauncherOptions, 'binDir' | 'runtime' | 'platform' | 'bridgeHomeOverride'>): ServerSpec {
+export function serverSpec(options: SpecOptions): ServerSpec {
   const env: Record<string, string> = options.bridgeHomeOverride ? { AGENT_BRIDGE_HOME: options.bridgeHomeOverride } : {};
   if (options.platform === 'win32') {
     // Agents on Windows start commands without a shell, which cannot run a .cmd file. Register the
-    // runtime itself; activation re-registers when VS Code's install path changes.
-    return { command: options.runtime, args: [scriptPath(options.binDir)], env: { ...env, ELECTRON_RUN_AS_NODE: '1' } };
+    // runtime itself; an entry naming another installed build's runtime stays as it is.
+    const exists = options.exists ?? fs.existsSync;
+    const alternativeCommands = (options.knownRuntimes ?? []).filter(r => !samePath(r, options.runtime, true) && exists(r));
+    return {
+      command: options.runtime,
+      args: [scriptPath(options.binDir, 'win32')],
+      env: { ...env, ELECTRON_RUN_AS_NODE: '1' },
+      ...(alternativeCommands.length ? { alternativeCommands } : {}),
+      windowsPaths: true,
+    };
   }
   return { command: launcherPath(options.binDir, options.platform), args: [], env };
 }
@@ -77,7 +141,7 @@ export function installServer(options: LauncherOptions): InstallResult {
   ensurePrivateDir(binDir);
   const manifestFile = path.join(binDir, 'manifest.json');
   const manifest = readManifest(manifestFile);
-  const script = scriptPath(binDir);
+  const script = scriptPath(binDir, platform);
   const source = fs.readFileSync(options.sourceScript, 'utf8');
   const installed = fs.existsSync(script) ? fs.readFileSync(script, 'utf8') : undefined;
 
@@ -90,7 +154,8 @@ export function installServer(options: LauncherOptions): InstallResult {
   }
   if (newerOrSame) version = options.version;
 
-  const runtimes = [options.runtime, ...(manifest?.runtimes ?? []).filter(r => r !== options.runtime && fs.existsSync(r))].slice(0, MAX_RUNTIMES);
+  const windows = platform === 'win32';
+  const runtimes = [options.runtime, ...(manifest?.runtimes ?? []).filter(r => !samePath(r, options.runtime, windows) && fs.existsSync(r))].slice(0, MAX_RUNTIMES);
   const launcher = launcherPath(binDir, platform);
   const content = platform === 'win32' ? windowsLauncher(runtimes, script) : unixLauncher(runtimes, script);
   let launcherUpdated = false;
@@ -135,7 +200,9 @@ export function unixLauncher(runtimes: string[], script: string): string {
 export function windowsLauncher(runtimes: string[], script: string): string {
   const lines = ['@echo off', 'rem Starts the Agent Bridge MCP server (stdio). Written by the Agent Bridge VS Code extension.', 'setlocal'];
   for (const runtime of runtimes) {
-    lines.push(`if exist "${runtime}" (`, '  set ELECTRON_RUN_AS_NODE=1', `  "${runtime}" "${script}" %*`, '  exit /b %ERRORLEVEL%', ')');
+    // `exit /b` without a number keeps the runtime's exit code; `%ERRORLEVEL%` inside the block
+    // would be expanded before the runtime runs.
+    lines.push(`if exist "${runtime}" (`, '  set ELECTRON_RUN_AS_NODE=1', `  "${runtime}" "${script}" %*`, '  exit /b', ')');
   }
   lines.push(`node "${script}" %*`, '');
   return lines.join('\r\n');

@@ -2,8 +2,10 @@
 // Rendered from plain data so the wording is testable without VS Code.
 import type { InstanceMatch } from '../../shared/protocol';
 import type { ArgvState } from './argv';
-import type { EntryState } from './claudeCode';
+import type { EntryState, RegisteredCommand } from './claudeCode';
+import { formatRecord, type HistoryRecord } from './history';
 import type { ServerSpec } from './launcher';
+import { DEFAULT_TITLES, type CommandTitles } from './plan';
 
 export interface AgentStatus {
   name: string;
@@ -16,12 +18,36 @@ export interface AgentStatus {
   /** A safety guard that blocks changes (dev hosts without throwaway config). */
   blocked?: string;
   notes: string[];
+  /** What the agent's config registers, and whether the files it names exist. */
+  registered?: RegisteredCommand & { commandExists: boolean; scriptExists?: boolean };
+}
+
+/** A start test of the server, as in probe.ts. */
+export interface CheckResult {
+  ok: boolean;
+  text: string;
+  stderr?: string;
+}
+
+export interface PlatformInfo {
+  os: string;
+  arch: string;
+  /** The extension host's runtime (`process.execPath`) and versions. */
+  runtime: string;
+  node: string;
+  electron: string | null;
+  appHost: string;
+  uiKind: string;
+  shell: string;
+  /** Environment variables that change where things are, as set for the extension host. */
+  env: Record<string, string | undefined>;
 }
 
 export interface StatusData {
   generatedAt: Date;
   extensionVersion: string;
   vscode: { appName: string; version: string; remoteName: string | null; platform: string; arch: string };
+  platform?: PlatformInfo;
   window: {
     id: string;
     socketPath: string;
@@ -34,7 +60,21 @@ export interface StatusData {
   otherWindows: Array<{ id: string; workspaceName: string | null; folders: string[]; remoteName: string | null }>;
   bridgeHome: string;
   browser: { available: boolean; argvPath: string | undefined; argvState: ArgvState | undefined; remote: boolean };
-  server: { spec: ServerSpec; installedVersion: string | undefined; runtimes: string[]; selfTest: { ok: boolean; text: string } };
+  server: {
+    spec: ServerSpec;
+    installedVersion: string | undefined;
+    runtimes: string[];
+    /** `--diagnose` started the way an agent would: which window it finds, and whether that answers. */
+    selfTest: CheckResult;
+    /** An MCP handshake with the registered command (`--no-connect`). */
+    handshake?: CheckResult;
+    scriptPath?: string;
+    scriptExists?: boolean;
+  };
+  /** Command names as shown in the Command Palette. */
+  titles?: CommandTitles;
+  /** The newest registration changes, oldest first. */
+  history?: HistoryRecord[];
   registrationMode: string;
   consent: string;
   agents: AgentStatus[];
@@ -87,6 +127,17 @@ function argvText(d: StatusData['browser']): string {
   }
 }
 
+function check(line: (s?: string) => void, title: string, result: CheckResult): void {
+  line(`- ${title}: ${result.ok ? 'ok ✓' : 'FAILED'}`);
+  for (const l of result.text.split('\n')) if (l.trim()) line(`  ${l}`);
+  if (result.stderr?.trim()) {
+    line('  stderr:');
+    line('  ```');
+    for (const l of result.stderr.trim().split(/\r?\n/).slice(-25)) line(`  ${l}`);
+    line('  ```');
+  }
+}
+
 export function renderStatus(d: StatusData): string {
   const out: string[] = [];
   const line = (s = '') => out.push(s);
@@ -97,6 +148,16 @@ export function renderStatus(d: StatusData): string {
       (d.vscode.remoteName ? ` · remote window (${d.vscode.remoteName}; this report describes the remote side)` : ' · local window'),
   );
   line();
+
+  if (d.platform) {
+    const p = d.platform;
+    line('## Platform');
+    line(`- OS: ${p.os} (${p.arch}); UI: ${p.uiKind}, app host: ${p.appHost}; default shell: ${p.shell || '(not set)'}`);
+    line(`- Extension host runtime: ${p.runtime} (Node ${p.node}${p.electron ? `, Electron ${p.electron}` : ''})`);
+    const vars = Object.entries(p.env).map(([k, v]) => `${k}=${v ?? '(unset)'}`);
+    if (vars.length) line(`- Environment: ${vars.join(' · ')}`);
+    line();
+  }
 
   line('## This window');
   line(`- Window id: ${d.window.id} (extension host process)`);
@@ -128,6 +189,14 @@ export function renderStatus(d: StatusData): string {
     line(`- Installed: ${agent.detected ? `yes (${agent.detectedBy})` : 'not found'}`);
     line(`- Config: ${agent.configFile}`);
     line(`- MCP server "vscode": ${stateText(agent.state)}`);
+    if (agent.state.kind === 'ours' && !agent.state.current && agent.state.reason) line(`- Out of date because ${agent.state.reason}`);
+    if (agent.registered) {
+      const r = agent.registered;
+      line(`- Registered command: ${JSON.stringify(r.command)} — ${r.commandExists ? 'exists ✓' : 'DOES NOT EXIST'}`);
+      line(`- Registered args: ${JSON.stringify(r.args)}${r.scriptExists === undefined ? '' : r.scriptExists ? ' — script exists ✓' : ' — SCRIPT DOES NOT EXIST'}`);
+      const env = Object.entries(r.env);
+      line(`- Registered env: ${env.length ? env.map(([k, v]) => `${k}=${v}`).join(' ') : '(none)'}`);
+    }
     if (agent.blocked) line(`- Changes blocked: ${agent.blocked}`);
     for (const note of agent.notes) line(`- ${note}`);
   }
@@ -139,9 +208,17 @@ export function renderStatus(d: StatusData): string {
   if (env.length) line(`- With environment: ${env.map(([k, v]) => `${k}=${v}`).join(' ')}`);
   line(`- Installed server version: ${d.server.installedVersion ?? 'not installed'}`);
   if (d.server.runtimes.length) line(`- Runtimes it tries: ${d.server.runtimes.join(', ')}`);
-  line(`- Self-test (started the way an agent would, from this window): ${d.server.selfTest.ok ? 'ok ✓' : 'FAILED'}`);
-  for (const l of d.server.selfTest.text.split('\n')) if (l.trim()) line(`  ${l}`);
+  if (d.server.scriptPath) line(`- Server script: ${d.server.scriptPath} — ${d.server.scriptExists ? 'present ✓' : 'MISSING'}`);
+  if (d.server.handshake) check(line, 'Start test (MCP handshake and tool list, as an agent starts it)', d.server.handshake);
+  check(line, 'Self-test (started the way an agent would, from this window)', d.server.selfTest);
   line();
+
+  if (d.history) {
+    line('## Recent registration changes');
+    if (d.history.length === 0) line('- None recorded.');
+    for (const r of d.history) line(`- ${formatRecord(r)}`);
+    line();
+  }
 
   line('## Agent sessions in this window');
   if (d.sessions.length === 0) line('- None connected. Start a new Claude Code session (chat or `claude` in a terminal) after registering; running sessions do not reload their MCP servers.');
@@ -155,6 +232,8 @@ export function renderStatus(d: StatusData): string {
   line('1. The agent must be started after registering: start a new Claude Code chat, or restart `claude` / `codex`. In Claude Code, `/mcp` lists the "vscode" server and its state.');
   line('2. The agent sees `window_status` and `window_select` even when it cannot reach a window; ask it to call `window_status`, which says why.');
   line('3. Several VS Code windows and an agent started outside any of them: the agent asks which window to use (window_select).');
-  line('4. Still stuck: copy this report and the output of "Agent Bridge: Show Log".');
+  const t = d.titles ?? DEFAULT_TITLES;
+  line(`4. Run "${t.repair}": it repairs what it can and says what it did.`);
+  line(`5. Still stuck: copy this report (the Copy button in the editor title bar, or "${t.copy}") and the output of "${t.log}".`);
   return out.join('\n') + '\n';
 }

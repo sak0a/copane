@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { compareVersions, installServer, launcherPath, serverSpec, unixLauncher } from '../../src/extension/registration/launcher';
+import { compareEntry, compareVersions, installServer, launcherPath, serverSpec, unixLauncher, windowsLauncher } from '../../src/extension/registration/launcher';
 
 let dir: string;
 let source: string;
@@ -34,7 +34,50 @@ describe('serverSpec', () => {
     const win = serverSpec({ binDir: 'C:\\h\\bin', runtime: 'C:\\VS Code\\Code.exe', platform: 'win32' });
     expect(win.command).toBe('C:\\VS Code\\Code.exe');
     expect(win.env).toEqual({ ELECTRON_RUN_AS_NODE: '1' });
-    expect(win.args[0]).toMatch(/mcp-server\.js$/);
+    expect(win.args).toEqual(['C:\\h\\bin\\mcp-server.js']); // Windows separators even when built on macOS
+  });
+});
+
+describe('Windows registrations (simulated)', () => {
+  const stable = 'C:\\Program Files\\Microsoft VS Code\\Code.exe';
+  const insiders = 'C:\\Users\\u\\AppData\\Local\\Programs\\Microsoft VS Code Insiders\\Code - Insiders.exe';
+  const binDir = 'C:\\Users\\u\\.vscode-agent-bridge\\bin';
+  const entry = (command: string) => ({ type: 'stdio', command, args: [`${binDir}\\mcp-server.js`], env: { ELECTRON_RUN_AS_NODE: '1' } });
+
+  it('accepts the runtime of another installed VS Code build, so two builds do not rewrite each other', () => {
+    const fromInsiders = serverSpec({ binDir, runtime: insiders, platform: 'win32', knownRuntimes: [insiders, stable], exists: () => true });
+    expect(fromInsiders.alternativeCommands).toEqual([stable]);
+    expect(compareEntry(entry(stable), fromInsiders, () => true)).toEqual({ current: true });
+    // Paths differ only in case and slashes (VS Code started through a differently cased path).
+    expect(compareEntry({ ...entry(stable.toLowerCase()), args: [`${binDir}/MCP-SERVER.JS`] }, fromInsiders, () => true)).toEqual({ current: true });
+  });
+
+  it('wants a rewrite when the runtime is gone, and says why', () => {
+    const spec = serverSpec({ binDir, runtime: insiders, platform: 'win32', knownRuntimes: [stable], exists: f => f !== stable });
+    expect(spec.alternativeCommands).toBeUndefined();
+    expect(compareEntry(entry(stable), spec, f => f !== stable)).toEqual({ current: false, reason: `the runtime it starts no longer exists (${stable})` });
+  });
+
+  it('wants a rewrite when the script, environment or type differ', () => {
+    const spec = serverSpec({ binDir, runtime: stable, platform: 'win32' });
+    expect(compareEntry({ ...entry(stable), args: ['C:\\elsewhere\\mcp-server.js'] }, spec)).toMatchObject({ current: false, reason: expect.stringMatching(/arguments/) });
+    expect(compareEntry({ ...entry(stable), env: {} }, spec)).toMatchObject({ current: false, reason: expect.stringMatching(/ELECTRON_RUN_AS_NODE/) });
+    expect(compareEntry({ ...entry(stable), type: 'http' }, spec)).toMatchObject({ current: false });
+    expect(compareEntry({ ...entry(stable), type: undefined }, spec)).toEqual({ current: true });
+  });
+
+  it('on unix compares paths exactly and has no alternatives', () => {
+    const spec = serverSpec({ binDir: '/h/bin', runtime: '/rt', platform: 'linux', knownRuntimes: ['/other'], exists: () => true });
+    expect(spec.alternativeCommands).toBeUndefined();
+    expect(compareEntry({ command: '/H/bin/mcp-server', args: [], env: {} }, spec)).toMatchObject({ current: false });
+    expect(compareEntry({ command: '/h/bin/mcp-server', args: [], env: {} }, spec)).toEqual({ current: true });
+  });
+
+  it('the .cmd launcher keeps the runtime\'s exit code (no %ERRORLEVEL% expanded too early)', () => {
+    const text = windowsLauncher([stable], `${binDir}\\mcp-server.js`);
+    expect(text).not.toContain('%ERRORLEVEL%');
+    expect(text).toContain('  exit /b\r\n');
+    expect(text).toContain(`"${stable}" "${binDir}\\mcp-server.js" %*`);
   });
 });
 

@@ -9,11 +9,12 @@ import {
   findClaudeCli,
   inspectClaude,
   isOurEntry,
+  locateClaudeCli,
   registerClaude,
   unregisterClaude,
   type ClaudeTarget,
 } from '../../src/extension/registration/claudeCode';
-import type { ServerSpec } from '../../src/extension/registration/launcher';
+import { serverSpec, type ServerSpec } from '../../src/extension/registration/launcher';
 
 let dir: string;
 let file: string;
@@ -73,7 +74,7 @@ describe('registerClaude (direct edit, no CLI)', () => {
     expect(config.mcpServers.github).toEqual(existing.mcpServers.github);
     expect(config.numStartups).toBe(42);
     expect(config.projects).toEqual(existing.projects);
-    expect(inspectClaude(file, spec).state).toEqual({ kind: 'ours', current: true, command: spec.command });
+    expect(inspectClaude(file, spec).state).toMatchObject({ kind: 'ours', current: true, command: spec.command });
   });
 
   it('creates the file when Claude Code has not written one yet', async () => {
@@ -138,6 +139,125 @@ describe('registerClaude (direct edit, no CLI)', () => {
   });
 });
 
+describe('an update can never lose the entry (the Windows "it got removed" report)', () => {
+  // A `claude` whose `mcp remove` works and whose `mcp add-json` fails, as when a running Claude Code
+  // holds the config lock, the CLI times out, or a virus scanner holds the file. The old update ran
+  // remove, then add-json, then fell back to editing the file, which failed as well (lock still held):
+  // the entry was gone.
+  const fakeCli = () => {
+    const script = path.join(dir, 'fake-claude.cjs');
+    const calls = path.join(dir, 'calls.log');
+    fs.writeFileSync(
+      script,
+      `const fs = require('fs'); const [cmd, sub, ...rest] = process.argv.slice(2);
+       fs.appendFileSync(${JSON.stringify(calls)}, [cmd, sub].join(' ') + '\\n');
+       const file = ${JSON.stringify(file)};
+       if (sub === 'remove') { const c = JSON.parse(fs.readFileSync(file, 'utf8')); delete c.mcpServers.vscode; fs.writeFileSync(file, JSON.stringify(c)); process.exit(0); }
+       process.stderr.write('Error: Lock file is already being held\\n'); process.exit(1);`,
+    );
+    const cli = path.join(dir, 'claude');
+    fs.writeFileSync(cli, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(script)} "$@"\n`, { mode: 0o755 });
+    return { cli, calls: () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').trim().split('\n') : []) };
+  };
+  const holdLock = () => {
+    fs.mkdirSync(`${file}.lock`);
+    const timer = setInterval(() => fs.utimesSync(`${file}.lock`, new Date(), new Date()), 100);
+    return () => {
+      clearInterval(timer);
+      fs.rmSync(`${file}.lock`, { recursive: true, force: true });
+    };
+  };
+
+  it.skipIf(process.platform === 'win32')('a failed update leaves the previous entry in place and never calls `claude mcp remove`', async () => {
+    const old = { type: 'stdio', command: 'C:\\Old VS Code\\Code.exe', args: ['C:\\Users\\u\\.vscode-agent-bridge\\bin\\mcp-server.js'], env: { ELECTRON_RUN_AS_NODE: '1' } };
+    fs.writeFileSync(file, JSON.stringify({ ...existing, mcpServers: { ...existing.mcpServers, vscode: old } }));
+    const { cli, calls } = fakeCli();
+    const release = holdLock();
+    try {
+      const result = await registerClaude({ configFile: file, configDir: dir, cli, lockTimeoutMs: 300 }, spec);
+      expect(result.kind).toBe('failed');
+      expect(result.detail).toMatch(/previous entry is unchanged/);
+    } finally {
+      release();
+    }
+    expect(read().mcpServers.vscode).toEqual(old);
+    expect(calls()).toEqual([]);
+    // Once the lock is free, the same update goes through in one step.
+    expect(await registerClaude({ configFile: file, configDir: dir, cli }, spec)).toMatchObject({ kind: 'changed', detail: 'updated', via: 'file' });
+    expect(read().mcpServers.vscode.command).toBe(spec.command);
+    expect(calls()).toEqual([]);
+  });
+
+  it.skipIf(process.platform === 'win32')('a new entry falls back to the file when `claude mcp add-json` fails', async () => {
+    fs.writeFileSync(file, JSON.stringify(existing));
+    const { cli, calls } = fakeCli();
+    const result = await registerClaude({ configFile: file, configDir: dir, cli }, spec);
+    expect(result).toMatchObject({ kind: 'changed', via: 'file' });
+    expect(result.detail).toMatch(/Lock file is already being held/);
+    expect(calls()).toEqual(['mcp add-json']);
+    expect(read().mcpServers.vscode.command).toBe(spec.command);
+  });
+});
+
+describe('Windows entries (simulated: win32 paths, case-insensitive)', () => {
+  const stable = 'C:\\Users\\u\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe';
+  const insiders = 'C:\\Users\\u\\AppData\\Local\\Programs\\Microsoft VS Code Insiders\\Code - Insiders.exe';
+  const binDir = 'C:\\Users\\u\\.vscode-agent-bridge\\bin';
+  const installed = new Set([stable, insiders]);
+  const exists = (f: string) => installed.has(f);
+  const specOf = (runtime: string) => serverSpec({ binDir, runtime, platform: 'win32', knownRuntimes: [stable, insiders], exists });
+
+  it('Stable and Insiders accept each other\'s entry while both are installed: no rewrite on every start', async () => {
+    fs.writeFileSync(file, JSON.stringify(existing));
+    expect(await registerClaude(direct(), specOf(stable))).toMatchObject({ kind: 'changed', detail: 'registered' });
+    const text = fs.readFileSync(file, 'utf8');
+    expect(inspectClaude(file, specOf(insiders)).state).toMatchObject({ kind: 'ours', current: true });
+    expect(await registerClaude(direct(), specOf(insiders))).toMatchObject({ kind: 'unchanged' });
+    expect(fs.readFileSync(file, 'utf8')).toBe(text);
+  });
+
+  it('rewrites once when the runtime the entry names is uninstalled, and says why', async () => {
+    fs.writeFileSync(file, JSON.stringify(existing));
+    await registerClaude(direct(), specOf(stable));
+    installed.delete(stable);
+    try {
+      const spec = specOf(insiders);
+      const state = inspectClaude(file, spec).state;
+      expect(state).toMatchObject({ kind: 'ours', current: false });
+      expect(state.kind === 'ours' && state.reason).toMatch(/runtime it starts no longer exists/);
+      expect(await registerClaude(direct(), spec)).toMatchObject({ kind: 'changed', detail: 'updated' });
+      expect(read().mcpServers.vscode.command).toBe(insiders);
+    } finally {
+      installed.add(stable);
+    }
+  });
+
+  it('ignores case and slash differences in Windows paths', () => {
+    const lower = { type: 'stdio', command: stable.toLowerCase(), args: [specOf(stable).args[0]!.replace(/\\\\/g, '/')], env: { ELECTRON_RUN_AS_NODE: '1' } };
+    fs.writeFileSync(file, JSON.stringify({ mcpServers: { vscode: lower } }));
+    expect(inspectClaude(file, specOf(stable)).state).toMatchObject({ kind: 'ours', current: true });
+  });
+
+  it('finds claude.exe on a Windows Path and reports an npm claude.cmd it cannot use', () => {
+    const files = new Set(['C:\\Users\\u\\AppData\\Roaming\\npm\\claude.cmd']);
+    const has = (f: string) => files.has(f);
+    // Windows: a copied env object keeps the case "Path"; directories may be quoted.
+    const env = { Path: 'C:\\Windows\\system32;C:\\Users\\u\\AppData\\Roaming\\npm;"C:\\Program Files\\Claude"' };
+    expect(locateClaudeCli(env, 'C:\\Users\\u', 'win32', [], has)).toEqual({ cli: undefined, shims: ['C:\\Users\\u\\AppData\\Roaming\\npm\\claude.cmd'] });
+    files.add('C:\\Program Files\\Claude\\claude.exe');
+    expect(locateClaudeCli(env, 'C:\\Users\\u', 'win32', [], has).cli).toBe('C:\\Program Files\\Claude\\claude.exe');
+    files.add('C:\\Users\\u\\.local\\bin\\claude.exe');
+    expect(locateClaudeCli({}, 'C:\\Users\\u', 'win32', [], has).cli).toBe('C:\\Users\\u\\.local\\bin\\claude.exe');
+  });
+});
+
+describe('Claude Code turned the server off in a project', () => {
+  it('is reported', () => {
+    fs.writeFileSync(file, JSON.stringify({ projects: { '/p': { disabledMcpServers: ['vscode'] }, '/q': { disabledMcpServers: ['x'] } } }));
+    expect(inspectClaude(file, spec).disabledIn).toEqual(['/p']);
+  });
+});
+
 const cli = process.platform === 'win32' ? undefined : findClaudeCli(process.env, os.homedir(), process.platform);
 
 describe.skipIf(!cli)('registerClaude with the real claude CLI (temporary CLAUDE_CONFIG_DIR)', () => {
@@ -152,7 +272,8 @@ describe.skipIf(!cli)('registerClaude with the real claude CLI (temporary CLAUDE
     expect(listed).toMatch(/Scope: User config/);
     expect(listed).toContain(spec.command);
     expect(await registerClaude(target(), withEnv)).toMatchObject({ kind: 'unchanged' });
-    expect(await registerClaude(target(), spec)).toMatchObject({ kind: 'changed', detail: 'updated', via: 'cli' });
+    // An update is one atomic edit of the file, never `claude mcp remove` + `add-json`.
+    expect(await registerClaude(target(), spec)).toMatchObject({ kind: 'changed', detail: 'updated', via: 'file' });
     expect(await unregisterClaude(target(), spec)).toMatchObject({ kind: 'changed', via: 'cli' });
     expect(read().mcpServers).toEqual(existing.mcpServers);
   }, 60_000);

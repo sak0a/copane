@@ -34,11 +34,41 @@ export function writeFileAtomic(file: string, text: string, mode = 0o600): void 
   try {
     fs.writeFileSync(temp, text, { mode: keepMode });
     if (process.platform !== 'win32') fs.chmodSync(temp, keepMode);
-    fs.renameSync(temp, target);
+    // On Windows a rename over a file fails while another program has it open without delete
+    // sharing, or while a virus scanner looks at the new file. Both pass within moments.
+    retryWhileBusy(() => fs.renameSync(temp, target));
   } catch (err) {
     fs.rmSync(temp, { force: true });
     throw err;
   }
+}
+
+/** Error codes Windows gives for a file or folder that another process has open or is deleting. */
+const BUSY_CODES = new Set(['EPERM', 'EACCES', 'EBUSY', 'ENOTEMPTY']);
+
+export function isBusyError(err: unknown, platform: NodeJS.Platform = process.platform): boolean {
+  return platform === 'win32' && BUSY_CODES.has((err as NodeJS.ErrnoException)?.code ?? '');
+}
+
+/**
+ * Runs `fn`, retrying for up to `totalMs` while it fails the way Windows fails on a busy file
+ * (graceful-fs does the same for npm). On other platforms those errors are real and thrown at once.
+ */
+export function retryWhileBusy<T>(fn: () => T, options: { platform?: NodeJS.Platform; totalMs?: number } = {}): T {
+  const platform = options.platform ?? process.platform;
+  const deadline = Date.now() + (options.totalMs ?? 3000);
+  for (let delay = 10; ; delay = Math.min(delay * 2, 250)) {
+    try {
+      return fn();
+    } catch (err) {
+      if (!isBusyError(err, platform) || Date.now() + delay > deadline) throw err;
+      sleepSync(delay);
+    }
+  }
+}
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 export interface LockOptions {
@@ -46,6 +76,7 @@ export interface LockOptions {
   staleMs?: number;
   /** Give up after this long. */
   timeoutMs?: number;
+  platform?: NodeJS.Platform;
 }
 
 /**
@@ -58,12 +89,19 @@ export async function withFileLock<T>(file: string, fn: () => T | Promise<T>, op
   const lock = `${file}.lock`;
   const staleMs = options.staleMs ?? 10_000;
   const deadline = Date.now() + (options.timeoutMs ?? 15_000);
+  const platform = options.platform ?? process.platform;
   fs.mkdirSync(path.dirname(file), { recursive: true });
   for (let delay = 25; ; delay = Math.min(delay * 2, 500)) {
     try {
       fs.mkdirSync(lock);
       break;
     } catch (err) {
+      // Windows: a lock folder another process is just removing cannot be created again for a moment.
+      if (isBusyError(err, platform)) {
+        if (Date.now() > deadline) throw new Error(`${file} is locked by another program (${lock}); try again in a moment`);
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
       try {
         if (Date.now() - fs.statSync(lock).mtimeMs > staleMs) {
@@ -91,7 +129,13 @@ export async function withFileLock<T>(file: string, fn: () => T | Promise<T>, op
     return await fn();
   } finally {
     clearInterval(refresh);
-    fs.rmSync(lock, { recursive: true, force: true });
+    // The work is done; failing to remove the lock must not turn it into a failure. Left behind, the
+    // lock goes stale and the next writer takes it over after `staleMs`.
+    try {
+      retryWhileBusy(() => fs.rmSync(lock, { recursive: true, force: true }), { platform, totalMs: 1000 });
+    } catch {
+      // Stale lock; see above.
+    }
   }
 }
 

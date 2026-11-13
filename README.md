@@ -151,9 +151,19 @@ have one, it asks whether to replace it. Its own entry points to
 `~/.vscode-agent-bridge/bin/mcp-server`, which stays the same across extension updates, so your
 agent configuration does not need to change when the extension updates.
 
-**Unregister** with **Agent Bridge: Unregister from Claude Code and Codex**. It removes Agent
-Bridge's entries and nothing else, and Agent Bridge does not add them back on its own. Run it
-before uninstalling the extension if you do not plan to reinstall it.
+On Windows the entry starts VS Code's own runtime (`Code.exe`) with the server script, because
+agents cannot start a `.cmd` launcher there. It is rewritten only when that runtime is gone; an entry
+written by another VS Code build that is still installed (Stable and Insiders) is left as it is.
+
+Once you have agreed, Agent Bridge keeps its entry present and current: if something removes it
+(`claude mcp remove`, or Claude Code resetting a damaged config), the next VS Code start adds it back
+and says why in the log. An update replaces the entry in one step and never removes it first. Every
+change is logged in the **Agent Bridge** output channel with its reason and kept in
+`~/.vscode-agent-bridge/registration-history.json`.
+
+**Turn it off** with **Agent Bridge: Turn Off (Unregister from Claude Code and Codex)**. It removes
+Agent Bridge's entries and nothing else, and Agent Bridge does not add them back until you run
+**Agent Bridge: Turn On**. Run it before uninstalling the extension if you do not plan to reinstall it.
 
 ## Security model
 
@@ -175,10 +185,12 @@ before uninstalling the extension if you do not plan to reinstall it.
 
 | Command | |
 |---|---|
-| Agent Bridge: Register with Claude Code and Codex | Adds (or repairs) the `vscode` MCP server in the agents' user configuration. |
-| Agent Bridge: Unregister from Claude Code and Codex | Removes Agent Bridge's entries. |
+| Agent Bridge: Check and Repair Setup | Checks everything end to end (entries present and current, server script and runtime, a real start of the server with an MCP handshake, this window reachable), fixes Agent Bridge's own entries and says what was wrong and what it did. The same check runs quietly at every start. |
+| Agent Bridge: Turn On (Register with Claude Code and Codex) | Adds the `vscode` MCP server to the agents' user configuration and keeps it there. |
+| Agent Bridge: Turn Off (Unregister from Claude Code and Codex) | Removes Agent Bridge's entries and keeps them off. |
 | Agent Bridge: Enable Integrated Browser | Allows the proposed browser API in `argv.json` and offers to quit VS Code. |
-| Agent Bridge: Show Status | Everything about this window, the browser, the agents and the connected sessions, in one copyable report. |
+| Agent Bridge: Show Status | Everything about this window, the browser, the agents, the server's start test, recent registration changes and the connected sessions, in one report. |
+| Agent Bridge: Copy Status Report | Puts that report on the clipboard (also the copy button above the report). |
 | Agent Bridge: Show Log | The extension's log. |
 
 ## Settings
@@ -192,7 +204,9 @@ before uninstalling the extension if you do not plan to reinstall it.
 
 ## Troubleshooting
 
-Run **Agent Bridge: Show Status** first. It checks each of the following and says what to do.
+Run **Agent Bridge: Check and Repair Setup** first: it fixes what it can and says what it found.
+**Agent Bridge: Show Status** then explains the rest; when asking for help, send that report
+(**Copy Status Report**) and the output of **Agent Bridge: Show Log**.
 
 **Claude Code does not list the `vscode` server.** Start a new session: agents read their MCP
 configuration when a session starts. Check that the status report says *registered ✓* for Claude

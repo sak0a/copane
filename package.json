@@ -76,13 +76,19 @@
         "category": "Agent Bridge"
       },
       {
+        "command": "agentBridge.repair",
+        "title": "Check and Repair Setup",
+        "category": "Agent Bridge",
+        "icon": "$(tools)"
+      },
+      {
         "command": "agentBridge.registerAgents",
-        "title": "Register with Claude Code and Codex",
+        "title": "Turn On (Register with Claude Code and Codex)",
         "category": "Agent Bridge"
       },
       {
         "command": "agentBridge.unregisterAgents",
-        "title": "Unregister from Claude Code and Codex",
+        "title": "Turn Off (Unregister from Claude Code and Codex)",
         "category": "Agent Bridge"
       },
       {
@@ -94,6 +100,12 @@
         "command": "agentBridge.showStatus",
         "title": "Show Status",
         "category": "Agent Bridge"
+      },
+      {
+        "command": "agentBridge.copyStatus",
+        "title": "Copy Status Report",
+        "category": "Agent Bridge",
+        "icon": "$(copy)"
       },
       {
         "command": "agentBridge.terminal.finishRequest",
@@ -223,9 +235,9 @@
             "manual"
           ],
           "enumDescriptions": [
-            "Ask once before adding the \"vscode\" MCP server to Claude Code's and Codex's user configuration. Afterwards only Agent Bridge's own entry is kept up to date.",
+            "Ask once before adding the \"vscode\" MCP server to Claude Code's and Codex's user configuration. Afterwards Agent Bridge keeps its own entry present and up to date (it re-adds it if something removes it) until you run \"Agent Bridge: Turn Off\".",
             "Add and keep the \"vscode\" MCP server in Claude Code's and Codex's user configuration without asking.",
-            "Never change agent configuration on its own. Use the commands \"Agent Bridge: Register with Claude Code and Codex\" and \"Agent Bridge: Unregister from Claude Code and Codex\"."
+            "Never change agent configuration on its own; only report problems. Use \"Agent Bridge: Turn On\", \"Agent Bridge: Turn Off\" and \"Agent Bridge: Check and Repair Setup\"."
           ],
           "default": "ask",
           "scope": "machine",
@@ -286,6 +298,11 @@
           "command": "agentBridge.browser.resumeTab",
           "when": "activeEditor == workbench.editor.browser && agentBridge.browser.activeTabPaused",
           "group": "navigation@-10"
+        },
+        {
+          "command": "agentBridge.copyStatus",
+          "when": "resourceScheme == agent-bridge-status",
+          "group": "navigation"
         }
       ],
       "view/title": [

@@ -48,4 +48,63 @@ describe('renderStatus', () => {
     expect(text).toMatch(/remote window: argv\.json is on your local machine/);
     expect(text).toMatch(/None connected\. Start a new Claude Code session/);
   });
+
+  it('has what is needed to diagnose a Windows failure remotely', () => {
+    const win = 'C:\\Users\\u\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe';
+    const script = 'C:\\Users\\u\\.vscode-agent-bridge\\bin\\mcp-server.js';
+    const text = renderStatus(
+      data({
+        vscode: { appName: 'Visual Studio Code', version: '1.146.0', remoteName: null, platform: 'win32', arch: 'x64' },
+        platform: {
+          os: 'Windows_NT 10.0.26100 (win32)',
+          arch: 'x64',
+          runtime: win,
+          node: 'v22.1.0',
+          electron: '37.0.0',
+          appHost: 'desktop',
+          uiKind: 'desktop',
+          shell: 'C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+          env: { CLAUDE_CONFIG_DIR: undefined },
+        },
+        agents: [
+          {
+            name: 'Claude Code',
+            enabled: true,
+            detected: true,
+            detectedBy: 'config file',
+            configFile: 'C:\\Users\\u\\.claude.json',
+            state: { kind: 'ours', current: false, command: `C:\\old\\Code.exe ${script}`, reason: 'the runtime it starts no longer exists (C:\\old\\Code.exe)' },
+            notes: ['PROBLEM: Claude Code has the "vscode" server turned off in the project C:\\w.'],
+            registered: { command: 'C:\\old\\Code.exe', args: [script], env: { ELECTRON_RUN_AS_NODE: '1' }, commandExists: false, scriptExists: true },
+          },
+        ],
+        server: {
+          spec: { command: win, args: [script], env: { ELECTRON_RUN_AS_NODE: '1' } },
+          installedVersion: '0.1.0',
+          runtimes: [win],
+          selfTest: { ok: false, text: 'finds no window', stderr: '' },
+          handshake: { ok: false, text: 'the server exited before answering the MCP handshake (exit code 1)', stderr: 'Error: EPERM: operation not permitted\r\n    at open' },
+          scriptPath: script,
+          scriptExists: true,
+        },
+        history: [
+          { at: '2026-11-12T09:00:00.000Z', agent: 'Claude Code', action: 'update', trigger: 'startup', reason: 'out of date', outcome: 'failed', detail: 'locked; the previous entry is unchanged', before: 'C:\\old\\Code.exe x' },
+        ],
+      }),
+    );
+    expect(text).toContain('## Platform');
+    expect(text).toContain('OS: Windows_NT 10.0.26100 (win32) (x64)');
+    expect(text).toContain('Electron 37.0.0');
+    expect(text).toContain('CLAUDE_CONFIG_DIR=(unset)');
+    expect(text).toContain('Registered command: "C:\\\\old\\\\Code.exe" — DOES NOT EXIST');
+    expect(text).toContain('script exists ✓');
+    expect(text).toContain('Registered env: ELECTRON_RUN_AS_NODE=1');
+    expect(text).toContain('Out of date because the runtime it starts no longer exists');
+    expect(text).toContain('PROBLEM: Claude Code has the "vscode" server turned off');
+    expect(text).toMatch(/Start test \(MCP handshake[^)]*\): FAILED\n  the server exited before answering/);
+    expect(text).toContain('  Error: EPERM: operation not permitted');
+    expect(text).toContain('## Recent registration changes');
+    expect(text).toContain('Claude Code · update (startup) → failed: locked; the previous entry is unchanged. Why: out of date; was: C:\\old\\Code.exe x');
+    expect(text).toContain('Check and Repair Setup');
+  });
 });

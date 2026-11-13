@@ -6,7 +6,7 @@
 //   node scripts/dev-host.mjs --name registration
 //   node test/e2e/registration.e2e.mjs --name registration
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { agent, assert, hostDir, run, sleep, test, until } from './harness.mjs';
 
@@ -17,6 +17,8 @@ const codexFile = join(codexDir, 'config.toml');
 const argvFile = join(hostDir, 'argv.json');
 const setupFile = join(hostDir, 'home', 'setup.json');
 const launcher = join(hostDir, 'home', 'bin', process.platform === 'win32' ? 'mcp-server.js' : 'mcp-server');
+const historyFile = join(hostDir, 'home', 'registration-history.json');
+const readHistory = () => (existsSync(historyFile) ? JSON.parse(readFileSync(historyFile, 'utf8')) : []);
 
 const CLAUDE_BEFORE = { numStartups: 7, mcpServers: { github: { type: 'http', url: 'https://example.com/mcp' } }, projects: { '/p': { allowedTools: [] } } };
 const CODEX_BEFORE = '# my codex settings\nmodel = "o3" # keep this comment\n\n[mcp_servers.other]\ncommand = "x"\n';
@@ -247,6 +249,161 @@ test('the MCP server reconnects after the window reloads and keeps its session k
     await a.close();
   }
   await sleep(500);
+});
+
+/** Turned on, with both agents registered: the state the owner was in before the entry disappeared. */
+async function turnedOn(a) {
+  resetConfigs();
+  await answers(a, [null]);
+  const results = await command(a, 'agentBridge.registerAgents');
+  assert.deepEqual(results.map(r => r.outcome.kind), ['changed', 'changed']);
+}
+
+test('an entry removed outside Agent Bridge comes back at startup, with the reason in the history', async () => {
+  const a = await agent({ session: 'repair-1' });
+  try {
+    await turnedOn(a);
+    // `claude mcp remove vscode`, or Claude Code resetting its config: the entry is gone, consent stays.
+    const claude = readClaude();
+    delete claude.mcpServers.vscode;
+    writeFileSync(claudeFile, JSON.stringify(claude, null, 2));
+    const prompts = (await shownPrompts(a)).length;
+    const results = await command(a, 'agentBridge.registration.runStartupCheck');
+    assert.deepEqual(results.map(r => [r.agent, r.outcome.kind]), [['Claude Code', 'changed']]);
+    assert.equal(readClaude().mcpServers.vscode.command, launcher);
+    assert.equal((await shownPrompts(a)).length, prompts, 'quiet: no prompt for a repair it could make');
+    const record = readHistory().at(-1);
+    assert.equal(record.agent, 'Claude Code');
+    assert.equal(record.action, 'add');
+    assert.equal(record.trigger, 'startup');
+    assert.match(record.reason, /missing although registration was agreed to/);
+    // The start test ran and passed, and is remembered so the next start does not repeat it.
+    assert.equal(JSON.parse(readFileSync(setupFile, 'utf8')).lastProbe.ok, true);
+  } finally {
+    await a.close();
+  }
+});
+
+test('an update never passes through "no entry": while the config is locked the old entry stays, then it is updated in one step', async () => {
+  const a = await agent({ session: 'repair-2' });
+  try {
+    await turnedOn(a);
+    const old = { type: 'stdio', command: '/old/place/.vscode-agent-bridge/bin/mcp-server', args: [], env: { AGENT_BRIDGE_HOME: join(hostDir, 'home') } };
+    writeFileSync(claudeFile, JSON.stringify({ ...readClaude(), mcpServers: { ...readClaude().mcpServers, vscode: old } }, null, 2));
+    // A running Claude Code holds its config lock for longer than Agent Bridge waits (15 s).
+    const lock = `${claudeFile}.lock`;
+    mkdirSync(lock);
+    const keepFresh = setInterval(() => utimesSync(lock, new Date(), new Date()), 1000);
+    const seen = [];
+    const watch = setInterval(() => seen.push(readClaude().mcpServers.vscode?.command ?? 'MISSING'), 50);
+    let results;
+    try {
+      results = await command(a, 'agentBridge.registration.runStartupCheck');
+    } finally {
+      clearInterval(keepFresh);
+      clearInterval(watch);
+      rmSync(lock, { recursive: true, force: true });
+    }
+    assert.deepEqual(results.map(r => [r.agent, r.outcome.kind]), [['Claude Code', 'failed']]);
+    assert.match(results[0].outcome.detail, /locked by another program.*the previous entry is unchanged/);
+    assert.deepEqual(readClaude().mcpServers.vscode, old);
+    assert.ok(seen.length > 100 && seen.every(c => c === old.command), 'the entry was there the whole time');
+    const failed = readHistory().at(-1);
+    assert.equal(failed.outcome, 'failed');
+    assert.match(failed.reason, /out of date: it starts \/old\/place/);
+    assert.equal(failed.before, old.command);
+
+    results = await command(a, 'agentBridge.registration.runStartupCheck');
+    assert.deepEqual(results.map(r => [r.agent, r.outcome.kind, r.outcome.detail]), [['Claude Code', 'changed', 'updated']]);
+    assert.equal(readClaude().mcpServers.vscode.command, launcher);
+  } finally {
+    await a.close();
+  }
+});
+
+test('Check and Repair checks end to end, fixes Agent Bridge\'s entries and reports what it cannot fix', async () => {
+  const a = await agent({ session: 'repair-3' });
+  try {
+    await turnedOn(a);
+    let report = await command(a, 'agentBridge.repair', { quiet: true });
+    assert.equal(report.ok, true, JSON.stringify(report.lines, null, 2));
+    const texts = report.lines.map(l => `${l.kind}: ${l.text}`).join('\n');
+    assert.match(texts, /ok: The MCP server script is in place/);
+    assert.match(texts, /ok: Claude Code: registered and current/);
+    assert.match(texts, /ok: Codex: registered and current/);
+    assert.match(texts, /ok: Start test: the server answered the MCP handshake and listed \d+ tools, and ended when its input closed/);
+    assert.match(texts, /ok: Window test: .*finds this window .*and the window answers/);
+    assert.match(texts, /ok: This window is published and listening/);
+
+    // Broken: Codex's entry is gone, Claude's is outdated, and Claude Code has the server turned off in this folder.
+    writeFileSync(codexFile, CODEX_BEFORE);
+    const ws = join(hostDir, 'ws');
+    const claude = readClaude();
+    claude.mcpServers.vscode.command = '/somewhere/else/.vscode-agent-bridge/bin/mcp-server';
+    claude.projects[ws] = { disabledMcpServers: ['vscode'] };
+    writeFileSync(claudeFile, JSON.stringify(claude, null, 2));
+    report = await command(a, 'agentBridge.repair', { quiet: true });
+    const fixed = report.lines.filter(l => l.kind === 'fixed').map(l => l.text);
+    assert.equal(fixed.length, 2, JSON.stringify(report.lines, null, 2));
+    assert.match(fixed[0], /^Claude Code: the registered entry is out of date: it starts \/somewhere\/else.*; updated it/);
+    assert.match(fixed[1], /^Codex: .*registered it/);
+    const problems = report.lines.filter(l => l.kind === 'problem').map(l => l.text);
+    assert.equal(problems.length, 1);
+    assert.match(problems[0], /turned off in the project .*\/ws: in a Claude Code session there, run \/mcp and enable it/);
+    assert.equal(readClaude().mcpServers.vscode.command, launcher);
+    assert.match(readCodex(), /\[mcp_servers\.vscode\]/);
+    assert.deepEqual(readClaude().projects[ws], { disabledMcpServers: ['vscode'] }, 'the user\'s choice is left alone');
+    assert.deepEqual(readHistory().slice(-2).map(r => [r.agent, r.action, r.trigger, r.outcome]), [
+      ['Claude Code', 'update', 'repair', 'changed'],
+      ['Codex', 'add', 'repair', 'changed'],
+    ]);
+  } finally {
+    await a.close();
+  }
+});
+
+test('Turn Off removes everything and Check and Repair respects it; Turn On brings it back', async () => {
+  const a = await agent({ session: 'repair-4' });
+  try {
+    await turnedOn(a);
+    await answers(a, [null]);
+    await command(a, 'agentBridge.unregisterAgents');
+    assert.equal(readClaude().mcpServers.vscode, undefined);
+    assert.equal(readCodex(), CODEX_BEFORE);
+    const report = await command(a, 'agentBridge.repair', { quiet: true });
+    const problems = report.lines.filter(l => l.kind === 'problem').map(l => l.text);
+    assert.equal(problems.length, 2);
+    for (const p of problems) assert.match(p, /not registered, because it was turned off; run "Agent Bridge: Turn On \(Register with Claude Code and Codex\)"/);
+    assert.equal(readClaude().mcpServers.vscode, undefined, 'repair does not undo Turn Off');
+    assert.deepEqual(await command(a, 'agentBridge.registration.runStartupCheck'), [], 'nor does the startup check');
+    assert.deepEqual(readHistory().slice(-2).map(r => [r.action, r.trigger, r.outcome]), [
+      ['remove', 'turn-off', 'changed'],
+      ['remove', 'turn-off', 'changed'],
+    ]);
+    await answers(a, [null]);
+    const on = await command(a, 'agentBridge.registerAgents');
+    assert.deepEqual(on.map(r => r.outcome.kind), ['changed', 'changed']);
+    assert.equal(readClaude().mcpServers.vscode.command, launcher);
+  } finally {
+    await a.close();
+  }
+});
+
+test('the status report has what is needed to diagnose remotely, and Copy returns it', async () => {
+  const a = await agent({ session: 'repair-5' });
+  try {
+    const report = await command(a, 'agentBridge.showStatus', { show: false });
+    assert.match(report, /## Platform\n- OS: .*\n- Extension host runtime: .*\(Node v[\d.]+, Electron [\d.]+\)/);
+    assert.match(report, /### Claude Code[\s\S]*Registered command: ".*mcp-server" — exists ✓[\s\S]*Registered env: AGENT_BRIDGE_HOME=/);
+    assert.match(report, /Start test \(MCP handshake and tool list, as an agent starts it\): ok ✓\n  answered the MCP handshake/);
+    assert.match(report, /Self-test .*: ok ✓\n  runs on .*finds this window .*and the window answers.*process lookup: ps/);
+    assert.match(report, /## Recent registration changes\n[\s\S]*- \S+ · Claude Code · add \(turn-on\) → changed: registered\. Why: the user ran "Agent Bridge: Turn On/);
+    assert.match(report, /## Last "Agent Bridge: Check and Repair Setup" \(/);
+    const copied = await command(a, 'agentBridge.copyStatus', { quiet: true, toClipboard: false });
+    assert.match(copied, /^# Agent Bridge status/);
+  } finally {
+    await a.close();
+  }
 });
 
 await run();
