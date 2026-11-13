@@ -1,0 +1,39 @@
+# Agent Bridge (VS Code extension)
+
+Gives Claude Code and other MCP agents the VS Code window they run in: its integrated browser tabs
+and integrated terminals, shared with the user, per window and per agent session.
+Read `docs/ARCHITECTURE.md` before changing anything; `docs/feasibility-assessment.md` has the verified
+facts about the VS Code APIs this builds on.
+
+## Commands
+
+    npm run check                                   # typecheck + unit tests + build (must pass before you finish)
+    node scripts/dev-host.mjs --name <n>            # isolated VS Code with the extension loaded (builds first)
+    node scripts/dev-host.mjs --name <n> --stop
+    node scripts/mcp-call.mjs --name <n> --list     # talk to it through the real MCP server
+    node scripts/mcp-call.mjs --name <n> --session s1 <tool> '<json>'
+    node scripts/mcp-call.mjs --name <n> --session s1 --repl < calls.txt
+
+`--session <key>` makes separate calls one agent session; use two keys to act as two agents.
+After changing extension code, restart the dev host (`--stop`, then start) to load the new build.
+
+## Rules
+
+- **Never touch the user's real setup.** No writes to `~/.claude.json`, `~/.claude/`, `~/.codex/`,
+  `~/.vscode/` or `~/.vscode-agent-bridge/`, and never start, stop or reconfigure their own VS Code.
+  Dev hosts are fully isolated under `/tmp/agent-bridge-dev/<name>/`; use a `--name` unique to your
+  task, and never `pkill` by a pattern that could match another dev host or the user's VS Code.
+  Code that edits user config is tested against a temporary directory.
+- The user is working on this machine. Open as few windows as you need, stop your dev hosts when you
+  are done, and do not use desktop mouse or keyboard automation.
+- Module boundaries: a module is one folder under `src/extension/` and talks to the others only
+  through `core/services.ts`. Each module declares its commands, settings, views and menus in its own
+  `contributes/<module>.json` (merged into `package.json` by the build; never edit `contributes` in
+  `package.json` by hand).
+- `src/extension/core/` and `src/shared/` are shared contracts. Change them only when necessary, keep
+  changes additive, and say so in your report.
+- Core logic that does not need `vscode` stays free of it and gets unit tests in `test/unit/`.
+  Behaviour that depends on VS Code is verified against a dev host through `scripts/mcp-call.mjs`.
+- Tool descriptions, tool results and error messages are read by a model. Say what happened and what
+  to do next; return compact text, not raw protocol dumps.
+- TypeScript strict, no new runtime dependencies without a reason (they are bundled into the VSIX).

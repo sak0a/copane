@@ -1,0 +1,16 @@
+{
+  "commands": [
+    { "command": "agentBridge.showLog", "title": "Show Log", "category": "Agent Bridge" }
+  ],
+  "configuration": {
+    "title": "Agent Bridge",
+    "properties": {
+      "agentBridge.sessionGraceSeconds": {
+        "type": "number",
+        "default": 20,
+        "minimum": 0,
+        "description": "How long a disconnected agent session keeps its tabs and terminals before they are released. Lets an agent reconnect after a window reload."
+      }
+    }
+  }
+}

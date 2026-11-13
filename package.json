@@ -1,0 +1,79 @@
+{
+  "name": "vscode-agent-bridge",
+  "displayName": "Agent Bridge: Browser & Terminal for Claude Code",
+  "description": "Gives Claude Code (and other MCP agents) first-class access to VS Code's integrated browser tabs and integrated terminals, per window and per agent session.",
+  "publisher": "sak0a",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "vscode": "^1.140.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "keywords": [
+    "claude",
+    "claude code",
+    "mcp",
+    "browser",
+    "terminal",
+    "agent",
+    "codex"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "enabledApiProposals": [
+    "browser"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "agentBridge.showLog",
+        "title": "Show Log",
+        "category": "Agent Bridge"
+      }
+    ],
+    "configuration": {
+      "title": "Agent Bridge",
+      "properties": {
+        "agentBridge.sessionGraceSeconds": {
+          "type": "number",
+          "default": 20,
+          "minimum": 0,
+          "description": "How long a disconnected agent session keeps its tabs and terminals before they are released. Lets an agent reconnect after a window reload."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run test && npm run build",
+    "dev:host": "node scripts/dev-host.mjs",
+    "mcp": "node scripts/mcp-call.mjs",
+    "package": "npm run build && vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/vscode": "~1.140.0",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.1.1",
+    "esbuild": "^0.28.2",
+    "typescript": "~5.9",
+    "vitest": "^5.1.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "jsonc-parser": "^3.3.1",
+    "zod": "^4.6.7"
+  }
+}
