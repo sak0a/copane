@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Drag fixture</title>
+<style>body{font:14px sans-serif;margin:16px} .card{width:120px;padding:8px;margin:6px;border:1px solid #333;background:#eef;cursor:grab} #zone{width:260px;height:90px;border:2px dashed #888;margin:10px 0}
+#track{position:relative;width:300px;height:20px;background:#ddd;margin:20px 0} #knob{position:absolute;left:0;top:0;width:20px;height:20px;background:#36c;cursor:pointer}</style></head>
+<body>
+<h1>Drag and drop</h1>
+<div class="card" id="card-a" draggable="true">Card A</div>
+<div class="card" id="card-b" draggable="true">Card B</div>
+<div id="zone" role="region" aria-label="Drop zone">Drop here</div>
+<div id="track" aria-label="Slider track"><div id="knob" role="slider" aria-label="Knob" aria-valuenow="0"></div></div>
+<p id="out" role="status"></p>
+<script>
+  const out = document.getElementById('out');
+  for (const c of document.querySelectorAll('.card')) c.addEventListener('dragstart', e => e.dataTransfer.setData('text/plain', c.id));
+  const zone = document.getElementById('zone');
+  zone.addEventListener('dragover', e => e.preventDefault());
+  zone.addEventListener('drop', e => { e.preventDefault(); const id = e.dataTransfer.getData('text/plain'); zone.append(document.getElementById(id)); out.textContent = 'Dropped ' + id; });
+  const knob = document.getElementById('knob');
+  const track = document.getElementById('track');
+  let dragging = false;
+  knob.addEventListener('mousedown', e => { dragging = true; e.preventDefault(); });
+  addEventListener('mousemove', e => { if (!dragging) return; const r = track.getBoundingClientRect(); const x = Math.max(0, Math.min(280, e.clientX - r.left - 10)); knob.style.left = x + 'px'; knob.setAttribute('aria-valuenow', Math.round(x / 2.8)); });
+  addEventListener('mouseup', () => { if (dragging) { dragging = false; out.textContent = 'Slider at ' + knob.getAttribute('aria-valuenow'); } });
+</script>
+</body></html>

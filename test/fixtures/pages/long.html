@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Long page fixture</title>
+<style>body{font:14px sans-serif;margin:16px} #scroller{height:120px;overflow:auto;border:1px solid #888}</style></head>
+<body>
+<header><h1>Long page</h1><nav aria-label="Sections"><a href="#s1">Section 1</a> <a href="#s10">Section 10</a></nav></header>
+<div id="scroller" aria-label="Inner scroller" role="region"></div>
+<main id="main"></main>
+<footer><h2>Footer heading</h2><button id="bottom">Bottom button</button></footer>
+<script>
+  const scroller = document.getElementById('scroller');
+  for (let i = 1; i <= 40; i++) { const p = document.createElement('p'); p.textContent = 'Scroll row ' + i; scroller.append(p); }
+  const main = document.getElementById('main');
+  for (let s = 1; s <= 30; s++) {
+    const sec = document.createElement('section');
+    sec.setAttribute('aria-label', 'Section ' + s);
+    sec.id = 's' + s;
+    sec.innerHTML = '<h2>Section ' + s + '</h2><ul>' + Array.from({ length: 60 }, (_, i) => '<li><a href="#item-' + s + '-' + i + '">Item ' + s + '.' + i + ' with some descriptive text</a></li>').join('') + '</ul>';
+    main.append(sec);
+  }
+</script>
+</body></html>

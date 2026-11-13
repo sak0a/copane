@@ -1,30 +1,58 @@
-import { z } from 'zod';
-import { ToolError } from '../../core/errors';
+// Page automation: everything an agent does inside a browser tab. Navigation, reading the page
+// (snapshot, screenshot), acting on it with real input, waiting, console and network, dialogs, and
+// JavaScript evaluation. Every tool goes through `services.browser.acquire`, with "read" for tools that
+// only look and "control" for tools that change the page.
+//
+// State kept here, never on the shared CdpPage: one PageState per tab (recorders, frames, dialog), and
+// per-session ref tables and read cursors.
 import type { BridgeServices } from '../../core/services';
-import { defineTool } from '../../core/tools';
+import { actionTools } from './actionTools';
+import type { PageEnv } from './call';
+import { debugCdpTools } from './debugCdp';
+import { logTools } from './logTools';
+import { navigationTools } from './navigationTools';
+import { PageStates } from './pageState';
+import { RefStore } from './refs';
+import { scriptTools } from './scriptTools';
+import { snapshotTools } from './snapshotTools';
+import { waitTools } from './waitTools';
 
-/** Tools that act on a page through CDP. Everything goes through `services.browser.acquire`. */
 export function registerPageTools(services: BridgeServices): void {
   const { browser, context } = services;
+  const env: PageEnv = { services, states: new PageStates(services.log), refs: new RefStore(), cursors: new Map() };
+
+  // Recording starts as soon as a tab's CDP connection exists.
   context.subscriptions.push(
+    browser.onDidAttachPage(page => {
+      env.states.forPage(page);
+      page.onDidClose(() => {
+        // A closed connection of a tab that still exists is re-attached later; keep its history.
+        setTimeout(() => {
+          if (browser.getTab(page.tabId)) return;
+          env.states.delete(page.tabId);
+          env.refs.dropTab(page.tabId);
+          for (const key of [...env.cursors.keys()]) if (key.endsWith(`\u0000${page.tabId}`)) env.cursors.delete(key);
+        }, 0);
+      });
+    }),
+    // Focus emulation (input.ts) lasts as long as an agent controls the tab.
+    services.tabLeases.onDidChange(change => {
+      if (!change.lease) env.states.get(change.resourceId)?.endFocusEmulation();
+    }),
+    services.sessions.onDidChange(change => {
+      if (change.type !== 'removed') return;
+      env.refs.dropSession(change.session.id);
+      for (const key of [...env.cursors.keys()]) if (key.startsWith(`${change.session.id}\u0000`)) env.cursors.delete(key);
+    }),
+    { dispose: () => env.states.dispose() },
     services.tools.register([
-      defineTool({
-        name: 'browser_evaluate',
-        title: 'Run JavaScript in page',
-        description: 'Evaluates a JavaScript expression in the page and returns its JSON-serialisable result. Promises are awaited.',
-        input: {
-          expression: z.string().describe('JavaScript expression, e.g. "document.title".'),
-          tab: z.string().optional().describe('Tab id. Defaults to your current tab.'),
-        },
-        handler: async (args, ctx) => {
-          const { page } = await browser.acquire(ctx.session, args.tab, 'control', ctx.signal);
-          const result = await page.send('Runtime.evaluate', { expression: args.expression, returnByValue: true, awaitPromise: true });
-          if (result.exceptionDetails) {
-            throw new ToolError('failed', `The script threw: ${result.exceptionDetails.exception?.description ?? result.exceptionDetails.text}`);
-          }
-          return JSON.stringify(result.result.value ?? null, null, 2);
-        },
-      }),
+      ...navigationTools(env),
+      ...snapshotTools(env),
+      ...actionTools(env),
+      ...waitTools(env),
+      ...logTools(env),
+      ...scriptTools(env),
+      ...debugCdpTools(services),
     ]),
   );
 }

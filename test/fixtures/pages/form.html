@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Form fixture</title>
+<style>body{font:14px sans-serif;margin:16px} label{display:block;margin:6px 0} #result{white-space:pre;border:1px solid #ccc;padding:6px;min-height:20px}</style></head>
+<body>
+<h1>Sign up</h1>
+<form id="f" onsubmit="event.preventDefault(); submitForm()">
+  <label>Name <input id="name" name="name" required></label>
+  <label>Email <input id="email" name="email" type="email" placeholder="you@example.com"></label>
+  <label>Password <input id="pw" name="pw" type="password"></label>
+  <label>Age <input id="age" name="age" type="number"></label>
+  <label>Zip (max 5) <input id="zip" name="zip" maxlength="5"></label>
+  <label>Birthday <input id="bday" name="bday" type="date"></label>
+  <label>Volume <input id="vol" name="vol" type="range" min="0" max="10" value="3"></label>
+  <label>Bio <textarea id="bio" name="bio"></textarea></label>
+  <label>Readonly <input id="ro" value="fixed" readonly></label>
+  <label><input type="checkbox" id="terms" name="terms"> I accept the terms</label>
+  <fieldset><legend>Plan</legend>
+    <label><input type="radio" name="plan" value="free" checked> Free</label>
+    <label><input type="radio" name="plan" value="pro"> Pro</label>
+  </fieldset>
+  <label>Country <select id="country" name="country"><option value="">Choose…</option><option value="de">Germany</option><option value="fr">France</option><option value="us" disabled>United States</option></select></label>
+  <label>Toppings <select id="tops" name="tops" multiple><option>Cheese</option><option>Ham</option><option>Olives</option></select></label>
+  <div id="notes" contenteditable="true" role="textbox" aria-label="Notes" style="border:1px solid #999;min-height:20px"></div>
+  <button id="submit" type="submit" disabled>Create account</button>
+</form>
+<p>Keys: <span id="keys"></span></p>
+<div id="result" role="status" aria-label="Result"></div>
+<script>
+  const f = document.getElementById('f');
+  const submit = document.getElementById('submit');
+  const sync = () => (submit.disabled = !document.getElementById('name').value);
+  f.addEventListener('input', sync);
+  const keys = [];
+  document.addEventListener('keydown', e => {
+    keys.push((e.ctrlKey ? 'Ctrl+' : '') + (e.metaKey ? 'Meta+' : '') + (e.altKey ? 'Alt+' : '') + (e.shiftKey && e.key.length > 1 ? 'Shift+' : '') + e.key);
+    document.getElementById('keys').textContent = keys.slice(-8).join(' ');
+  });
+  async function submitForm() {
+    const data = Object.fromEntries([...new FormData(f).entries()].filter(([k, v]) => typeof v === 'string'));
+    data.tops = [...document.getElementById('tops').selectedOptions].map(o => o.value).join(',');
+    data.notes = document.getElementById('notes').innerText;
+    const res = await fetch('/echo', { method: 'POST', headers: { 'content-type': 'application/json', 'x-test': 'form' }, body: JSON.stringify(data) });
+    const echoed = await res.json();
+    console.log('submitted', echoed.body);
+    document.getElementById('result').textContent = 'Saved: ' + echoed.body;
+  }
+</script>
+</body></html>

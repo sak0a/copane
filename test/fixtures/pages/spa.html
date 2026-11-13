@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>SPA fixture</title>
+<style>body{font:14px sans-serif;margin:16px} .tip{display:none;position:absolute;background:#ffd;border:1px solid #aa0;padding:4px} #hoverme:hover + .tip{display:block}</style></head>
+<body>
+<nav aria-label="Main"><a href="/spa.html" data-route="home">Home</a> | <a href="/spa/items" data-route="items">Items</a> | <a href="/form.html">Form page</a> | <a href="/spa.html?popup" target="_blank" id="popup">Open in new tab</a></nav>
+<main>
+  <h1 id="title">Home</h1>
+  <ul id="list"></ul>
+  <button id="shuffle">Shuffle</button>
+  <button id="rename">Rename me</button>
+  <button id="later">Load later</button>
+  <button id="fetch-ok">Fetch JSON</button>
+  <button id="fetch-500">Fetch 500</button>
+  <button id="fetch-slow">Fetch slow</button>
+  <button id="fetch-down">Fetch unreachable</button>
+  <button id="log-error">Log error</button>
+  <button id="throw">Throw</button>
+  <button id="warn">Warn</button>
+  <button id="ctx">Context target</button>
+  <button id="dbl">Double target</button>
+  <button id="mods">Modifier target</button>
+  <span id="hoverme">Hover me</span><span class="tip" role="tooltip">Helpful tooltip</span>
+  <p id="banner">Welcome banner</p>
+  <button id="hide-banner">Hide banner</button>
+  <p id="status" role="status"></p>
+</main>
+<script>
+  const $ = id => document.getElementById(id);
+  let items = ['Apple', 'Banana', 'Cherry'];
+  const render = () => { $('list').replaceChildren(...items.map(t => { const li = document.createElement('li'); const b = document.createElement('button'); b.textContent = t; b.onclick = () => ($('status').textContent = 'Picked ' + t); li.append(b); return li; })); };
+  render();
+  $('shuffle').onclick = () => { items = [items[2], items[0], items[1]]; render(); };
+  $('rename').onclick = () => ($('rename').textContent = 'Renamed');
+  $('later').onclick = () => setTimeout(() => ($('status').textContent = 'Loaded later!'), 1500);
+  $('fetch-ok').onclick = async () => { const r = await fetch('/json'); $('status').textContent = 'Got ' + (await r.json()).name; };
+  $('fetch-500').onclick = () => fetch('/status/500').then(r => ($('status').textContent = 'Status ' + r.status));
+  $('fetch-slow').onclick = () => fetch('/slow?ms=1200').then(r => ($('status').textContent = 'Slow done'));
+  $('fetch-down').onclick = () => fetch('http://127.0.0.1:9/nothing').catch(e => console.error('fetch failed:', e.message));
+  $('log-error').onclick = () => console.error('Something broke', { code: 42, items: [1, 2] });
+  $('throw').onclick = () => { throw new TypeError('kaboom from click'); };
+  $('warn').onclick = () => console.warn('careful %s', 'now');
+  $('ctx').addEventListener('contextmenu', e => { e.preventDefault(); $('status').textContent = 'context menu at button ' + e.button; });
+  $('dbl').addEventListener('dblclick', () => ($('status').textContent = 'double clicked'));
+  $('mods').addEventListener('click', e => ($('status').textContent = 'mods:' + (e.shiftKey ? 'shift' : '') + (e.altKey ? 'alt' : '') + (e.metaKey ? 'meta' : '') + (e.ctrlKey ? 'ctrl' : '')));
+  $('hide-banner').onclick = () => setTimeout(() => $('banner').remove(), 800);
+  const route = () => { $('title').textContent = location.pathname.endsWith('/items') ? 'Items' : 'Home'; };
+  document.querySelectorAll('[data-route]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); history.pushState({}, '', a.getAttribute('href')); route(); }));
+  addEventListener('popstate', route);
+  route();
+</script>
+</body></html>

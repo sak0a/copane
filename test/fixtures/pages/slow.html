@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Slow page fixture</title></head>
+<body>
+<h1>Slow page</h1>
+<p>The image below holds the load event.</p>
+<script>
+  const ms = new URLSearchParams(location.search).get('ms') || '2000';
+  const img = new Image();
+  img.alt = 'slow';
+  img.src = ms === 'hang' ? '/hang' : '/slow?ms=' + ms;
+  document.body.append(img);
+  console.info('slow page script ran');
+</script>
+</body></html>

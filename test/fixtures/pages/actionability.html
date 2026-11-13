@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Actionability fixture</title>
+<style>body{font:14px sans-serif;margin:16px} #overlay{position:fixed;inset:0;background:rgba(0,0,0,.4)} #mover{position:relative;transition:left 1s linear;left:0}
+[data-agent-bridge-ui]{position:fixed;top:0;right:0;background:#f00;color:#fff;padding:4px;z-index:99999;pointer-events:none}</style></head>
+<body>
+<div data-agent-bridge-ui="indicator">AGENT INDICATOR <button>Indicator button</button></div>
+<h1>Actionability</h1>
+<button id="covered" onclick="out('covered clicked')">Covered button</button>
+<button id="enabled-later" disabled onclick="out('enabled clicked')">Enabled later</button>
+<button id="never" disabled>Never enabled</button>
+<button id="hidden" style="display:none">Hidden button</button>
+<button id="mover" onclick="out('mover clicked')">Moving button</button>
+<p id="out" role="status"></p>
+<div id="overlay"></div>
+<script>
+  function out(t) { document.getElementById('out').textContent = t; }
+  const params = new URLSearchParams(location.search);
+  setTimeout(() => document.getElementById('overlay').remove(), Number(params.get('overlay') ?? 1500));
+  setTimeout(() => (document.getElementById('enabled-later').disabled = false), 1000);
+  requestAnimationFrame(() => (document.getElementById('mover').style.left = '200px'));
+  // Records visibility changes of the bridge indicator, so the e2e test can verify screenshots hide it.
+  window.indicatorLog = [];
+  new MutationObserver(() => indicatorLog.push(getComputedStyle(document.querySelector('[data-agent-bridge-ui]')).visibility)).observe(document.querySelector('[data-agent-bridge-ui]'), { attributes: true });
+</script>
+</body></html>
