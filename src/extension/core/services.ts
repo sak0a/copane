@@ -51,6 +51,10 @@ export interface BrowserTabInfo {
   allowedSessions: string[];
   /** The user has taken over: agent actions on this tab are refused until they resume it. */
   paused: boolean;
+  /** VS Code's own id of the browser view; the editor tab's resource is `vscode-browser:/<viewId>`. Known once the tab has been attached. */
+  viewId?: string;
+  /** For a tab a page opened (popup, `target=_blank`) while a session controlled it: the tab it came from. */
+  openerTab?: string;
 }
 
 /** A CDP connection to one tab's page target. Shared by all sessions that use the tab. */
@@ -87,6 +91,12 @@ export interface BrowserService {
   releaseTab(tabId: string, sessionId?: string): void;
   /** User takeover: while paused, agents cannot act on the tab. */
   setPaused(tabId: string, paused: boolean): void;
+  /** Fires once per new tab, after it is attributed (agent tab, popup of an agent tab, or user tab). */
+  readonly onDidOpenTab?: Event<BrowserTabInfo>;
+  /** The user shares one of their tabs with a session (as if they had answered "Allow"). */
+  grantAccess?(tabId: string, sessionId: string): void;
+  /** Withdraws what the user allowed or denied for a tab (all sessions, or one), so the next use asks again. */
+  revokeAccess?(tabId: string, sessionId?: string): void;
 }
 
 // ---------------------------------------------------------------- Terminals

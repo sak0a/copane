@@ -30,7 +30,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const config = () => vscode.workspace.getConfiguration('agentBridge');
   const sessions = new SessionManager({ graceMs: () => Math.max(0, config().get<number>('sessionGraceSeconds', 20)) * 1000 });
   const tools = new ToolRegistry();
-  const tabLeases = new LeaseManager();
+  // Idle timeout of tab control: the browser module's setting (contributes/browser.json).
+  const tabLeases = new LeaseManager({ idleMs: () => Math.max(5, config().get<number>('browser.leaseIdleSeconds', 120)) * 1000 });
   const instance = new InstanceRegistration(context, log);
   // Leases end with their session, and when they have not been used for a while.
   const idleSweep = setInterval(() => tabLeases.releaseIdle(), 10_000);
