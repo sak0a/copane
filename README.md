@@ -18,7 +18,8 @@ CLI** in the integrated terminal, and with **Codex** (`codex` CLI and extension)
 
 ## Install
 
-1. Install **Copane** from the Marketplace, or a `.vsix` with
+1. Download `copane-<version>.vsix` from the [latest release](https://github.com/sak0a/copane/releases/latest)
+   and install it: Extensions view → `…` → *Install from VSIX…*, or
    `code --install-extension copane-<version>.vsix`.
 2. When VS Code asks *"let Claude Code and Codex use this VS Code's browser tabs and terminals?"*,
    choose **Register**. This adds an MCP server named `copane` to your user configuration of the
