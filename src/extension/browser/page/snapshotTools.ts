@@ -149,6 +149,11 @@ export function snapshotTools(env: PageEnv): ToolDefinition<any>[] {
           const target = (await resolveTarget(call, args, { waitMs: 2000 })) as ElementTarget | undefined;
           if (target && args.fullPage) throw new ToolError('invalid_input', 'Pass either an element (ref/selector) or fullPage, not both.');
           if (target) await scrollIntoView(call, target);
+          const format = args.format ?? 'jpeg';
+          for (const hook of env.hooks ?? []) {
+            const shot = await hook.screenshot?.(call, { target, fullPage: Boolean(args.fullPage), format });
+            if (shot) return shot;
+          }
           const vp = await viewport(call);
           let region: { x: number; y: number; width: number; height: number };
           let what: string;
@@ -168,7 +173,6 @@ export function snapshotTools(env: PageEnv): ToolDefinition<any>[] {
             what = 'the viewport';
           }
           const scale = screenshotScale(region.width, region.height);
-          const format = args.format ?? 'jpeg';
           let hidden = 0;
           try {
             hidden = await call.evaluate<number>(TOGGLE_BRIDGE_UI, [true]);

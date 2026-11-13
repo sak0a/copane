@@ -14,5 +14,5 @@ export function activateBrowser(services: BridgeServices): void {
   services.context.subscriptions.push(browser, certificates);
   registerTabTools(services, browser);
   registerBrowserCommands(services, browser);
-  registerPageTools(services);
+  registerPageTools(services, browser);
 }

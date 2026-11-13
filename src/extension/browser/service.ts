@@ -92,6 +92,8 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
 
   /** Set by the certificate gate (see `BrowserService.certificateRefusal`). */
   certificateRefusal: ((url: string) => string | undefined) | undefined;
+  /** Features that add fields to a tab's info (downloads, emulation); see `addTabInfoProvider`. */
+  private readonly infoProviders = new Set<(tabId: string) => Partial<BrowserTabInfo> | undefined>();
 
   readonly onDidChange = this.changeEmitter.event;
   readonly onDidAttachPage = this.attachEmitter.event;
@@ -301,6 +303,17 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
 
   idleSeconds(): number {
     return leaseIdleSeconds();
+  }
+
+  /** Adds fields to every tab's `BrowserTabInfo`. Call `tabInfoChanged` when what it returns changes. */
+  addTabInfoProvider(provider: (tabId: string) => Partial<BrowserTabInfo> | undefined): vscode.Disposable {
+    this.infoProviders.add(provider);
+    return { dispose: () => void this.infoProviders.delete(provider) };
+  }
+
+  /** Fires `onDidChange` for a change only a tab info provider knows about. */
+  tabInfoChanged(): void {
+    this.changeEmitter.fire();
   }
 
   dispose(): void {
@@ -718,7 +731,16 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
     const openedBy = isLive(record.openedBy) ? record.openedBy : undefined;
     const allowed = new Set(this.consent.allowedSessions(record.id, record.tab.url).filter(isLive));
     if (openedBy) allowed.add(openedBy);
+    const extra: Partial<BrowserTabInfo> = {};
+    for (const provider of this.infoProviders) {
+      try {
+        Object.assign(extra, provider(record.id));
+      } catch (err) {
+        this.log.warn(`tab info provider failed for ${record.id}: ${errorText(err)}`);
+      }
+    }
     return {
+      ...extra,
       id: record.id,
       url: record.tab.url,
       title: pageTitle(record.tab.title, record.tab.url),

@@ -4,6 +4,7 @@
 import { ToolError } from '../../core/errors';
 import type { BridgeServices, BrowserTabInfo, CdpPage, TabAccess } from '../../core/services';
 import type { ToolContext } from '../../core/tools';
+import type { ToolContent } from '../../../shared/protocol';
 import { DialogInterrupt, type DialogInfo, type PageState, type PageStates } from './pageState';
 import { clip } from './ringBuffer';
 import type { RefStore, RefTable } from './refs';
@@ -15,6 +16,33 @@ export interface PageEnv {
   refs: RefStore;
   /** Read cursors for console and network, per `${sessionId}\0${tabId}`. */
   cursors: Map<string, { console: number; network: number }>;
+  /** Features that hook into page tool calls (downloads, emulation). */
+  hooks?: PageHook[];
+}
+
+/** A feature's hooks into page tool calls. Every member is optional. */
+export interface PageHook {
+  /** Runs before a call that controls the tab; the function it returns runs when the call ends. */
+  aroundControl?(call: PageCall): Promise<(() => void) | undefined>;
+  /** Lines for an action's result about what it caused since `sinceSeq` (e.g. downloads). */
+  effectLines?(call: PageCall, sinceSeq: number): Promise<string[]>;
+  /** Takes a screenshot itself when the usual way would disturb the tab; undefined to let the tool do it. */
+  screenshot?(call: PageCall, request: ScreenshotRequest): Promise<ToolContent[] | undefined>;
+  /** The page takes touch input instead of mouse presses (mobile emulation). */
+  usesTouch?(call: PageCall): Promise<boolean>;
+}
+
+export interface ScreenshotRequest {
+  /** Element to capture (already scrolled into view). */
+  target: { backendNodeId: number; label: string } | undefined;
+  fullPage: boolean;
+  format: 'jpeg' | 'png';
+}
+
+/** True when a hook says the page wants taps instead of mouse presses. */
+export async function pageUsesTouch(call: PageCall): Promise<boolean> {
+  for (const hook of call.env.hooks ?? []) if (await hook.usesTouch?.(call)) return true;
+  return false;
 }
 
 /** An object handle argument for `callOn`. */
@@ -211,7 +239,14 @@ export async function withPage<T>(env: PageEnv, ctx: ToolContext, tabId: string 
   const state = env.states.forPage(page);
   await Promise.race([state.ready, new Promise(resolve => setTimeout(resolve, 15_000))]);
   const call = new PageCall(env, ctx, tab, page, state);
+  const after: Array<() => void> = [];
   try {
+    if (options.access === 'control') {
+      for (const hook of env.hooks ?? []) {
+        const done = await hook.aroundControl?.(call);
+        if (done) after.push(done);
+      }
+    }
     if (state.dialog && !options.allowDialog) throw new DialogInterrupt(state.dialog);
     // The session driving the tab gets a page that behaves as if it were in front, even when the tab is
     // in the background: timers not throttled, animation frames running, input accepted.
@@ -223,6 +258,7 @@ export async function withPage<T>(env: PageEnv, ctx: ToolContext, tabId: string 
     if (page.closed && !(err instanceof ToolError && err.code === 'cancelled')) throw new ToolError('not_found', `Tab ${tab.id} was closed while the tool was running.`);
     throw err;
   } finally {
+    for (const done of after) done();
     call.dispose();
   }
 }

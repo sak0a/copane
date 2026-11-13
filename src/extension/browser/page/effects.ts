@@ -94,9 +94,13 @@ export async function describeEffects(call: PageCall, mark: ActionMark): Promise
   for (const f of failures.slice(0, 3)) lines.push(`Request failed: ${f.method} ${clip(f.url, 200)} → ${f.failed ?? `HTTP ${f.status}`} (${f.id}).`);
   if (failures.length > 3) lines.push(`${failures.length - 3} more requests failed (browser_network_requests with status "failed").`);
 
-  for (const p of state.popups.after(mark.seq)) {
-    if (p.kind === 'download') lines.push(`A download started: ${clip(p.url, 200)}.`);
+  const hooks = (call.env.hooks ?? []).filter(h => h.effectLines);
+  if (hooks.length === 0) {
+    for (const p of state.popups.after(mark.seq)) {
+      if (p.kind === 'download') lines.push(`A download started: ${clip(p.url, 200)}.`);
+    }
   }
+  for (const hook of hooks) lines.push(...(await hook.effectLines!(call, mark.seq)));
   const newTabs = call.env.services.browser.listTabs().filter(t => !mark.tabs.has(t.id));
   for (const t of newTabs) lines.push(`A new tab opened: ${t.id} ${clip(t.url, 200)}. Your current tab is still ${call.tab.id}; pass tab: "${t.id}" to use the new one.`);
   if (newTabs.length === 0) {

@@ -7,6 +7,10 @@
 // per-session ref tables and read cursors.
 import type { BridgeServices } from '../../core/services';
 import { actionTools } from './actionTools';
+import { DownloadManager } from './downloads';
+import { downloadTools } from './downloadTools';
+import { EmulationManager, type TabInfoHost } from './emulation';
+import { emulationTools } from './emulationTools';
 import type { PageEnv } from './call';
 import { debugCdpTools } from './debugCdp';
 import { logTools } from './logTools';
@@ -17,9 +21,14 @@ import { scriptTools } from './scriptTools';
 import { snapshotTools } from './snapshotTools';
 import { waitTools } from './waitTools';
 
-export function registerPageTools(services: BridgeServices): void {
+export function registerPageTools(services: BridgeServices, host: TabInfoHost): void {
   const { browser, context } = services;
   const env: PageEnv = { services, states: new PageStates(services.log), refs: new RefStore(), cursors: new Map() };
+  // Downloads and device emulation (downloads.ts, emulation.ts) hook into page tool calls.
+  const downloads = new DownloadManager(services, host, tabId => env.states.get(tabId)?.nextSeq() ?? 0);
+  const emulation = new EmulationManager(services, host);
+  env.hooks = [downloads, emulation];
+  context.subscriptions.push(downloads, emulation);
 
   // Recording starts as soon as a tab's CDP connection exists.
   context.subscriptions.push(
@@ -52,6 +61,8 @@ export function registerPageTools(services: BridgeServices): void {
       ...waitTools(env),
       ...logTools(env),
       ...scriptTools(env),
+      ...downloadTools(env, downloads),
+      ...emulationTools(env, emulation),
       ...debugCdpTools(services),
     ]),
   );

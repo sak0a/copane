@@ -1,6 +1,7 @@
 // Real input through CDP: mouse events at viewport coordinates and key events, the same path a
 // user's mouse and keyboard take, so pages see trusted events.
-import { keepPageActive, type PageCall } from './call';
+import { ToolError } from '../../core/errors';
+import { keepPageActive, pageUsesTouch, type PageCall } from './call';
 import { keyDefinition, keyEvents, modifierMask, type Chord, type Modifier } from './keys';
 
 export type MouseButton = 'left' | 'right' | 'middle';
@@ -37,6 +38,13 @@ export async function click(call: PageCall, x: number, y: number, options: { but
   const modifiers = options.modifiers ?? [];
   const mask = modifierMask(modifiers);
   await prepareInput(call);
+  // Under mobile emulation VS Code turns mouse input into touch, and the browser never answers a
+  // mouse press: tap instead.
+  if (await pageUsesTouch(call)) {
+    if (button !== 'left' || modifiers.length) throw new ToolError('failed', `${call.tab.id} emulates a touch device, which has no ${button !== 'left' ? `${button} button` : 'modifier keys'}. Turn off mobile emulation (browser_emulate with mobile: false) for this.`);
+    for (let i = 0; i < (options.clickCount ?? 1); i++) await tap(call, x, y);
+    return;
+  }
   await modifiersDown(call, modifiers);
   try {
     await mouseMove(call, x, y, modifiers);
@@ -47,6 +55,12 @@ export async function click(call: PageCall, x: number, y: number, options: { but
   } finally {
     if (modifiers.length && !call.state.dialog) await modifiersUp(call, modifiers);
   }
+}
+
+/** A one-finger tap at viewport coordinates. */
+export async function tap(call: PageCall, x: number, y: number): Promise<void> {
+  await call.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+  await call.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
 }
 
 export async function wheel(call: PageCall, x: number, y: number, deltaX: number, deltaY: number): Promise<void> {
