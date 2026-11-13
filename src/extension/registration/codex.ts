@@ -14,7 +14,7 @@ import * as path from 'node:path';
 import { MCP_SERVER_NAME } from '../../shared/protocol';
 import { readTextIfExists, writeFileAtomic } from './files';
 import { isOurEntry, type ChangeOutcome, type EntryState } from './claudeCode';
-import type { ServerSpec } from './launcher';
+import { compareEntry, type ServerSpec } from './launcher';
 
 export function codexConfigFile(env: NodeJS.ProcessEnv, home: string): string {
   return path.join(env.CODEX_HOME?.trim() || path.join(home, '.codex'), 'config.toml');
@@ -316,13 +316,10 @@ export function inspectCodexText(text: string | undefined, spec: ServerSpec): En
   const described = [entry.command ?? '(no command)', ...entry.args].join(' ');
   if (!isOurEntry(entry)) return { kind: 'foreign', command: described };
   // Current when what makes it start is right. Other keys (timeouts, enabled, ...) are the user's.
-  const sameEnv = !!entry.env && JSON.stringify(sortObject(entry.env)) === JSON.stringify(sortObject(spec.env));
-  const current = entry.command === spec.command && JSON.stringify(entry.args) === JSON.stringify(spec.args) && sameEnv;
-  return { kind: 'ours', current, command: described };
-}
-
-function sortObject(o: Record<string, string>): Record<string, string> {
-  return Object.fromEntries(Object.entries(o).sort(([a], [b]) => a.localeCompare(b)));
+  const registered = { command: entry.command ?? '', args: entry.args, env: entry.env ?? {} };
+  if (!entry.env) return { kind: 'ours', current: false, command: described, reason: 'its env table is not in the form Agent Bridge writes', entry: registered };
+  const compared = compareEntry({ command: entry.command, args: entry.args, env: entry.env }, spec);
+  return { kind: 'ours', current: compared.current, command: described, ...(compared.current ? {} : { reason: compared.reason }), entry: registered };
 }
 
 /** The document with our tables removed (and no other change). */

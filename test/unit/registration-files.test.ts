@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { tildify, withFileLock, writeFileAtomic } from '../../src/extension/registration/files';
+import { isBusyError, retryWhileBusy, tildify, withFileLock, writeFileAtomic } from '../../src/extension/registration/files';
 
 let dir: string;
 beforeEach(() => (dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ab-files-'))));
@@ -63,5 +63,44 @@ describe('tildify', () => {
   it('shortens paths in the home folder only', () => {
     expect(tildify(path.join('/h', '.claude.json'), '/h')).toBe(`~${path.sep}.claude.json`);
     expect(tildify('/elsewhere/x', '/h')).toBe('/elsewhere/x');
+  });
+});
+
+describe('Windows busy files (simulated)', () => {
+  const busy = (code: string) => Object.assign(new Error(`${code}: operation not permitted, rename`), { code });
+
+  it('retries a rename that Windows refuses while another program has the file open', () => {
+    let attempts = 0;
+    const result = retryWhileBusy(
+      () => {
+        if (++attempts < 3) throw busy('EPERM');
+        return 'renamed';
+      },
+      { platform: 'win32' },
+    );
+    expect(result).toBe('renamed');
+    expect(attempts).toBe(3);
+  });
+
+  it('gives up after the time limit, and does not retry real errors or other platforms', () => {
+    expect(() => retryWhileBusy(() => { throw busy('EBUSY'); }, { platform: 'win32', totalMs: 50 })).toThrow(/EBUSY/);
+    let attempts = 0;
+    expect(() => retryWhileBusy(() => { attempts++; throw busy('ENOENT'); }, { platform: 'win32' })).toThrow();
+    expect(attempts).toBe(1);
+    attempts = 0;
+    expect(() => retryWhileBusy(() => { attempts++; throw busy('EPERM'); }, { platform: 'darwin' })).toThrow();
+    expect(attempts).toBe(1);
+    expect(isBusyError(busy('EACCES'), 'win32')).toBe(true);
+    expect(isBusyError(busy('EACCES'), 'linux')).toBe(false);
+  });
+
+  it('a lock that cannot be removed afterwards does not turn a finished write into a failure', async () => {
+    const file = path.join(dir, 'c.json');
+    const result = await withFileLock(file, () => {
+      fs.rmSync(`${file}.lock`, { recursive: true });
+      fs.writeFileSync(`${file}.lock`, 'not a folder any more');
+      return 'written';
+    });
+    expect(result).toBe('written');
   });
 });

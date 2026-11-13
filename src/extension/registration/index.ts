@@ -1,11 +1,17 @@
 // Getting from "extension installed" to "the agent has the tools", and keeping it that way:
 // installs the MCP server launcher, registers it with Claude Code and Codex (after asking once),
-// enables the integrated browser API, and reports the state of all of it in one place.
+// enables the integrated browser API, checks and repairs all of it, and reports its state in one place.
 //
-// Commands: agentBridge.registerAgents, agentBridge.unregisterAgents, agentBridge.enableBrowser,
-// agentBridge.showStatus (the UI module links to these ids), and agentBridge.registration.runStartupCheck
-// (internal: the startup check, which development hosts do not run on their own).
-import { execFile } from 'node:child_process';
+// Commands: agentBridge.registerAgents (Turn On), agentBridge.unregisterAgents (Turn Off),
+// agentBridge.repair (Check and Repair Setup), agentBridge.enableBrowser, agentBridge.showStatus,
+// agentBridge.copyStatus (the UI module links to some of these ids), and
+// agentBridge.registration.runStartupCheck (internal: the startup check, which development hosts do
+// not run on their own).
+//
+// Every change to an agent's configuration goes through `applyChange`, which logs it with its reason
+// in the output channel and appends it to `<bridge home>/registration-history.json`. Changes are
+// serialised across windows and VS Code builds with a lock in the bridge home. Nothing is ever
+// removed except by Turn Off.
 import * as fs from 'node:fs';
 import * as net from 'node:net';
 import * as os from 'node:os';
@@ -18,19 +24,22 @@ import type { BridgeServices } from '../core/services';
 import { applyTextEdits, argvJsonPath, argvState, enableProposedApiEdits, newArgvJson, type ArgvState } from './argv';
 import {
   claudeConfigFile,
-  findClaudeCli,
   inspectClaude,
+  locateClaudeCli,
   registerClaude,
   unregisterClaude,
   type ChangeOutcome,
   type EntryState,
+  type RegisteredCommand,
 } from './claudeCode';
 import { codexConfigFile, inspectCodexText, registerCodex, unregisterCodex } from './codex';
-import { readTextIfExists, tildify, writeFileAtomic } from './files';
-import { installServer, readInstalledManifest, serverSpec, type ServerSpec } from './launcher';
-import { renderStatus, type AgentStatus, type StatusData } from './status';
+import { readTextIfExists, tildify, withFileLock, writeFileAtomic } from './files';
+import { appendHistory, readHistory, recentReAdds, type Trigger } from './history';
+import { installServer, readInstalledManifest, scriptPath, serverSpec, type ServerSpec } from './launcher';
+import { DEFAULT_TITLES, planAgent, type CommandTitles, type Mode, type Plan } from './plan';
+import { diagnose, handshake, type HandshakeResult } from './probe';
+import { renderStatus, type AgentStatus, type CheckResult, type StatusData } from './status';
 
-type Mode = 'ask' | 'automatic' | 'manual';
 type AgentId = 'claude-code' | 'codex';
 
 /** Machine-wide setup decisions, shared by all windows and VS Code builds using this bridge home. */
@@ -42,6 +51,10 @@ interface SetupState {
   decidedAt?: string;
   /** "Not now": do not ask again before this time. */
   snoozedUntil?: number;
+  /** Turn Off switched registration mode from "automatic" to "manual"; Turn On switches it back. */
+  modeChangedByTurnOff?: boolean;
+  /** The last start test run by the startup check, so it runs again only when something changed. */
+  lastProbe?: { key: string; ok: boolean; at: number };
 }
 
 interface Agent {
@@ -52,7 +65,7 @@ interface Agent {
   /** Why changes are refused (a development host without throwaway config). */
   blocked: string | undefined;
   detect(): { detected: boolean; by?: string };
-  inspect(): { state: EntryState; notes: string[] };
+  inspect(): { state: EntryState; notes: string[]; problems: string[] };
   register(replaceForeign: boolean): Promise<ChangeOutcome>;
   unregister(): Promise<ChangeOutcome>;
 }
@@ -62,9 +75,23 @@ export interface AgentResult {
   outcome: ChangeOutcome | { kind: 'skipped'; detail: string };
 }
 
+/** One finding of "Check and Repair": fine, fixed, or a problem it could not fix. */
+export interface CheckLine {
+  kind: 'ok' | 'fixed' | 'problem';
+  text: string;
+}
+
+export interface RepairReport {
+  at: string;
+  ok: boolean;
+  lines: CheckLine[];
+}
+
 const STATUS_SCHEME = 'agent-bridge-status';
 const BROWSER_NOTICE_KEY = 'agentBridge.browserNoticeShown';
+const WARNED_KEY = 'agentBridge.registration.warned';
 const SNOOZE_MS = 7 * 24 * 3600_000;
+const PROBE_EVERY_MS = 24 * 3600_000;
 
 export function activateRegistration(services: BridgeServices): void {
   const registration = new Registration(services);
@@ -75,6 +102,7 @@ export function activateRegistration(services: BridgeServices): void {
     statusProvider,
     vscode.commands.registerCommand('agentBridge.registerAgents', () => registration.registerAgents()),
     vscode.commands.registerCommand('agentBridge.unregisterAgents', () => registration.unregisterAgents()),
+    vscode.commands.registerCommand('agentBridge.repair', (options?: { quiet?: boolean }) => registration.repair(options)),
     // The options are for tests: edit argv.json even though the API is already on (dev hosts start
     // with it enabled), and go through an editor as in a remote window.
     vscode.commands.registerCommand('agentBridge.enableBrowser', (options?: { evenIfAvailable?: boolean; viaEditor?: boolean }) =>
@@ -85,7 +113,16 @@ export function activateRegistration(services: BridgeServices): void {
       if (options?.show !== false) await statusProvider.show(text);
       return text;
     }),
-    vscode.commands.registerCommand('agentBridge.registration.runStartupCheck', () => registration.startup()),
+    // `toClipboard: false` is for tests: a dev host shares the clipboard of the person using the machine.
+    vscode.commands.registerCommand('agentBridge.copyStatus', async (options?: { quiet?: boolean; toClipboard?: boolean }) => {
+      // From the status document's title bar: copy what is shown; from the palette: a fresh report.
+      const text = statusProvider.isActive() ? statusProvider.current : await registration.statusReport();
+      if (options?.toClipboard === false) return text;
+      await vscode.env.clipboard.writeText(text);
+      if (!options?.quiet) void services.prompts.ask({ message: `${registration.titles.product}: the status report is on the clipboard (${text.split('\n').length} lines).`, choices: [] });
+      return text;
+    }),
+    vscode.commands.registerCommand('agentBridge.registration.runStartupCheck', () => registration.startup({ probe: 'wait' })),
   );
 
   registration.installServerSafely();
@@ -95,7 +132,7 @@ export function activateRegistration(services: BridgeServices): void {
   setTimeout(() => void registration.startup().catch(err => registration.log.error('startup check failed', err)), 1500);
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration(e => {
-      if (e.affectsConfiguration('agentBridge.registration')) void registration.startup({ browserNotice: false });
+      if (e.affectsConfiguration('agentBridge.registration')) void registration.startup({ browserNotice: false, trigger: 'settings' });
     }),
   );
 }
@@ -107,13 +144,18 @@ class Registration {
   private readonly isDev: boolean;
   private readonly binDir: string;
   private readonly stateFile: string;
+  private readonly historyFile: string;
+  private readonly lastCheckFile: string;
   private spec: ServerSpec;
+  private installError: string | undefined;
 
   constructor(private readonly services: BridgeServices) {
     this.log = scopedLogger(services.log, 'registration');
     this.isDev = services.context.extensionMode !== vscode.ExtensionMode.Production;
     this.binDir = path.join(bridgeHome(), 'bin');
     this.stateFile = path.join(bridgeHome(), 'setup.json');
+    this.historyFile = path.join(bridgeHome(), 'registration-history.json');
+    this.lastCheckFile = path.join(bridgeHome(), 'last-check.json');
     this.spec = this.currentSpec();
   }
 
@@ -125,13 +167,42 @@ class Registration {
     return String(this.services.context.extension.packageJSON.version);
   }
 
+  /** Command names as the Command Palette shows them, read from the manifest so a rename follows. */
+  get titles(): CommandTitles {
+    const commands: Array<{ command: string; title: string; category?: string }> = this.services.context.extension.packageJSON.contributes?.commands ?? [];
+    const title = (id: string, fallback: string) => {
+      const c = commands.find(x => x.command === id);
+      return c ? `${c.category ? `${c.category}: ` : ''}${c.title}` : fallback;
+    };
+    return {
+      product: commands.find(c => c.command === 'agentBridge.repair')?.category ?? DEFAULT_TITLES.product,
+      turnOn: title('agentBridge.registerAgents', DEFAULT_TITLES.turnOn),
+      turnOff: title('agentBridge.unregisterAgents', DEFAULT_TITLES.turnOff),
+      repair: title('agentBridge.repair', DEFAULT_TITLES.repair),
+      status: title('agentBridge.showStatus', DEFAULT_TITLES.status),
+      copy: title('agentBridge.copyStatus', DEFAULT_TITLES.copy),
+      log: title('agentBridge.showLog', DEFAULT_TITLES.log),
+    };
+  }
+
   private currentSpec(): ServerSpec {
-    return serverSpec({ binDir: this.binDir, runtime: process.execPath, platform: process.platform, bridgeHomeOverride: this.env[Env.home] || undefined });
+    return serverSpec({
+      binDir: this.binDir,
+      runtime: process.execPath,
+      platform: process.platform,
+      bridgeHomeOverride: this.env[Env.home] || undefined,
+      knownRuntimes: readInstalledManifest(this.binDir)?.runtimes ?? [],
+    });
   }
 
   private mode(): Mode {
     const value = vscode.workspace.getConfiguration('agentBridge.registration').get<string>('mode', 'ask');
     return value === 'automatic' || value === 'manual' ? value : 'ask';
+  }
+
+  /** Who made a change, for the history: several VS Code builds and windows share one bridge home. */
+  private get by(): string {
+    return `${vscode.env.appName} ${vscode.version}, window ${this.services.window.instanceId}`;
   }
 
   // ------------------------------------------------------------------ server
@@ -146,8 +217,10 @@ class Registration {
         platform: process.platform,
         bridgeHomeOverride: this.env[Env.home] || undefined,
       });
+      this.installError = undefined;
       if (result.scriptUpdated || result.launcherUpdated) this.log.info(`MCP server ${result.version} installed in ${this.binDir} (runtime ${process.execPath})`);
     } catch (err) {
+      this.installError = err instanceof Error ? err.message : String(err);
       this.log.error(`could not install the MCP server in ${this.binDir}`, err);
     }
     this.spec = this.currentSpec();
@@ -176,7 +249,8 @@ class Registration {
           path.join(claudeExtension.extensionPath, 'resources', 'native-binary', process.platform === 'win32' ? 'claude.exe' : 'claude'),
         ]
       : [];
-    const cli = () => findClaudeCli(this.env, this.home, process.platform, bundled);
+    const located = () => locateClaudeCli(this.env, this.home, process.platform, bundled);
+    const cli = () => located().cli;
     const codexFile = codexConfigFile(this.env, this.home);
     const spec = () => this.spec;
     return [
@@ -195,10 +269,17 @@ class Registration {
         },
         inspect: () => {
           const result = inspectClaude(claude.configFile, spec());
-          const notes = result.overriddenIn.filter(o => !o.ours).map(o => `The project ${o.project} has its own "vscode" server (local scope), which Claude Code uses there instead.`);
-          const found = cli();
-          notes.push(found ? `Changes are made with ${found} (claude mcp).` : 'No claude executable found; changes are made by editing the file under Claude Code\'s lock.');
-          return { state: result.state, notes };
+          const problems = [
+            ...result.overriddenIn.filter(o => !o.ours).map(o => `The project ${o.project} has its own "vscode" MCP server (local scope), which Claude Code uses there instead of Agent Bridge's.`),
+            ...result.disabledIn.map(p => `Claude Code has the "vscode" server turned off in the project ${p}: in a Claude Code session there, run /mcp and enable it.`),
+          ];
+          const notes: string[] = [];
+          const { cli: found, shims } = located();
+          notes.push(found ? `Adds and removes with ${found} (claude mcp); updates by editing the file in one step.` : 'No claude executable found; changes are made by editing the file under Claude Code\'s lock.');
+          if (!found && shims.length) notes.push(`Found ${shims.join(', ')} (npm install); a .cmd/.ps1 shim cannot be run without a shell, so the file is edited instead.`);
+          const backups = claudeBackups(claude.configFile, claude.configDir ?? path.join(this.home, '.claude'));
+          if (backups.length) notes.push(`Claude Code found its config damaged and reset it (which drops all MCP servers): ${backups.join('; ')}`);
+          return { state: result.state, notes, problems };
         },
         register: replaceForeign => registerClaude({ ...claude, cli: cli() }, spec(), { replaceForeign }),
         unregister: () => unregisterClaude({ ...claude, cli: cli() }, spec()),
@@ -216,7 +297,13 @@ class Registration {
           if (vscode.extensions.getExtension('openai.chatgpt')) return { detected: true, by: 'Codex extension' };
           return { detected: false };
         },
-        inspect: () => ({ state: inspectCodexText(readTextIfExists(codexFile), spec()), notes: [] }),
+        inspect: () => {
+          try {
+            return { state: inspectCodexText(readTextIfExists(codexFile), spec()), notes: [], problems: [] };
+          } catch (err) {
+            return { state: { kind: 'unreadable', error: err instanceof Error ? err.message : String(err) }, notes: [], problems: [] };
+          }
+        },
         register: replaceForeign => registerCodex({ configFile: codexFile }, spec(), { replaceForeign }),
         unregister: () => unregisterCodex({ configFile: codexFile }, spec()),
       },
@@ -228,46 +315,146 @@ class Registration {
     return this.agents().filter(a => config.get<boolean>(a.setting, true));
   }
 
+  private consentFor(agent: Agent, setup = this.readState()): 'granted' | 'declined' | undefined {
+    return setup.consent && setup.agents?.includes(agent.id) ? setup.consent : undefined;
+  }
+
+  private plan(agent: Agent, trigger: 'startup' | 'repair'): Plan {
+    const setup = this.readState();
+    return planAgent(
+      {
+        agent: agent.name,
+        state: agent.inspect().state,
+        mode: this.mode(),
+        consent: this.consentFor(agent, setup),
+        ...(setup.decidedAt ? { consentAt: setup.decidedAt } : {}),
+        detected: agent.detect().detected,
+        ...(agent.blocked ? { blocked: agent.blocked } : {}),
+        snoozed: !!setup.snoozedUntil && setup.snoozedUntil > Date.now(),
+        recentReAdds: recentReAdds(readHistory(this.historyFile), agent.name, Date.now()),
+      },
+      trigger,
+      this.titles,
+    );
+  }
+
+  /**
+   * The one way an agent's configuration is changed: logs the change and its reason in the output
+   * channel and records it in the bridge home's history.
+   */
+  private async applyChange(agent: Agent, action: 'add' | 'update' | 'replace' | 'remove', reason: string, trigger: Trigger): Promise<AgentResult> {
+    const before = agent.inspect().state;
+    let outcome: ChangeOutcome;
+    try {
+      outcome = action === 'remove' ? await agent.unregister() : await agent.register(action === 'replace');
+    } catch (err) {
+      outcome = { kind: 'failed', detail: err instanceof Error ? err.message : String(err) };
+    }
+    const line = `${agent.name}: ${action} (${trigger}) → ${outcome.kind}: ${outcome.detail}. Reason: ${reason}`;
+    if (outcome.kind === 'failed' || outcome.kind === 'conflict') this.log.warn(line);
+    else this.log.info(line);
+    if (outcome.kind !== 'unchanged') {
+      appendHistory(this.historyFile, {
+        at: new Date().toISOString(),
+        agent: agent.name,
+        action,
+        trigger,
+        reason,
+        outcome: outcome.kind,
+        detail: outcome.detail,
+        ...(before.kind === 'ours' || before.kind === 'foreign' ? { before: before.command } : {}),
+        by: this.by,
+      });
+    }
+    return { agent: agent.name, outcome };
+  }
+
+  /** Serialises registration changes across windows and VS Code builds (they share the bridge home). */
+  private withRegistrationLock<T>(fn: () => Promise<T>): Promise<T> {
+    return withFileLock(path.join(bridgeHome(), 'registration'), fn, { timeoutMs: 60_000 });
+  }
+
   // ------------------------------------------------------------------ startup
 
   /**
-   * Runs at startup. Keeps Agent Bridge's own registrations current; asks once (mode "ask") before
-   * adding one; never touches another server named "vscode". Then tells the user once if the
-   * integrated browser is not enabled.
+   * Runs at startup, quietly: keeps Agent Bridge's own registrations present and current (re-adds a
+   * missing one the user agreed to, updates an outdated one in one step), asks once (mode "ask")
+   * before adding one, never touches another server named "vscode", and tests that the registered
+   * command starts. Says something only when something is wrong that it could not fix.
    */
-  async startup(options: { browserNotice?: boolean } = {}): Promise<AgentResult[]> {
+  async startup(options: { browserNotice?: boolean; trigger?: Trigger; probe?: 'background' | 'wait' } = {}): Promise<AgentResult[]> {
+    const trigger = options.trigger ?? 'startup';
     this.installServerSafely();
-    const mode = this.mode();
     const results: AgentResult[] = [];
-    const candidates = this.enabledAgents().filter(a => !a.blocked && a.detect().detected);
-    const absent: Agent[] = [];
-    for (const agent of candidates) {
-      const { state } = agent.inspect();
-      if (state.kind === 'ours' && !state.current && mode !== 'manual') {
-        // Our own entry, out of date (bridge home moved, VS Code moved on Windows): refreshing it is
-        // part of what the user agreed to.
-        const outcome = await agent.register(false);
-        this.log.info(`${agent.name}: refreshed the registration: ${outcome.kind} (${outcome.detail})`);
-        results.push({ agent: agent.name, outcome });
-      } else if (state.kind === 'absent') {
-        absent.push(agent);
-      } else if (state.kind === 'foreign') {
-        this.log.warn(`${agent.name}: ${agent.configFile} has a "vscode" MCP server that Agent Bridge did not add (${state.command}); not touching it`);
+    const toAsk: Agent[] = [];
+    const problems: string[] = [];
+    await this.withRegistrationLock(async () => {
+      for (const agent of this.enabledAgents()) {
+        const plan = this.plan(agent, 'startup');
+        if (plan.action === 'add' || plan.action === 'update') {
+          const result = await this.applyChange(agent, plan.action, plan.reason, trigger);
+          results.push(result);
+          if (result.outcome.kind === 'changed' && !this.consentFor(agent)) this.recordConsent('granted', [agent]);
+          if (result.outcome.kind === 'failed') problems.push(`${agent.name}: could not ${plan.action} the registration (${result.outcome.detail})`);
+        } else if (plan.action === 'ask') {
+          toAsk.push(agent);
+        } else if (plan.action === 'report') {
+          this.log.warn(`${agent.name}: ${plan.problem}`);
+          if (/keeps disappearing/.test(plan.problem)) problems.push(`${agent.name}: ${plan.problem}`);
+        } else if (plan.action === 'none') {
+          this.log.info(`${agent.name}: ${plan.note}`);
+        }
       }
-    }
+    });
+    if (toAsk.length > 0) results.push(...(await this.askToRegister(toAsk)));
+    for (const problem of problems) this.warnOnce(problem, `${this.titles.product}: ${problem}.`);
 
-    const setup = this.readState();
-    const pending = absent.filter(a => !(setup.consent === 'granted' && setup.agents?.includes(a.id)) && !(setup.consent === 'declined' && setup.agents?.includes(a.id)));
-    if (pending.length > 0 && mode === 'automatic') {
-      for (const agent of pending) results.push({ agent: agent.name, outcome: await agent.register(false) });
-      this.recordConsent('granted', pending);
-    } else if (pending.length > 0 && mode === 'ask' && !(setup.snoozedUntil && setup.snoozedUntil > Date.now())) {
-      results.push(...(await this.askToRegister(pending)));
-    }
-    for (const r of results) this.log.info(`${r.agent}: ${r.outcome.kind} (${r.outcome.detail})`);
-
+    const probe = this.startupProbe().catch(err => this.log.error('start test failed', err));
+    if (options.probe === 'wait') await probe;
     if (options.browserNotice !== false) void this.browserNotice();
     return results;
+  }
+
+  /**
+   * Starts the registered command once with an MCP handshake, when it changed since the last test or
+   * a day has passed. A failure here is what makes an agent show the server as failed or closed.
+   */
+  private async startupProbe(): Promise<void> {
+    const manifest = readInstalledManifest(this.binDir);
+    const key = JSON.stringify([this.spec.command, this.spec.args, this.spec.env, manifest?.version]);
+    const last = this.readState().lastProbe;
+    if (last && last.key === key && last.ok && Date.now() - last.at < PROBE_EVERY_MS) return;
+    const result = await this.handshake();
+    this.writeState({ ...this.readState(), lastProbe: { key, ok: result.ok, at: Date.now() } });
+    if (result.ok) {
+      this.log.info(`start test: ${result.text} (${result.ms} ms)`);
+      return;
+    }
+    this.log.error(`start test FAILED: ${result.text}${result.stderr ? `\nstderr:\n${result.stderr}` : ''}`);
+    this.warnOnce(
+      `probe:${key}`,
+      `${this.titles.product}: the MCP server that agents start does not work on this machine: ${result.text}. Agents will show the "vscode" server as failed.`,
+    );
+  }
+
+  private handshake(): Promise<HandshakeResult> {
+    return handshake(this.spec, { baseEnv: this.env, cwd: this.workspaceCwd() });
+  }
+
+  private workspaceCwd(): string {
+    return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? this.home;
+  }
+
+  /** A warning with a way to act on it, shown once per distinct problem per VS Code installation. */
+  private warnOnce(key: string, message: string): void {
+    const memento = this.services.context.globalState;
+    const warned = memento.get<string[]>(WARNED_KEY, []);
+    if (warned.includes(key)) return;
+    void memento.update(WARNED_KEY, [...warned, key].slice(-20));
+    void this.services.prompts.ask({ message, choices: ['Check and Repair', 'Show Status'] }).then(choice => {
+      if (choice === 'Check and Repair') void vscode.commands.executeCommand('agentBridge.repair');
+      if (choice === 'Show Status') void vscode.commands.executeCommand('agentBridge.showStatus');
+    });
   }
 
   private async askToRegister(agents: Agent[]): Promise<AgentResult[]> {
@@ -289,12 +476,14 @@ class Registration {
       const names = agents.map(a => a.name).join(' and ');
       const files = agents.map(a => tildify(a.configFile, this.home)).join(', ');
       const answer = await this.services.prompts.ask({
-        message: `Agent Bridge: let ${names} use this VS Code's browser tabs and terminals? This adds an MCP server named "vscode" to ${files}.`,
+        message: `${this.titles.product}: let ${names} use this VS Code's browser tabs and terminals? This adds an MCP server named "vscode" to ${files}.`,
         choices: ['Register', 'Not Now', 'Never'],
       });
       if (answer === 'Register') {
         const results: AgentResult[] = [];
-        for (const agent of agents) results.push({ agent: agent.name, outcome: await agent.register(false) });
+        await this.withRegistrationLock(async () => {
+          for (const agent of agents) results.push(await this.applyChange(agent, 'add', 'the user answered "Register" when asked', 'startup'));
+        });
         this.recordConsent('granted', agents);
         this.reportResults(results);
         return results;
@@ -312,6 +501,7 @@ class Registration {
 
   // ------------------------------------------------------------------ commands
 
+  /** Turn On: registers with every enabled agent that is installed, and remembers the user wants it. */
   async registerAgents(): Promise<AgentResult[]> {
     this.installServerSafely();
     const results: AgentResult[] = [];
@@ -325,46 +515,150 @@ class Registration {
         results.push({ agent: agent.name, outcome: { kind: 'skipped', detail: 'not installed' } });
         continue;
       }
-      let outcome = await agent.register(false);
-      if (outcome.kind === 'conflict') {
+      let result = await this.withRegistrationLock(() => this.applyChange(agent, agent.inspect().state.kind === 'ours' ? 'update' : 'add', `the user ran "${this.titles.turnOn}"`, 'turn-on'));
+      if (result.outcome.kind === 'conflict') {
         const { state } = agent.inspect();
         const answer = await this.services.prompts.ask({
-          message: `${agent.name} already has an MCP server named "vscode" that Agent Bridge did not add${state.kind === 'foreign' ? ` (${state.command})` : ''}. Replace it with Agent Bridge's?`,
-          detail: `It is in ${agent.configFile}. Keeping it means ${agent.name} does not get Agent Bridge's tools.`,
+          message: `${agent.name} already has an MCP server named "vscode" that ${this.titles.product} did not add${state.kind === 'foreign' ? ` (${state.command})` : ''}. Replace it with ${this.titles.product}'s?`,
+          detail: `It is in ${agent.configFile}. Keeping it means ${agent.name} does not get ${this.titles.product}'s tools.`,
           choices: ['Replace', 'Keep It'],
           modal: true,
         });
-        if (answer === 'Replace') outcome = await agent.register(true);
+        if (answer === 'Replace') result = await this.withRegistrationLock(() => this.applyChange(agent, 'replace', 'the user chose to replace the other "vscode" server', 'turn-on'));
       }
-      if (outcome.kind === 'changed' || outcome.kind === 'unchanged') registered.push(agent);
-      results.push({ agent: agent.name, outcome });
+      if (result.outcome.kind === 'changed' || result.outcome.kind === 'unchanged') registered.push(agent);
+      results.push(result);
     }
     if (registered.length > 0) this.recordConsent('granted', registered);
+    const setup = this.readState();
+    if (setup.modeChangedByTurnOff && this.mode() === 'manual') {
+      await vscode.workspace.getConfiguration('agentBridge.registration').update('mode', 'automatic', vscode.ConfigurationTarget.Global);
+      this.writeState({ ...this.readState(), modeChangedByTurnOff: false });
+    }
     this.reportResults(results);
     return results;
   }
 
+  /** Turn Off: removes Agent Bridge's entries from every agent and keeps them off until Turn On. */
   async unregisterAgents(): Promise<AgentResult[]> {
     const results: AgentResult[] = [];
     const agents = this.agents(); // All of them, also those turned off in settings.
-    for (const agent of agents) {
-      if (agent.blocked) {
-        results.push({ agent: agent.name, outcome: { kind: 'failed', detail: agent.blocked } });
-        continue;
+    await this.withRegistrationLock(async () => {
+      for (const agent of agents) {
+        if (agent.blocked) {
+          results.push({ agent: agent.name, outcome: { kind: 'failed', detail: agent.blocked } });
+          continue;
+        }
+        results.push(await this.applyChange(agent, 'remove', `the user ran "${this.titles.turnOff}"`, 'turn-off'));
       }
-      results.push({ agent: agent.name, outcome: await agent.unregister() });
-    }
+    });
     // Do not put it back on the next start.
     this.recordConsent('declined', agents);
     if (this.mode() === 'automatic') {
       await vscode.workspace.getConfiguration('agentBridge.registration').update('mode', 'manual', vscode.ConfigurationTarget.Global);
+      this.writeState({ ...this.readState(), modeChangedByTurnOff: true });
     }
     const lines = results.map(r => `${r.agent}: ${r.outcome.kind === 'changed' ? 'removed' : r.outcome.detail}`);
     void this.services.prompts.ask({
-      message: `Agent Bridge: ${lines.join('; ')}. Running agent sessions keep the tools until they restart.`,
+      message: `${this.titles.product}: ${lines.join('; ')}. Running agent sessions keep the tools until they restart. "${this.titles.turnOn}" adds them back.`,
       choices: ['Show Status'],
     }).then(choice => choice && vscode.commands.executeCommand('agentBridge.showStatus'));
     return results;
+  }
+
+  /**
+   * Check and Repair: checks everything an agent needs, end to end, fixes what belongs to Agent Bridge
+   * and says in plain words what was wrong and what it did. Respects Turn Off.
+   */
+  async repair(options: { quiet?: boolean } = {}): Promise<RepairReport> {
+    const lines: CheckLine[] = [];
+    const ok = (text: string) => lines.push({ kind: 'ok', text });
+    const fixed = (text: string) => lines.push({ kind: 'fixed', text });
+    const problem = (text: string) => lines.push({ kind: 'problem', text });
+
+    // 1. The server script and how agents start it.
+    this.installServerSafely();
+    if (this.installError) problem(`The MCP server could not be installed in ${this.binDir}: ${this.installError}`);
+    const script = scriptPath(this.binDir);
+    if (fs.existsSync(script)) ok(`The MCP server script is in place (${script}).`);
+    else problem(`The MCP server script is missing (${script}).`);
+    if (fs.existsSync(this.spec.command)) ok(`Agents start it with ${this.spec.command}, which exists.`);
+    else problem(`Agents would start it with ${this.spec.command}, which does not exist.`);
+
+    // 2. Each agent's registration.
+    const config = vscode.workspace.getConfiguration('agentBridge.registration');
+    for (const agent of this.agents()) {
+      if (!config.get<boolean>(agent.setting, true)) {
+        ok(`${agent.name}: turned off in settings (agentBridge.registration.${agent.setting}); not checked.`);
+        continue;
+      }
+      const plan = this.plan(agent, 'repair');
+      if (plan.action === 'none') {
+        if (plan.note === 'not installed') ok(`${agent.name}: not installed.`);
+        else ok(`${agent.name}: ${plan.note}.`);
+      } else if (plan.action === 'add' || plan.action === 'update') {
+        const result = await this.withRegistrationLock(() => this.applyChange(agent, plan.action as 'add' | 'update', plan.reason, 'repair'));
+        if (result.outcome.kind === 'changed') {
+          fixed(`${agent.name}: ${plan.reason}; ${plan.action === 'add' ? 'registered it' : 'updated it'}. Start a new ${agent.name} session to get the tools.`);
+          this.recordConsent('granted', [agent]);
+        } else if (result.outcome.kind === 'unchanged') ok(`${agent.name}: registered and current.`);
+        else problem(`${agent.name}: ${plan.reason}, and fixing it failed: ${result.outcome.detail}`);
+      } else if (plan.action === 'ask-replace') {
+        const answer = await this.services.prompts.ask({
+          message: `${agent.name} has an MCP server named "vscode" that ${this.titles.product} did not add (${plan.command}). Replace it with ${this.titles.product}'s?`,
+          detail: `It is in ${agent.configFile}. Keeping it means ${agent.name} does not get ${this.titles.product}'s tools.`,
+          choices: ['Replace', 'Keep It'],
+          modal: true,
+        });
+        if (answer === 'Replace') {
+          const result = await this.withRegistrationLock(() => this.applyChange(agent, 'replace', 'the user chose to replace the other "vscode" server', 'repair'));
+          if (result.outcome.kind === 'changed') fixed(`${agent.name}: replaced the other "vscode" server (${plan.command}) with ${this.titles.product}'s.`);
+          else problem(`${agent.name}: replacing the other "vscode" server failed: ${result.outcome.detail}`);
+        } else {
+          problem(`${agent.name}: another MCP server named "vscode" is configured (${plan.command}); kept it, so ${agent.name} does not get ${this.titles.product}'s tools.`);
+        }
+      } else if (plan.action === 'report') {
+        problem(`${agent.name}: ${plan.problem}.`);
+      }
+      for (const p of agent.inspect().problems) problem(`${agent.name}: ${p}`);
+    }
+
+    // 3. The registered command really starts and speaks MCP, and finds and reaches this window.
+    const started = await this.handshake();
+    if (started.ok) ok(`Start test: the server ${started.text} (${started.ms} ms).`);
+    else problem(`Start test: ${started.text}.${started.stderr ? ` It printed: ${started.stderr.split(/\r?\n/).slice(-3).join(' / ')}` : ''}`);
+    const found = await diagnose(this.spec, { baseEnv: this.env, cwd: this.workspaceCwd(), windowId: this.services.window.instanceId });
+    if (found.ok) ok(`Window test: ${found.text}`);
+    else problem(`Window test: ${found.text}`);
+
+    // 4. This window is published and listening.
+    const id = this.services.window.instanceId;
+    const listening = await canConnect(socketPathFor(id));
+    const published = fs.existsSync(instanceFile(id));
+    if (listening && published) ok('This window is published and listening for agents.');
+    else problem(`This window is ${published ? '' : 'not published (instance file missing) and '}${listening ? 'listening' : 'not listening'}; reload the window ("Developer: Reload Window").`);
+
+    const report: RepairReport = { at: new Date().toISOString(), ok: !lines.some(l => l.kind === 'problem'), lines };
+    try {
+      writeFileAtomic(this.lastCheckFile, JSON.stringify(report, null, 2) + '\n', 0o600);
+    } catch {
+      // Only for the status report.
+    }
+    for (const l of lines) (l.kind === 'problem' ? this.log.warn : this.log.info).call(this.log, `check: ${l.kind}: ${l.text}`);
+    if (!options.quiet) {
+      const fixes = lines.filter(l => l.kind === 'fixed');
+      const problems = lines.filter(l => l.kind === 'problem');
+      const summary = problems.length
+        ? `found ${problems.length} problem${problems.length > 1 ? 's' : ''} it could not fix: ${problems.map(p => p.text).join(' ')}`
+        : fixes.length
+          ? `fixed ${fixes.length} thing${fixes.length > 1 ? 's' : ''}: ${fixes.map(f => f.text).join(' ')} Everything else is fine.`
+          : 'everything is fine: registrations are current, the server starts and answers, and this window is reachable.';
+      void this.services.prompts.ask({ message: `${this.titles.product}: ${summary}`, choices: ['Show Status', 'Copy Report'] }).then(async choice => {
+        if (choice === 'Show Status') await vscode.commands.executeCommand('agentBridge.showStatus');
+        if (choice === 'Copy Report') await vscode.commands.executeCommand('agentBridge.copyStatus');
+      });
+    }
+    return report;
   }
 
   private reportResults(results: AgentResult[]): void {
@@ -379,8 +673,8 @@ class Registration {
     const anyRegistered = results.some(r => r.outcome.kind === 'changed' || r.outcome.kind === 'unchanged');
     const none = results.every(r => r.outcome.kind === 'skipped');
     const message = none
-      ? 'Agent Bridge: neither Claude Code nor Codex was found. Install one, then run "Agent Bridge: Register with Claude Code and Codex".'
-      : `Agent Bridge: ${parts.join('; ')}.${anyRegistered ? ' New agent sessions get the tools; restart sessions that are already running.' : ''}`;
+      ? `${this.titles.product}: neither Claude Code nor Codex was found. Install one, then run "${this.titles.turnOn}".`
+      : `${this.titles.product}: ${parts.join('; ')}.${anyRegistered ? ' New agent sessions get the tools; restart sessions that are already running.' : ''}`;
     void this.services.prompts.ask({ message, choices: ['Show Status'] }).then(choice => choice && vscode.commands.executeCommand('agentBridge.showStatus'));
   }
 
@@ -518,6 +812,7 @@ class Registration {
       const enabled = config.get<boolean>(agent.setting, true);
       const detected = agent.detect();
       const inspected = agent.inspect();
+      const entry: RegisteredCommand | undefined = inspected.state.kind === 'ours' ? inspected.state.entry : undefined;
       return {
         name: agent.name,
         enabled,
@@ -526,19 +821,50 @@ class Registration {
         configFile: agent.configFile,
         state: inspected.state,
         ...(agent.blocked ? { blocked: agent.blocked } : {}),
-        notes: inspected.notes,
+        notes: [...inspected.problems.map(p => `PROBLEM: ${p}`), ...inspected.notes],
+        ...(entry
+          ? {
+              registered: {
+                ...entry,
+                commandExists: !!entry.command && fs.existsSync(entry.command),
+                ...(entry.args[0] && /mcp-server\.js$/i.test(entry.args[0]) ? { scriptExists: fs.existsSync(entry.args[0]) } : {}),
+              },
+            }
+          : {}),
       };
     });
     const setup = this.readState();
     const manifest = readInstalledManifest(this.binDir);
+    const cwd = this.workspaceCwd();
+    const [started, found, listening] = await Promise.all([
+      this.handshake(),
+      diagnose(this.spec, { baseEnv: this.env, cwd, windowId: id }),
+      canConnect(socketPath),
+    ]);
+    const handshakeCheck: CheckResult = {
+      ok: started.ok,
+      text: `${started.text} (${started.ms} ms${started.server ? `; ${started.server}` : ''}${started.tools ? `; tools: ${started.tools.join(', ')}` : ''}${started.exitCode !== undefined ? `; exit code ${started.exitCode}` : ''})`,
+      stderr: started.stderr,
+    };
     const data: StatusData = {
       generatedAt: new Date(),
       extensionVersion: this.version,
       vscode: { appName: vscode.env.appName, version: vscode.version, remoteName: vscode.env.remoteName ?? null, platform: process.platform, arch: process.arch },
+      platform: {
+        os: `${os.type()} ${os.release()} (${process.platform})`,
+        arch: process.arch,
+        runtime: process.execPath,
+        node: process.version,
+        electron: process.versions.electron ?? null,
+        appHost: vscode.env.appHost,
+        uiKind: vscode.env.uiKind === vscode.UIKind.Web ? 'web' : 'desktop',
+        shell: vscode.env.shell,
+        env: Object.fromEntries(['AGENT_BRIDGE_HOME', 'CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'ELECTRON_RUN_AS_NODE'].map(k => [k, this.env[k]])),
+      },
       window: {
         id,
         socketPath,
-        listening: await canConnect(socketPath),
+        listening,
         instanceFile: instanceFile(id),
         instanceFilePresent: fs.existsSync(instanceFile(id)),
         workspaceName: vscode.workspace.name ?? null,
@@ -547,10 +873,20 @@ class Registration {
       otherWindows: others.map(i => ({ id: i.id, workspaceName: i.workspaceName, folders: i.workspaceFolders, remoteName: i.remoteName })),
       bridgeHome: bridgeHome(),
       browser: { available: services.browser.available, argvPath: argv.file, argvState: argvStateValue, remote: !!vscode.env.remoteName },
-      server: { spec: this.spec, installedVersion: manifest?.version, runtimes: manifest?.runtimes ?? [], selfTest: await this.selfTest() },
+      server: {
+        spec: this.spec,
+        installedVersion: manifest?.version,
+        runtimes: manifest?.runtimes ?? [],
+        selfTest: { ok: found.ok, text: found.text, stderr: found.stderr },
+        handshake: handshakeCheck,
+        scriptPath: scriptPath(this.binDir),
+        scriptExists: fs.existsSync(scriptPath(this.binDir)),
+      },
       registrationMode: this.mode(),
-      consent: setup.consent ? `${setup.consent}${setup.agents?.length ? ` (${setup.agents.join(', ')})` : ''}` : 'not asked yet',
+      consent: setup.consent ? `${setup.consent}${setup.agents?.length ? ` (${setup.agents.join(', ')})` : ''}${setup.decidedAt ? ` on ${setup.decidedAt}` : ''}` : 'not asked yet',
       agents,
+      titles: this.titles,
+      history: readHistory(this.historyFile).slice(-12),
       sessions: services.sessions.list().map(s => ({
         label: s.label,
         title: s.title,
@@ -561,39 +897,24 @@ class Registration {
         cwd: s.cwd,
       })),
     };
-    return renderStatus(data);
-  }
-
-  /** Starts the registered command with --diagnose, as an extension in this window would start it. */
-  private selfTest(): Promise<{ ok: boolean; text: string }> {
-    const { command, args, env } = this.spec;
-    const childEnv: NodeJS.ProcessEnv = { ...process.env, ...env };
-    delete childEnv[Env.instance];
-    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? this.home;
-    return new Promise(resolve => {
-      execFile(command, [...args, '--diagnose'], { env: childEnv, cwd, timeout: 15_000, windowsHide: true, encoding: 'utf8' }, (err, stdout, stderr) => {
-        if (err) {
-          resolve({ ok: false, text: `${command} could not be started: ${(stderr || err.message).trim().split('\n')[0]}` });
-          return;
-        }
-        try {
-          const report = JSON.parse(stdout);
-          const runtime = `runs on ${report.runtime?.execPath} (Node ${report.runtime?.node}), server ${report.version}`;
-          if (report.selected?.id === this.services.window.instanceId) {
-            resolve({ ok: true, text: `${runtime}; finds this window (matched by ${report.selected.matchedBy}).` });
-          } else if (report.selected) {
-            resolve({ ok: false, text: `${runtime}; but connects to window ${report.selected.id} instead of this one (matched by ${report.selected.matchedBy}).` });
-          } else {
-            resolve({ ok: false, text: `${runtime}; but finds no window: ${report.problem}` });
-          }
-        } catch {
-          resolve({ ok: false, text: `unexpected output: ${stdout.slice(0, 200)}` });
-        }
-      });
-    });
+    let text = renderStatus(data);
+    const lastCheck = this.readLastCheck();
+    if (lastCheck) {
+      const lines = lastCheck.lines.map(l => `- ${l.kind === 'ok' ? 'ok' : l.kind === 'fixed' ? 'FIXED' : 'PROBLEM'}: ${l.text}`);
+      text += `\n## Last "${this.titles.repair}" (${lastCheck.at})\n${lines.join('\n')}\n`;
+    }
+    return text;
   }
 
   // ------------------------------------------------------------------ state
+
+  private readLastCheck(): RepairReport | undefined {
+    try {
+      return JSON.parse(fs.readFileSync(this.lastCheckFile, 'utf8')) as RepairReport;
+    } catch {
+      return undefined;
+    }
+  }
 
   private readState(): SetupState {
     try {
@@ -615,23 +936,27 @@ class Registration {
     const state = this.readState();
     const ids = new Set<AgentId>(state.consent === consent ? (state.agents ?? []) : []);
     for (const a of agents) ids.add(a.id);
-    this.writeState({ consent, agents: [...ids], decidedAt: new Date().toISOString() });
+    this.writeState({ ...state, consent, agents: [...ids], decidedAt: new Date().toISOString(), snoozedUntil: undefined });
   }
 }
 
 /** Shows the status report as a read-only document: selectable and copyable, no "save?" on close. */
 class StatusDocuments implements vscode.TextDocumentContentProvider, vscode.Disposable {
-  private text = '';
+  current = '';
   private readonly emitter = new vscode.EventEmitter<vscode.Uri>();
   readonly onDidChange = this.emitter.event;
   private readonly uri = vscode.Uri.parse(`${STATUS_SCHEME}:Agent Bridge Status.md`);
 
   provideTextDocumentContent(): string {
-    return this.text;
+    return this.current;
+  }
+
+  isActive(): boolean {
+    return vscode.window.activeTextEditor?.document.uri.scheme === STATUS_SCHEME && !!this.current;
   }
 
   async show(text: string): Promise<void> {
-    this.text = text;
+    this.current = text;
     this.emitter.fire(this.uri);
     const document = await vscode.workspace.openTextDocument(this.uri);
     await vscode.languages.setTextDocumentLanguage(document, 'markdown');
@@ -641,6 +966,32 @@ class StatusDocuments implements vscode.TextDocumentContentProvider, vscode.Disp
   dispose(): void {
     this.emitter.dispose();
   }
+}
+
+/** Copies Claude Code keeps of a config file it found damaged before resetting it, newest first: "name (time)". */
+function claudeBackups(configFile: string, claudeDir: string): string[] {
+  const found: Array<{ name: string; mtime: number }> = [];
+  for (const dir of [path.dirname(configFile), path.join(claudeDir, 'backups')]) {
+    let names: string[] = [];
+    try {
+      names = fs.readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      // `.claude.json.backup.<time>` files are written on ordinary saves; only `corrupted` ones mean a reset.
+      if (!/^\.claude\.json\..*corrupted/.test(name)) continue;
+      try {
+        found.push({ name: path.join(dir, name), mtime: fs.statSync(path.join(dir, name)).mtimeMs });
+      } catch {
+        // Gone meanwhile.
+      }
+    }
+  }
+  return found
+    .sort((a, b) => b.mtime - a.mtime)
+    .slice(0, 3)
+    .map(f => `${f.name} (${new Date(f.mtime).toISOString()})`);
 }
 
 function canConnect(socketPath: string): Promise<boolean> {

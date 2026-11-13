@@ -16,7 +16,7 @@ import {
   unregisterCodex,
   upsertCodexEntry,
 } from '../../src/extension/registration/codex';
-import type { ServerSpec } from '../../src/extension/registration/launcher';
+import { serverSpec, type ServerSpec } from '../../src/extension/registration/launcher';
 
 const spec: ServerSpec = { command: '/home/u/.vscode-agent-bridge/bin/mcp-server', args: [], env: {} };
 const devSpec: ServerSpec = { command: '/tmp/agent-bridge-dev/r/home/bin/mcp-server', args: [], env: { AGENT_BRIDGE_HOME: '/tmp/agent-bridge-dev/r/home' } };
@@ -135,6 +135,17 @@ describe('editing config.toml', () => {
     const text = upsertCodexEntry('', win);
     expect(text).toContain('command = "C:\\\\Program Files\\\\Microsoft VS Code\\\\Code.exe"');
     expect(inspectCodexText(text, win)).toMatchObject({ kind: 'ours', current: true });
+  });
+
+  it('accepts the entry of another installed VS Code build on Windows, and updates once that build is gone', () => {
+    const stable = 'C:\\Program Files\\Microsoft VS Code\\Code.exe';
+    const insiders = 'C:\\Program Files\\Microsoft VS Code Insiders\\Code - Insiders.exe';
+    const binDir = 'C:\\Users\\me\\.vscode-agent-bridge\\bin';
+    const text = upsertCodexEntry('', serverSpec({ binDir, runtime: stable, platform: 'win32' }));
+    const fromInsiders = serverSpec({ binDir, runtime: insiders, platform: 'win32', knownRuntimes: [stable], exists: () => true });
+    expect(inspectCodexText(text, fromInsiders)).toMatchObject({ kind: 'ours', current: true });
+    const stableGone = serverSpec({ binDir, runtime: insiders, platform: 'win32', knownRuntimes: [stable], exists: () => false });
+    expect(inspectCodexText(text, stableGone)).toMatchObject({ kind: 'ours', current: false });
   });
 });
 
