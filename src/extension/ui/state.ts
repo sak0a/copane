@@ -79,6 +79,7 @@ export class UiState implements vscode.Disposable {
       terminals: this.sources.terminals(),
       browserAvailable: this.sources.browserAvailable,
       graceSeconds: Math.max(0, vscode.workspace.getConfiguration('copane').get<number>('sessionGraceSeconds', 20)),
+      sessionProfiles: this.sources.sessionProfiles(this.services.sessions.list().map(s => s.id)),
     };
   }
 

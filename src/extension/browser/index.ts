@@ -9,6 +9,7 @@ import { registerPageTools } from './page';
 import { RequestRoutes } from './routes';
 import { BrowserServiceImpl } from './service';
 import { registerTabTools } from './tabTools';
+import { activateProfiles } from './profiles';
 
 /** Integrated browser: tab tracking, CDP, consent and leases, marking, and the browser_* tools. */
 export function activateBrowser(services: BridgeServices): void {
@@ -35,4 +36,5 @@ export function activateBrowser(services: BridgeServices): void {
   // Handing a tab to the user (sign-ins, captchas, decisions): handoff.ts.
   const handoffs = new BrowserHandoffs(services, browser, page);
   services.context.subscriptions.push(handoffs, services.tools.register(handoffs.tools()));
+  services.context.subscriptions.push(...activateProfiles(services, browser));
 }

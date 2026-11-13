@@ -4,7 +4,7 @@
 // together and its color runs down the list as a band. Tabs no live session uses are left out: they
 // belong to nobody here and the editor area already shows them. No `vscode` here (unit-tested in
 // test/unit/ui-panel.test.ts); panel.ts maps it to a TreeView.
-import { tabMarks } from './tabMarks';
+import { profileMark, tabMarks } from './tabMarks';
 import type { BrowserTabInfo } from '../core/services';
 import type { AgentSession } from '../core/sessions';
 import { Cmd } from './ids';
@@ -89,6 +89,7 @@ function tabRow(tab: BrowserTabInfo, owner: AgentSession, sessions: readonly Age
     firstOfSession ? owner.title : undefined,
     owner.connected ? undefined : 'reconnecting',
     state === 'waiting' ? `${STATE_TEXT[state]}: ${truncate(tab.request!.message, 60)}` : STATE_TEXT[state],
+    profileMark(tab, owner.id),
     ...tabMarks(tab),
     relation,
     others.length ? `shared with ${others.map(s => s.label).join(', ')}` : undefined,
@@ -113,8 +114,11 @@ function tabRow(tab: BrowserTabInfo, owner: AgentSession, sessions: readonly Age
     md(tab.url),
     `$(circle-large-filled) ${md(owner.label)}${owner.title ? ` · ${md(owner.title)}` : ''}${owner.connected ? '' : ' (reconnecting)'}`,
     `${control} ${opened}${others.length ? ` Also used by ${md(others.map(s => s.label).join(', '))}.` : ''}`,
+    tab.profile ? `$(account) ${md(tab.profile.description)}` : undefined,
     'Click to show the tab.',
-  ].join('\n\n');
+  ]
+    .filter(isString)
+    .join('\n\n');
 
   const flags = ['tab', tab.request ? 'waitingForUser' : tab.paused ? 'paused' : 'notPaused', tab.controlledBy ? 'releasable' : undefined, tab.origin === 'agent' ? 'agentTab' : 'userTab'];
   return {
@@ -130,6 +134,7 @@ function tabRow(tab: BrowserTabInfo, owner: AgentSession, sessions: readonly Age
       `${owner.label}${owner.title ? ` (${owner.title})` : ''}`,
       owner.connected ? undefined : 'reconnecting',
       STATE_TEXT[state],
+      profileMark(tab, owner.id),
       relation,
       others.length ? `shared with ${others.map(s => s.label).join(', ')}` : undefined,
       host && host !== label ? host : undefined,

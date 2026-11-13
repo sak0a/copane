@@ -89,6 +89,21 @@ export interface BrowserTabInfo {
    * for them: what it asked for, and which session asked. The tab is `paused` meanwhile.
    */
   request?: { sessionId: string; message: string; since: number };
+  /**
+   * The login profile of the tab: a separate in-memory store of cookies, local storage and cache that
+   * only tabs of the same profile share. Absent: the window's default store (shared by all tabs without
+   * a profile). `kind` "detached": the tab was in `name` before VS Code restarted and now has an empty
+   * store of its own (profiles live in memory only).
+   */
+  profile?: {
+    /** "dev"; for a session's private profile "private:<session id>". */
+    name: string;
+    /** For rows and the page indicator: "dev", "private to Claude 2". */
+    label: string;
+    kind: 'named' | 'private' | 'detached';
+    /** One sentence for a tooltip. */
+    description: string;
+  };
 }
 
 /** A CDP connection to one tab's page target. Shared by all sessions that use the tab. */
@@ -124,7 +139,8 @@ export interface BrowserService {
    * "control", and returns the CDP connection. Throws ToolError with a message for the agent.
    */
   acquire(session: AgentSession, tabId: string | undefined, access: TabAccess, signal?: AbortSignal): Promise<{ tab: BrowserTabInfo; page: CdpPage }>;
-  openTab(session: AgentSession, url: string, options?: { background?: boolean }): Promise<BrowserTabInfo>;
+  /** `profile`: a login profile name (see `BrowserTabInfo.profile`); omitted: the session's default. */
+  openTab(session: AgentSession, url: string, options?: { background?: boolean; profile?: string }): Promise<BrowserTabInfo>;
   closeTab(tabId: string): Promise<void>;
   /** Brings the tab to the front in the editor area. */
   revealTab(tabId: string): Promise<void>;
@@ -149,6 +165,11 @@ export interface BrowserService {
    * nothing was pending.
    */
   resolveUserRequest?(tabId: string, outcome: 'done' | 'declined'): boolean;
+  /**
+   * The login profile new tabs of a session open in when it names none, and who chose it; undefined
+   * while that is the window's default store by default. Set by login profiles.
+   */
+  sessionProfile?(sessionId: string): { name: string; label: string; setBy: 'user' | 'agent' | 'setting' } | undefined;
 }
 
 // ---------------------------------------------------------------- Terminals

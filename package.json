@@ -94,6 +94,24 @@
         "category": "Copane"
       },
       {
+        "command": "copane.browser.openInProfile",
+        "title": "Open Browser Tab in Login Profile…",
+        "category": "Copane",
+        "icon": "$(account)"
+      },
+      {
+        "command": "copane.browser.setSessionProfile",
+        "title": "Set Login Profile for Agent Session…",
+        "shortTitle": "Login Profile…",
+        "category": "Copane",
+        "icon": "$(account)"
+      },
+      {
+        "command": "copane.browser.closeProfile",
+        "title": "Close Login Profile…",
+        "category": "Copane"
+      },
+      {
         "command": "copane.browser.finishRequest",
         "title": "Done: Hand Browser Tab Back to Agent",
         "shortTitle": "Done",
@@ -329,6 +347,19 @@
           "default": true,
           "markdownDescription": "When a site or proxy asks for a login (HTTP authentication: Basic, Digest, NTLM) in a browser tab an agent session is driving, ask you for it in VS Code instead of letting the page fail. The agent never sees what you type. Logins are remembered until the window closes, or saved in VS Code's secret storage if you choose **Log In and Remember**; **Copane: Forget Saved Browser Logins** removes them. While a session drives a tab, every request of that tab passes through the bridge."
         },
+        "copane.browser.agentLoginStore": {
+          "type": "string",
+          "enum": [
+            "shared",
+            "private"
+          ],
+          "enumDescriptions": [
+            "Tabs agent sessions open use the window's default login store, which your own tabs use too: agents are logged in wherever you are.",
+            "Every agent session opens its tabs in a private login profile of its own, which starts logged out; agents cannot open tabs in your default store. They can still use named profiles and, with your permission, tabs you opened."
+          ],
+          "default": "shared",
+          "markdownDescription": "Which login store (cookies, local storage, cache) browser tabs of agent sessions use when neither the agent nor you chose a profile for them. A profile you choose for a session in the Sessions view, or one the agent names, comes first. Login profiles live in memory until VS Code quits; see **Copane: Open Browser Tab in Login Profile…**."
+        },
         "copane.registration.mode": {
           "type": "string",
           "enum": [
@@ -424,6 +455,18 @@
       ],
       "commandPalette": [
         {
+          "command": "copane.browser.openInProfile",
+          "when": "!copane.ui.browserUnavailable"
+        },
+        {
+          "command": "copane.browser.setSessionProfile",
+          "when": "copane.ui.hasSessions && !copane.ui.browserUnavailable"
+        },
+        {
+          "command": "copane.browser.closeProfile",
+          "when": "!copane.ui.browserUnavailable"
+        },
+        {
           "command": "copane.browser.finishRequest",
           "when": "copane.browser.waitingForUser"
         },
@@ -505,6 +548,11 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "copane.browser.setSessionProfile",
+          "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/ && !copane.ui.browserUnavailable",
+          "group": "2_control@3"
+        },
         {
           "command": "copane.ui.finishTabRequest",
           "when": "(view == copane.sessions || view == copane.tabs) && viewItem =~ /\\bwaitingForUser\\b/",

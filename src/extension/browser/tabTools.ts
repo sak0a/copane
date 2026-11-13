@@ -15,6 +15,7 @@ export function formatTab(tab: BrowserTabInfo, services: BridgeServices, viewer:
     tab.controlledBy ? `controlled by ${label(tab.controlledBy)}` : undefined,
     tab.active ? 'in front' : undefined,
     tab.paused ? 'PAUSED by the user' : undefined,
+    tab.profile ? (tab.profile.kind === 'detached' ? 'own login store (its profile ended when VS Code restarted)' : `login profile "${tab.profile.label}"`) : undefined,
     ...(tab.requestRules ?? []).map(r => `${r.rules} request rule${r.rules === 1 ? '' : 's'} by ${label(r.sessionId) ?? 'an ended session'} (browser_route)`),
   ].filter(Boolean);
   return `${tab.id}  ${tab.url}  "${tab.title}"  (${notes.join(', ')})`;
@@ -59,22 +60,30 @@ export function registerTabTools(services: BridgeServices, browser: BrowserServi
         input: {
           url: z.string().describe('"localhost:3000" works without a scheme.'),
           background: z.boolean().optional().describe('Do not bring the tab to the front.'),
+          profile: z
+            .string()
+            .optional()
+            .describe(
+              'Login profile: tabs of one profile share cookies and logins, apart from all other tabs ("dev", "test"; "private" = your own; "default" = the shared store). See browser_profiles for which applies when omitted.',
+            ),
         },
         annotations: { openWorldHint: true },
         handler: async (args, ctx) => {
           await requireBrowser();
           const url = normalizeUrl(args.url);
-          const tab = await browser.openTab(ctx.session, url, { background: args.background });
+          const tab = await browser.openTab(ctx.session, url, { background: args.background, profile: args.profile });
+          const store = browser.openNote?.(tab.id);
+          const after = `\nIt is now your current tab.${store ? `\n${store}` : ''}`;
           // Return once the page has loaded, so the next call (usually a snapshot) reads it, not the empty tab.
           if (page) {
             try {
-              return `${await page.describeOpened(ctx, tab.id, url)}\nIt is now your current tab.`;
+              return `${await page.describeOpened(ctx, tab.id, url)}${after}`;
             } catch (err) {
               if (ctx.signal.aborted) throw err;
               ctx.log.warn(`could not wait for ${tab.id} to load: ${err instanceof Error ? err.message : String(err)}`);
             }
           }
-          return `Opened ${formatTab(tab, services, ctx.session)}\nIt is now your current tab.`;
+          return `Opened ${formatTab(tab, services, ctx.session)}${after}`;
         },
       }),
       defineTool({

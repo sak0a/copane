@@ -1,0 +1,46 @@
+{
+  "commands": [
+    {
+      "command": "copane.browser.openInProfile",
+      "title": "Open Browser Tab in Login Profile…",
+      "category": "Copane",
+      "icon": "$(account)"
+    },
+    {
+      "command": "copane.browser.setSessionProfile",
+      "title": "Set Login Profile for Agent Session…",
+      "shortTitle": "Login Profile…",
+      "category": "Copane",
+      "icon": "$(account)"
+    },
+    {
+      "command": "copane.browser.closeProfile",
+      "title": "Close Login Profile…",
+      "category": "Copane"
+    }
+  ],
+  "menus": {
+    "commandPalette": [
+      { "command": "copane.browser.openInProfile", "when": "!copane.ui.browserUnavailable" },
+      { "command": "copane.browser.setSessionProfile", "when": "copane.ui.hasSessions && !copane.ui.browserUnavailable" },
+      { "command": "copane.browser.closeProfile", "when": "!copane.ui.browserUnavailable" }
+    ],
+    "view/item/context": [
+      { "command": "copane.browser.setSessionProfile", "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/ && !copane.ui.browserUnavailable", "group": "2_control@3" }
+    ]
+  },
+  "configuration": {
+    "properties": {
+      "copane.browser.agentLoginStore": {
+        "type": "string",
+        "enum": ["shared", "private"],
+        "enumDescriptions": [
+          "Tabs agent sessions open use the window's default login store, which your own tabs use too: agents are logged in wherever you are.",
+          "Every agent session opens its tabs in a private login profile of its own, which starts logged out; agents cannot open tabs in your default store. They can still use named profiles and, with your permission, tabs you opened."
+        ],
+        "default": "shared",
+        "markdownDescription": "Which login store (cookies, local storage, cache) browser tabs of agent sessions use when neither the agent nor you chose a profile for them. A profile you choose for a session in the Sessions view, or one the agent names, comes first. Login profiles live in memory until VS Code quits; see **Copane: Open Browser Tab in Login Profile…**."
+      }
+    }
+  }
+}

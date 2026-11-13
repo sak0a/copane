@@ -78,6 +78,12 @@ agent and its MCP server also run; the browser itself stays on the UI side and V
   only while some client needs it on that tab, and every paused request is answered. It covers the
   tab's page target only, not out-of-process iframes or workers.
 
+- **Login profiles** (`browser/profiles/`): a tab can be opened in a named profile, a separate
+  in-memory login store (a CDP browser context created through a tab's CDP session; VS Code opens
+  `Target.createTarget` with `browserContextId` as a real tab). Tabs of one profile share logins.
+  The service's `opener` hook routes `openTab` there; `BrowserTabInfo.profile` shows it everywhere.
+  Profiles do not survive a VS Code restart; see `docs/browser-profiles.md` for what does.
+
 ## Terminal rules
 
 - Agent terminals are real integrated terminals, named and colored after their session, visible to

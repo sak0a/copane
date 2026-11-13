@@ -1,7 +1,7 @@
 // The UI as data: sessions, tabs and terminals in; the Sessions tree, the status bar item, the view
 // badge and the list of things that need the user out. No `vscode` here, so every state is unit-tested
 // with fixture data (test/unit/ui-model.test.ts); the glue in tree.ts / statusBar.ts only maps it.
-import { tabMarks } from './tabMarks';
+import { profileMark, tabMarks } from './tabMarks';
 import type { BrowserTabInfo, TerminalInfo } from '../core/services';
 import type { AgentSession } from '../core/sessions';
 import { Cmd, ExternalCmd } from './ids';
@@ -13,6 +13,8 @@ export interface UiInput {
   browserAvailable: boolean;
   /** `copane.sessionGraceSeconds`, for explaining what "disconnected" means. */
   graceSeconds: number;
+  /** The login profile each session's new tabs open in, when it is not the default store (by session id). */
+  sessionProfiles?: ReadonlyMap<string, { label: string; setBy: 'user' | 'agent' | 'setting' }>;
 }
 
 export interface ViewIcon {
@@ -107,7 +109,7 @@ export function buildViewModel(input: UiInput): ViewModel {
       ...sessionTabs.map(t => tabNode(t, session, name)),
       ...sessionTerminals.map(t => terminalNode(t, session)),
     ];
-    roots.push(sessionNode(session, sessionTabs, sessionTerminals, children, input.graceSeconds));
+    roots.push(sessionNode(session, sessionTabs, sessionTerminals, children, input.graceSeconds, input.sessionProfiles?.get(session.id)));
   }
 
   const nodes = new Map<string, ViewNode>();
@@ -183,6 +185,7 @@ function sessionNode(
   terminals: TerminalInfo[],
   children: ViewNode[],
   graceSeconds: number,
+  profile?: { label: string; setBy: 'user' | 'agent' | 'setting' },
 ): ViewNode {
   const waitingTerminals = terminals.filter(t => t.state === 'waiting-for-user').length;
   const waitingTabs = tabs.filter(t => t.request).length;
@@ -208,6 +211,9 @@ function sessionNode(
     ]
       .filter(isString)
       .join(' '),
+    profile
+      ? `New tabs open in the login profile **${md(profile.label)}** (${{ user: 'chosen by you', agent: 'chosen by the agent', setting: 'your setting for agent sessions' }[profile.setBy]}).`
+      : undefined,
     `Its tabs and terminals are marked in ${session.color.id}.`,
   ]
     .filter(isString)
@@ -224,7 +230,7 @@ function sessionNode(
     id: sessionNodeId(session.id, children.length > 0),
     kind: 'session',
     label: session.label,
-    description: [session.title, state].filter(isString).join(' · ') || undefined,
+    description: [session.title, state, profile ? `profile ${profile.label}` : undefined].filter(isString).join(' · ') || undefined,
     tooltip,
     icon: { id: session.connected ? 'circle-filled' : 'circle-outline', color: session.color.themeColor },
     contextValue: flags.filter(isString).join(' '),
@@ -275,7 +281,7 @@ function tabNode(tab: BrowserTabInfo, session: AgentSession, name: (id: string |
         : tab.openedBy
           ? undefined
           : 'tab of an ended session';
-  const description = [stateText, ...tabMarks(tab), relation, host && host !== label ? host : undefined].filter(isString).join(' · ');
+  const description = [stateText, profileMark(tab, session.id), ...tabMarks(tab), relation, host && host !== label ? host : undefined].filter(isString).join(' · ');
   const opened =
     tab.origin === 'user'
       ? `Your tab. You allowed ${session.label} to use it.`
@@ -300,7 +306,7 @@ function tabNode(tab: BrowserTabInfo, session: AgentSession, name: (id: string |
     kind: 'tab',
     label,
     description,
-    tooltip: [`$(globe) **${md(label)}**`, md(tab.url), `${opened} ${control}`].join('\n\n'),
+    tooltip: [`$(globe) **${md(label)}**`, md(tab.url), `${opened} ${control}`, tab.profile ? `$(account) ${md(tab.profile.description)}` : undefined].filter(isString).join('\n\n'),
     icon:
       state === 'waiting-for-user'
         ? { id: 'bell-dot', color: WARNING }
@@ -310,7 +316,7 @@ function tabNode(tab: BrowserTabInfo, session: AgentSession, name: (id: string |
           ? { id: 'globe', color: session.color.themeColor }
           : { id: 'globe' },
     contextValue: flags.filter(isString).join(' '),
-    accessibilityLabel: [`Browser tab ${label}`, stateText, relation, `used by ${session.label}`].filter(isString).join(', '),
+    accessibilityLabel: [`Browser tab ${label}`, stateText, profileMark(tab, session.id), relation, `used by ${session.label}`].filter(isString).join(', '),
     command: { command: Cmd.revealTab, title: 'Show Tab', args: [tab.id] },
     children: [],
     ref: { sessionId: session.id, tabId: tab.id },
