@@ -118,6 +118,10 @@ for (const folder of folders) {
     `--extensionDevelopmentPath=${root}`,
     ...(flag('no-proposed') ? [] : [`--enable-proposed-api=${extensionId}`]),
     ...(uiPort ? [`--remote-debugging-port=${uiPort}`] : []),
+    // Dev hosts sit behind other windows. Without these, Chromium stops animation frames for a covered
+    // window, and UI that appears on a frame (notification toasts) never reaches the DOM the tests read.
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
     '--new-window',
     folder,
   ];
