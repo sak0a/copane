@@ -13,6 +13,9 @@ const common = {
   define: { __VERSION__: JSON.stringify(version) },
   bundle: true,
   platform: 'node',
+  // Prefer a package's ES module build: jsonc-parser's default (UMD) build loads its parts with
+  // dynamic require() calls that a bundle cannot resolve.
+  mainFields: ['module', 'main'],
   target: 'node20',
   format: 'cjs',
   sourcemap: true,

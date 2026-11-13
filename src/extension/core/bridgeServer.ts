@@ -103,6 +103,7 @@ export class BridgeServer implements Disposable {
         client: params.client,
         pid: params.process?.pid,
         cwd: params.process?.cwd,
+        matchedBy: params.matchedBy,
       });
       this.peerSessions.set(peer, session);
       options.log.info(`${session.label} connected (${params.client.name} ${params.client.version ?? ''}, pid ${params.process?.pid}, matched by ${params.matchedBy})`);

@@ -77,7 +77,15 @@ if (!flag('no-ui-port')) {
   });
   writeFileSync(uiPortFile, String(uiPort));
 }
-const env = { ...process.env, AGENT_BRIDGE_HOME: dirs.home };
+// Throwaway agent and VS Code configuration: what the registration module edits in a dev host. The
+// extension refuses to change agent config or argv.json in a dev host unless they point in here.
+const sandboxEnv = {
+  AGENT_BRIDGE_HOME: dirs.home,
+  CLAUDE_CONFIG_DIR: join(base, 'claude'),
+  CODEX_HOME: join(base, 'codex'),
+  AGENT_BRIDGE_ARGV_JSON: join(base, 'argv.json'),
+};
+const env = { ...process.env, ...sandboxEnv };
 // Variables that would make `code` talk to the VS Code this script was started from.
 for (const k of ['VSCODE_IPC_HOOK_CLI', 'ELECTRON_RUN_AS_NODE', 'AGENT_BRIDGE_INSTANCE', 'VSCODE_PID', 'VSCODE_CWD']) delete env[k];
 
@@ -112,7 +120,7 @@ for (const folder of folders) {
   if (process.platform === 'darwin' && !flag('foreground')) {
     // `open -g` starts the window in the background, so it does not take focus from whoever is working.
     const app = execFileSync('sh', ['-c', 'dirname "$(dirname "$(dirname "$(dirname "$(dirname "$(readlink -f "$(command -v code)" 2>/dev/null || python3 -c "import os,sys;print(os.path.realpath(sys.argv[1]))" "$(command -v code)")")")")")"'], { encoding: 'utf8' }).trim();
-    spawn('open', ['-g', '-n', '-a', app, '--env', `AGENT_BRIDGE_HOME=${dirs.home}`, '--args', ...codeArgs], { env, stdio: 'ignore', detached: true }).unref();
+    spawn('open', ['-g', '-n', '-a', app, ...Object.entries(sandboxEnv).flatMap(([k, v]) => ['--env', `${k}=${v}`]), '--args', ...codeArgs], { env, stdio: 'ignore', detached: true }).unref();
   } else {
     spawn('code', codeArgs, { env, stdio: 'ignore', detached: true, shell: process.platform === 'win32' }).unref();
   }
@@ -133,7 +141,7 @@ while (Date.now() < deadline) {
 }
 restoreFocus();
 console.log(`dev host "${name}"`);
-console.log(`  AGENT_BRIDGE_HOME=${dirs.home}`);
+for (const [k, v] of Object.entries(sandboxEnv)) console.log(`  ${k}=${v}`);
 if (uiPort) console.log(`  UI inspection: node scripts/ui.mjs --name ${name} shot|eval|text`);
 for (const f of found) {
   const i = JSON.parse(readFileSync(join(instances, f), 'utf8'));
