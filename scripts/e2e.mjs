@@ -92,7 +92,9 @@ export function vscodeVersion(executable) {
     if (!app) return undefined;
     const { version } = JSON.parse(readFileSync(join(app, 'package.json'), 'utf8'));
     const { commit, quality } = JSON.parse(readFileSync(join(app, 'product.json'), 'utf8'));
-    return `${version}${quality && quality !== 'stable' ? `-${quality}` : ''}${commit ? ` (${commit.slice(0, 10)})` : ''}`;
+    // Insiders builds already say "-insider" in their version.
+    const suffix = quality && quality !== 'stable' && !version.includes(quality) ? `-${quality}` : '';
+    return `${version}${suffix}${commit ? ` (${commit.slice(0, 10)})` : ''}`;
   } catch {
     return undefined;
   }
