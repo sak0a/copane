@@ -1,6 +1,7 @@
 // The UI as data: sessions, tabs and terminals in; the Sessions tree, the status bar item, the view
 // badge and the list of things that need the user out. No `vscode` here, so every state is unit-tested
 // with fixture data (test/unit/ui-model.test.ts); the glue in tree.ts / statusBar.ts only maps it.
+import { tabMarks } from './tabMarks';
 import type { BrowserTabInfo, TerminalInfo } from '../core/services';
 import type { AgentSession } from '../core/sessions';
 import { Cmd, ExternalCmd } from './ids';
@@ -262,7 +263,7 @@ function tabNode(tab: BrowserTabInfo, session: AgentSession, name: (id: string |
         : tab.openedBy
           ? undefined
           : 'tab of an ended session';
-  const description = [stateText, relation, host && host !== label ? host : undefined].filter(isString).join(' · ');
+  const description = [stateText, ...tabMarks(tab), relation, host && host !== label ? host : undefined].filter(isString).join(' · ');
   const opened =
     tab.origin === 'user'
       ? `Your tab. You allowed ${session.label} to use it.`

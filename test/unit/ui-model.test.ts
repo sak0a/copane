@@ -381,3 +381,20 @@ describe('helpers', () => {
     expect(md('$(alert) *x*')).toBe('\\$\\(alert\\) \\*x\\*');
   });
 });
+
+describe('tab marks', () => {
+  it('names emulation, mocked requests and an active download; nothing for a plain tab', async () => {
+    const { tabMarks } = await import('../../src/extension/ui/tabMarks');
+    const plain = { id: 'tab-1', url: 'http://x/', title: 'X', active: true, origin: 'agent' as const, openedBy: 'a', controlledBy: 'a', allowedSessions: ['a'], paused: false };
+    expect(tabMarks(plain)).toEqual([]);
+    expect(
+      tabMarks({
+        ...plain,
+        emulation: { sessionId: 'a', label: 'iPhone 15 Pro · dark', description: '' },
+        requestRules: [{ sessionId: 'a', rules: 2 }, { sessionId: 'b', rules: 1 }],
+        downloads: [{ id: 'dl-1', name: 'report.csv', sessionId: 'a', state: 'downloading', progress: 40.2 }],
+      }),
+    ).toEqual(['emulating iPhone 15 Pro · dark', '3 mocked request rules', 'downloading report.csv 40%']);
+    expect(tabMarks({ ...plain, downloads: [{ id: 'dl-1', name: 'a.zip', sessionId: 'a', state: 'saved', path: '/x/a.zip' }] })).toEqual([]);
+  });
+});

@@ -4,6 +4,7 @@
 // together and its color runs down the list as a band. Tabs no live session uses are left out: they
 // belong to nobody here and the editor area already shows them. No `vscode` here (unit-tested in
 // test/unit/ui-panel.test.ts); panel.ts maps it to a TreeView.
+import { tabMarks } from './tabMarks';
 import type { BrowserTabInfo } from '../core/services';
 import type { AgentSession } from '../core/sessions';
 import { Cmd } from './ids';
@@ -87,6 +88,7 @@ function tabRow(tab: BrowserTabInfo, owner: AgentSession, sessions: readonly Age
     firstOfSession ? owner.title : undefined,
     owner.connected ? undefined : 'reconnecting',
     STATE_TEXT[state],
+    ...tabMarks(tab),
     relation,
     others.length ? `shared with ${others.map(s => s.label).join(', ')}` : undefined,
     host && host !== label ? host : undefined,

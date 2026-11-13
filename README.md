@@ -66,7 +66,8 @@ Tools appear in Claude Code as `mcp__copane__<name>`.
 | Navigation | `browser_navigate`, `browser_history` (back, forward, reload) |
 | Reading a page | `browser_snapshot` (accessibility tree with element refs; `mode: "text"` for reading, `find` to locate), `browser_screenshot`, `browser_wait_for` |
 | Acting on a page | `browser_click`, `browser_type`, `browser_fill_form` (also selects options), `browser_press_key`, `browser_hover`, `browser_scroll`, `browser_drag`, `browser_upload_file`, `browser_handle_dialog`, `browser_evaluate` |
-| Debugging a page | `browser_console_messages`, `browser_network_requests` (with `id`: one request's headers and bodies) |
+| Debugging a page | `browser_console_messages`, `browser_network_requests` (with `id`: one request's headers and bodies), `browser_route` (mock, fail or delay requests) |
+| Devices and files | `browser_emulate` (phone and tablet sizes, dark mode, locale, time zone), `browser_downloads` |
 | Terminals | `terminal_run`, `terminal_read`, `terminal_wait`, `terminal_send`, `terminal_interrupt`, `terminal_request_user_input` (hand a login or prompt to the user), `terminal_create`, `terminal_list`, `terminal_close` |
 
 The session indicator in a page can be dragged to any corner; it stays there for that tab and new
@@ -79,9 +80,34 @@ Trust <host>*, or *Cancel*. *Always Trust* adds the host to
 `["localhost", "*.corp.example"]`. Set `copane.browser.certificateErrors` to `block` to never
 proceed for agents. This applies only to tabs an agent session is driving.
 
-Known limits: content of cross-origin iframes is not in snapshots (use a screenshot and click by
-coordinates); JavaScript `prompt()` is not available in VS Code's browser; without shell integration
-a terminal command's exit code is unknown.
+**Logins.** When a site or proxy in a tab an agent is driving asks for a login (HTTP
+authentication: Basic, Digest, NTLM), you are asked in VS Code and type it into a masked field. The
+agent never sees it, only whether you logged in. Each site or proxy is asked once; a rejected login
+is asked once more, then the agent is told to stop. *Log In and Remember* saves the login in VS
+Code's secret storage; **Copane: Forget Saved Browser Logins** removes saved logins. Turn this off
+with `copane.browser.loginPrompts`. Not possible: Windows single sign-on (Kerberos or Negotiate
+without typing anything) cannot be provided by an extension.
+
+**Downloads.** When an agent's click or navigation downloads a file, Copane saves it to
+`~/Downloads/Copane` (setting `copane.browser.downloadsFolder`) under a name that never replaces an
+existing file, and gives the agent the path. By default you are asked once per agent session
+(`copane.browser.agentDownloads`: `ask`, `allow`, `deny`). Your own downloads are unchanged. In
+remote windows (WSL, SSH) downloads are saved on your computer through VS Code's dialog and the
+agent cannot read them.
+
+**Device emulation and request mocking.** Agents can show a tab as a phone or tablet, in dark or
+light mode, with another locale or time zone (`browser_emulate`), and can make requests of a tab
+return canned responses, fail or be slow (`browser_route`). Both belong to the session that set them
+and end when it releases the tab; both are shown on the tab's row in the Sessions and Agent Tabs
+views, and you can end them yourself with **End Agent's Device Emulation in Browser Tab** and
+**Remove Agent Request Mocks from Browser Tab**.
+
+**Frames.** Elements inside iframes, including ones from other sites, are read and used like any
+other element (up to 10 cross-origin frames per snapshot; the rest can be read one at a time).
+
+Known limits: requests made from inside a cross-origin iframe are not mocked; JavaScript `prompt()`
+is not available in VS Code's browser; without shell integration a terminal command's exit code is
+unknown.
 
 ## How it works
 

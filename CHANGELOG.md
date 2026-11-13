@@ -1,6 +1,41 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.2.0
+
+Agents use far fewer tokens for the same work, and reach more of a page.
+
+- **Leaner snapshots.** Element refs only on what an agent can act on, link targets left out unless
+  asked for (`urls: true`), table rows on one line. `browser_snapshot` gains `mode: "text"` (read a
+  page as text), `find` (only matching elements), and `offset` (continue a cut snapshot).
+- **Action results say what changed on the page**, so a new snapshot is rarely needed after a click.
+- **Tool definitions are about 40% smaller.**
+- **Iframes from other sites** are read and used like any other element.
+- **Login prompts** for sites and proxies that ask for a user name and password (Basic, Digest,
+  NTLM); the agent never sees what you type. Optional saving in VS Code's secret storage.
+- **Downloads**: files an agent downloads are saved and their path reported (`browser_downloads`).
+- **Device emulation** (`browser_emulate`) and **request mocking** (`browser_route`).
+- **Certificate errors** ask once per host, with a trusted-hosts setting.
+- The session indicator in a page can be dragged to any corner.
+- **Agent Tabs** view in the bottom panel; **Check and Repair Setup**, **Turn On** and **Turn Off**
+  commands; registration can no longer lose its entry during an update.
+
+Changed for agents:
+
+- Removed `browser_select_option`: use `browser_fill_form` with `{ ref, value }`.
+- Removed `browser_network_request`: use `browser_network_requests` with `id`.
+- `browser_open` waits for the page to load and reports its title and status.
+- The snapshot format changed as described above.
+
+Fixed:
+
+- A navigation no longer reports console errors of the page being left.
+- Clicks no longer fail as "covered" when the bottom panel shrinks the browser area.
+
+## 0.1.1
+
+Publisher id is `saka`; the extension id is `saka.copane`.
+
+## 0.1.0
 
 First version.
 

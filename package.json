@@ -3,7 +3,7 @@
   "displayName": "Copane",
   "description": "Shares your VS Code window with Claude Code and other MCP agents: its integrated browser tabs and terminals, per window and per agent session, with you able to step in.",
   "publisher": "saka",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "license": "MIT",
   "engines": {
     "vscode": "^1.140.0"
