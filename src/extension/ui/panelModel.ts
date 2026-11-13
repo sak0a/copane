@@ -23,7 +23,7 @@ export interface PanelModel {
   description: string | undefined;
 }
 
-export type PanelTabState = 'controlling' | 'idle' | 'paused';
+export type PanelTabState = 'controlling' | 'idle' | 'paused' | 'waiting';
 
 /** The id of a tab's row in the panel. Stable while the tab exists, whichever session it moves to. */
 export function panelTabNodeId(tabId: string): string {
@@ -31,27 +31,28 @@ export function panelTabNodeId(tabId: string): string {
 }
 
 /**
- * The session a tab is shown under: the one controlling it, else the live session that opened it,
+ * The session a tab is shown under: the one waiting for the user in it, the one controlling it, else the live session that opened it,
  * else the first live session (in session order) the user allowed to use it. Undefined when no live
  * session uses it.
  */
 export function tabOwner(tab: BrowserTabInfo, sessions: readonly AgentSession[]): AgentSession | undefined {
   const live = (id: string | undefined) => (id ? sessions.find(s => s.id === id) : undefined);
-  return live(tab.controlledBy) ?? (tab.origin === 'agent' ? live(tab.openedBy) : undefined) ?? sessions.find(s => tabBelongsTo(tab, s.id));
+  return live(tab.request?.sessionId) ?? live(tab.controlledBy) ?? (tab.origin === 'agent' ? live(tab.openedBy) : undefined) ?? sessions.find(s => tabBelongsTo(tab, s.id));
 }
 
 export function panelTabState(tab: BrowserTabInfo): PanelTabState {
+  if (tab.request) return 'waiting';
   if (tab.paused) return 'paused';
   return tab.controlledBy ? 'controlling' : 'idle';
 }
 
-const STATE_TEXT: Record<PanelTabState, string> = { controlling: 'controlling', idle: 'idle', paused: 'paused by you' };
+const STATE_TEXT: Record<PanelTabState, string> = { controlling: 'controlling', idle: 'idle', paused: 'paused by you', waiting: 'waiting for you' };
 
 /**
  * The shape says what the session is doing with the tab, the color says which session it is: a filled
  * dot while it controls the tab, a ring while it only has it, a pause sign while the user holds it.
  */
-const STATE_ICON: Record<PanelTabState, string> = { controlling: 'circle-large-filled', idle: 'circle-large-outline', paused: 'debug-pause' };
+const STATE_ICON: Record<PanelTabState, string> = { controlling: 'circle-large-filled', idle: 'circle-large-outline', paused: 'debug-pause', waiting: 'bell-dot' };
 
 export function buildPanelModel(input: PanelInput): PanelModel {
   const order = new Map(input.sessions.map((s, i) => [s.id, i]));
@@ -87,7 +88,7 @@ function tabRow(tab: BrowserTabInfo, owner: AgentSession, sessions: readonly Age
     owner.label,
     firstOfSession ? owner.title : undefined,
     owner.connected ? undefined : 'reconnecting',
-    STATE_TEXT[state],
+    state === 'waiting' ? `${STATE_TEXT[state]}: ${truncate(tab.request!.message, 60)}` : STATE_TEXT[state],
     ...tabMarks(tab),
     relation,
     others.length ? `shared with ${others.map(s => s.label).join(', ')}` : undefined,
@@ -101,6 +102,7 @@ function tabRow(tab: BrowserTabInfo, owner: AgentSession, sessions: readonly Age
     controlling: `**${md(owner.label)} is controlling it.**`,
     idle: `${md(owner.label)} is not controlling it right now.`,
     paused: `**Paused by you.** Agents cannot act on it until you resume it.`,
+    waiting: `**${md(owner.label)} is waiting for you** in this tab: ${md(tab.request?.message ?? '')} Click Done in the page when you are finished.`,
   }[state];
   const opened =
     tab.origin === 'user'
@@ -114,7 +116,7 @@ function tabRow(tab: BrowserTabInfo, owner: AgentSession, sessions: readonly Age
     'Click to show the tab.',
   ].join('\n\n');
 
-  const flags = ['tab', tab.paused ? 'paused' : 'notPaused', tab.controlledBy ? 'releasable' : undefined, tab.origin === 'agent' ? 'agentTab' : 'userTab'];
+  const flags = ['tab', tab.request ? 'waitingForUser' : tab.paused ? 'paused' : 'notPaused', tab.controlledBy ? 'releasable' : undefined, tab.origin === 'agent' ? 'agentTab' : 'userTab'];
   return {
     id: panelTabNodeId(tab.id),
     kind: 'tab',
@@ -144,6 +146,11 @@ function tabRow(tab: BrowserTabInfo, owner: AgentSession, sessions: readonly Age
 /** Renders the panel as text (debug tool output and tests). */
 export function panelAsText(model: PanelModel): string {
   return model.roots.map(n => `${n.label} — ${n.description}  [${n.icon.id}:${n.icon.color}]`).join('\n');
+}
+
+function truncate(value: string, max: number): string {
+  const oneLine = value.replace(/\s+/g, ' ');
+  return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine;
 }
 
 function naturalCompare(a: string, b: string): number {

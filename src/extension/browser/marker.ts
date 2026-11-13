@@ -1,6 +1,7 @@
 // The in-page indicator: while an agent session controls a tab, the page shows a thin frame and a small
 // pill in the session's color ("Claude 2 · checkout tests  [Take over]"); while the user has paused the
-// tab, the pill offers "Resume".
+// tab, the pill offers "Resume". While an agent has handed the tab to the user (browser_request_user_input),
+// the pill shows what it asks for, with "Done" and "Won't do".
 //
 // Isolation: the script runs in a CDP isolated world (`WORLD`), so page scripts can neither see its
 // globals nor call the binding it reports clicks through. It draws inside a closed shadow root, styles
@@ -27,6 +28,8 @@ export interface MarkerState {
   color: string;
   /** The user paused agent access: the pill offers "Resume". */
   paused: boolean;
+  /** An agent handed the tab to the user and waits: what it asks them to do. The pill shows it with "Done" and "Won't do". */
+  request?: string;
 }
 
 /** Where the pill sits. The user drags it; the choice is kept for the tab and used for new tabs. */
@@ -34,7 +37,9 @@ export type MarkerCorner = 'br' | 'bl' | 'tr' | 'tl';
 
 let preferredCorner: MarkerCorner = 'br';
 
-export type MarkerAction = 'pause' | 'resume';
+export type MarkerAction = 'pause' | 'resume' | 'done' | 'decline';
+
+const ACTIONS: readonly string[] = ['pause', 'resume', 'done', 'decline'];
 
 const CORNERS: readonly MarkerCorner[] = ['br', 'bl', 'tl', 'tr'];
 
@@ -91,12 +96,25 @@ function pageScript(BINDING: string, ATTRIBUTE: string): void {
     .passive .pill { pointer-events: none; opacity: .45; }
     .paused .frame { display: none; }
     .paused .dot { background: transparent; border: 2px solid var(--c); width: 4px; height: 8px; border-radius: 0; border-top: 0; border-bottom: 0; }
+    .second { display: none; }
+    .request .frame { display: block; border-width: 3px; opacity: .85; }
+    .request .pill { max-width: min(460px, calc(100vw - 20px)); flex-wrap: wrap; border-radius: 12px; border-width: 2px; padding: 7px 7px 7px 11px; font-size: 13px;
+      line-height: 19px; animation: copane-attn 1.2s ease-in-out 3; }
+    .request .dot { background: var(--c); border: 0; width: 8px; height: 8px; border-radius: 50%; }
+    .request .label { white-space: normal; flex: 1 1 220px; max-height: 7.2em; overflow-y: auto; cursor: default; }
+    .request .who { font-weight: 700; }
+    .request .second { display: inline-block; }
+    .request button { padding: 1px 10px; }
+    .request .first { background: #f3f3f3; color: #1e1e20; }
+    .request .first:hover { background: #fff; }
+    @keyframes copane-attn { 50% { box-shadow: 0 0 0 7px rgba(255, 255, 255, .22), 0 2px 10px rgba(0, 0, 0, .28); } }
   `;
-  let state: { label: string; color: string; paused: boolean; corner?: string } | null = null;
+  let state: { label: string; color: string; paused: boolean; request?: string; corner?: string } | null = null;
   let host: HTMLElement | undefined;
   let root: HTMLElement | undefined;
   let label: HTMLElement | undefined;
   let button: HTMLElement | undefined;
+  let button2: HTMLElement | undefined;
   let passiveTimer: any;
   let corner = 'br';
   let pill: HTMLElement | undefined;
@@ -142,7 +160,11 @@ function pageScript(BINDING: string, ATTRIBUTE: string): void {
     label.title = 'Drag to another corner';
     button = document.createElement('button');
     button.setAttribute('type', 'button');
-    pill.append(dot, label, button);
+    button.className = 'first';
+    button2 = document.createElement('button');
+    button2.setAttribute('type', 'button');
+    button2.className = 'second';
+    pill.append(dot, label, button, button2);
     root.append(frame, pill);
     shadow.appendChild(root);
     // Drag the pill to any corner; it snaps to the nearest one when released.
@@ -153,7 +175,7 @@ function pageScript(BINDING: string, ATTRIBUTE: string): void {
       send({ type: 'corner', corner });
     };
     pill.addEventListener('pointerdown', (event: any) => {
-      if (!event.isTrusted || event.button !== 0 || event.target === button) return;
+      if (!event.isTrusted || event.button !== 0 || event.target === button || event.target === button2) return;
       drag = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false };
       try {
         pill!.setPointerCapture(event.pointerId);
@@ -192,7 +214,12 @@ function pageScript(BINDING: string, ATTRIBUTE: string): void {
     button.addEventListener('click', (event: any) => {
       if (!event.isTrusted || !state) return;
       event.stopPropagation();
-      send({ type: state.paused ? 'resume' : 'pause' });
+      send({ type: state.request ? 'done' : state.paused ? 'resume' : 'pause' });
+    });
+    button2.addEventListener('click', (event: any) => {
+      if (!event.isTrusted || !state?.request) return;
+      event.stopPropagation();
+      send({ type: 'decline' });
     });
     // Keep page handlers from seeing interaction with the indicator.
     for (const type of ['click', 'mousedown', 'mouseup', 'mousemove', 'pointerdown', 'pointerup', 'pointermove', 'keydown', 'keyup']) {
@@ -233,10 +260,26 @@ function pageScript(BINDING: string, ATTRIBUTE: string): void {
     if (!host) build();
     root!.style.setProperty('--c', state.color);
     if (!drag && state.corner) corner = state.corner;
-    root!.className = `root ${corner}${state.paused ? ' paused' : ''}${passiveTimer ? ' passive' : ''}${drag?.moved ? ' dragging' : ''}`;
-    label!.textContent = state.paused ? 'Agent access paused' : state.label;
-    button!.textContent = state.paused ? 'Resume' : 'Take over';
-    button!.title = state.paused ? `Let ${state.label} use this tab again` : `Pause ${state.label}: agents cannot use this tab until you resume`;
+    root!.className = `root ${corner}${state.paused ? ' paused' : ''}${state.request ? ' request' : ''}${passiveTimer ? ' passive' : ''}${drag?.moved ? ' dragging' : ''}`;
+    if (state.request) {
+      const who = document.createElement('span');
+      who.className = 'who';
+      who.textContent = `${state.label} needs you: `;
+      label!.replaceChildren(who, document.createTextNode(state.request));
+      label!.title = '';
+      pill!.setAttribute('role', 'alert');
+      button!.textContent = 'Done';
+      button!.title = `Give the tab back to ${state.label}`;
+      button2!.textContent = "Won't do";
+      button2!.title = `Tell ${state.label} you will not do this`;
+    } else {
+      label!.textContent = state.paused ? 'Agent access paused' : state.label;
+      label!.title = 'Drag to another corner';
+      pill!.setAttribute('role', 'status');
+      button!.textContent = state.paused ? 'Resume' : 'Take over';
+      button!.title = state.paused ? `Let ${state.label} use this tab again` : `Pause ${state.label}: agents cannot use this tab until you resume`;
+      button2!.textContent = '';
+    }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', attach, { once: true });
     else attach();
   }
@@ -340,8 +383,8 @@ export class PageMarker {
             this.corner = corner;
             preferredCorner = corner; // New tabs start where the user last put it.
           }
-        } else if (message?.type === 'pause' || message?.type === 'resume') {
-          this.onAction(message.type);
+        } else if (message?.type && ACTIONS.includes(message.type)) {
+          this.onAction(message.type as MarkerAction);
         }
       }),
     );

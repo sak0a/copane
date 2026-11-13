@@ -52,6 +52,16 @@ agent and its MCP server also run; the browser itself stays on the UI side and V
   blocked by a lease. Leases end on release, idle timeout or session end.
 - **User takeover**: the user can pause a tab; agent actions are then refused with a message telling
   the agent to wait for the user. Resuming gives control back.
+- **Hand-off** (`browser/handoff.ts`): `browser_request_user_input` hands a tab to the user (sign-in
+  with SSO/MFA, captcha, consent, a choice) by pausing it, the same state as a user takeover, so no
+  agent reads or acts in it meanwhile. The page indicator shows the request with Done / Won't do; the
+  views and status bar count it like a terminal waiting for the user (`BrowserTabInfo.request`); a
+  notification appears only while the tab is out of sight, because VS Code pauses a browser view a
+  notification covers. It ends on the agent's `done_when` condition, the user's answer, timeout, cancel,
+  session end or tab close. Before the pause ends, requests sent meanwhile lose URL query, headers and
+  bodies, console messages lose their text (`page/privacy.ts`, `NetworkEntry.withheld`), and password
+  and one-time-code fields still on the page are emptied. Anything new that exports or reads recorded
+  requests must honour `withheld`.
 - **Marking**: a tab in use shows which session uses it, in the page (unobtrusive indicator in the
   session color, never in screenshots the agent takes) and on the editor tab where VS Code allows it.
 - Tools take an optional `tab`; without it they act on the session's current tab (the one it last

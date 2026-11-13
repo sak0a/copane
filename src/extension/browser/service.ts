@@ -46,6 +46,14 @@ interface PendingPopup {
   at: number;
 }
 
+/** A feature's part in a tab's page indicator (see `BrowserServiceImpl.addMarkerExtension`). */
+export interface MarkerExtension {
+  /** The state to show, given what the indicator would show otherwise (null: nothing). */
+  state(tabId: string, current: MarkerState | null): MarkerState | null;
+  /** Handles a click on the indicator; true when handled (the default handling is skipped). */
+  onAction?(tabId: string, action: MarkerAction): boolean;
+}
+
 const STATE_KEY = 'copane.browser.state';
 /** How long a tool call waits for the user to answer a consent prompt before it returns. */
 const CONSENT_WAIT_MS = 120_000;
@@ -97,6 +105,14 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
   certificateRefusal: ((url: string) => string | undefined) | undefined;
   /** Features that add fields to a tab's info (downloads, emulation); see `addTabInfoProvider`. */
   private readonly infoProviders = new Set<(tabId: string) => Partial<BrowserTabInfo> | undefined>();
+  /** Features that change what a tab's page indicator shows and handle its buttons; see `addMarkerExtension`. */
+  private readonly markerExtensions = new Set<MarkerExtension>();
+  /** Features that take over un-pausing a tab (a hand-off ends first); see `addResumeGuard`. */
+  private readonly resumeGuards = new Set<(tabId: string) => boolean>();
+  /** Features that explain why a paused tab is paused; see `addPausedExplainer`. */
+  private readonly pausedExplainers = new Set<(tabId: string, sessionId: string) => string | undefined>();
+  /** Set by the hand-off feature (see `BrowserService.resolveUserRequest`). */
+  resolveUserRequest: ((tabId: string, outcome: 'done' | 'declined') => boolean) | undefined;
 
   readonly onDidChange = this.changeEmitter.event;
   readonly onDidAttachPage = this.attachEmitter.event;
@@ -239,6 +255,15 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
   setPaused(tabId: string, paused: boolean): void {
     const record = this.find(normalizeTabId(tabId));
     if (!record || record.paused === paused) return;
+    if (!paused) {
+      for (const guard of this.resumeGuards) {
+        try {
+          if (guard(record.id)) return;
+        } catch (err) {
+          this.log.warn(`resume guard failed for ${record.id}: ${errorText(err)}`);
+        }
+      }
+    }
     record.paused = paused;
     this.log.info(`${record.id} ${paused ? 'paused' : 'resumed'} by the user`);
     if (paused) this.services.tabLeases.release(record.id);
@@ -349,6 +374,36 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
     this.changeEmitter.fire();
   }
 
+  /**
+   * Lets a feature change what a tab's page indicator shows (applied after the default state, in
+   * registration order) and handle the indicator's buttons first. Call `refreshMarker` when it changes.
+   */
+  addMarkerExtension(extension: MarkerExtension): vscode.Disposable {
+    this.markerExtensions.add(extension);
+    return { dispose: () => void this.markerExtensions.delete(extension) };
+  }
+
+  /** Re-renders a tab's page indicator and editor-tab badge. */
+  refreshMarker(tabId: string): void {
+    const record = this.find(normalizeTabId(tabId));
+    if (record) this.refreshMarking(record);
+  }
+
+  /**
+   * Lets a feature handle a request to resume a paused tab (from any command or the indicator) itself:
+   * a guard that returns true keeps the tab paused, and resumes it later through `setPaused`.
+   */
+  addResumeGuard(guard: (tabId: string) => boolean): vscode.Disposable {
+    this.resumeGuards.add(guard);
+    return { dispose: () => void this.resumeGuards.delete(guard) };
+  }
+
+  /** Lets a feature word the error an agent gets on a paused tab (the first non-empty answer wins). */
+  addPausedExplainer(explain: (tabId: string, sessionId: string) => string | undefined): vscode.Disposable {
+    this.pausedExplainers.add(explain);
+    return { dispose: () => void this.pausedExplainers.delete(explain) };
+  }
+
   dispose(): void {
     for (const s of this.subscriptions.splice(0)) s.dispose();
     for (const pending of this.pendingConsent.values()) pending.controller.abort();
@@ -402,6 +457,12 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
         continue;
       }
       if (decision.kind === 'ask') throw new ToolError('access_denied', `The user did not allow you to use ${record.id}. Open your own tab with browser_open.`);
+      if (decision.kind === 'paused') {
+        for (const explain of this.pausedExplainers) {
+          const message = explain(record.id, session.id);
+          if (message) throw new ToolError('access_denied', message);
+        }
+      }
       throw new ToolError('access_denied', deniedMessage(decision, record.id));
     }
   }
@@ -706,10 +767,29 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
   // ------------------------------------------------------------------ Marking
 
   private onMarkerAction(record: TabRecord, action: MarkerAction): void {
-    this.setPaused(record.id, action === 'pause');
+    for (const extension of this.markerExtensions) {
+      try {
+        if (extension.onAction?.(record.id, action)) return;
+      } catch (err) {
+        this.log.warn(`indicator action handler failed for ${record.id}: ${errorText(err)}`);
+      }
+    }
+    if (action === 'pause' || action === 'resume') this.setPaused(record.id, action === 'pause');
   }
 
   private markerState(record: TabRecord): MarkerState | null {
+    let state = this.baseMarkerState(record);
+    for (const extension of this.markerExtensions) {
+      try {
+        state = extension.state(record.id, state);
+      } catch (err) {
+        this.log.warn(`indicator extension failed for ${record.id}: ${errorText(err)}`);
+      }
+    }
+    return state;
+  }
+
+  private baseMarkerState(record: TabRecord): MarkerState | null {
     if (!config().get<boolean>('pageIndicator', true)) return null;
     if (record.paused) {
       const last = record.lastController ? this.services.sessions.get(record.lastController) : undefined;

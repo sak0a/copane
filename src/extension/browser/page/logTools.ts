@@ -139,6 +139,10 @@ async function requestDetails(call: PageCall, rawId: string, max: number): Promi
   if (e.redirectedTo) lines.push(`Redirected to ${clip(e.redirectedTo, 500)}.`);
   if (e.intercepted) lines.push(`Not a real network response: ${e.intercepted} (browser_route).`);
   if (e.statusText) lines.push(`Status text: ${e.statusText}`);
+  if (e.withheld) {
+    lines.push('Sent while the user had the tab (browser_request_user_input): its URL query, headers and bodies are withheld because they may carry what the user typed.');
+    return lines.join('\n');
+  }
   const headerBlock = (title: string, h: Record<string, string> | undefined) => {
     if (!h || Object.keys(h).length === 0) return [`${title}: (none recorded)`];
     return [`${title}:`, ...Object.entries(h).map(([k, v]) => `  ${k}: ${v}`)];

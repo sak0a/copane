@@ -17,6 +17,9 @@ export const Cmd = {
   resumeTab: 'copane.ui.resumeTab',
   releaseTab: 'copane.ui.releaseTab',
   closeTab: 'copane.ui.closeTab',
+  /** A tab an agent handed to the user: give it back ("Done") or decline the request ("Won't Do"). */
+  finishTabRequest: 'copane.ui.finishTabRequest',
+  declineTabRequest: 'copane.ui.declineTabRequest',
   revealTerminal: 'copane.ui.revealTerminal',
   interruptTerminal: 'copane.ui.interruptTerminal',
   closeTerminal: 'copane.ui.closeTerminal',

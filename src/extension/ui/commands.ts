@@ -56,6 +56,7 @@ export function registerUiCommands(services: BridgeServices, state: UiState, tre
 
   const describeTab = (tab: BrowserTabInfo): string => {
     const users = sessions.list().filter(s => tabBelongsTo(tab, s.id));
+    if (tab.request) return `${sessionLabel(tab.request.sessionId)} is waiting for you: ${tab.request.message}`;
     if (tab.paused) return 'paused by you';
     if (tab.controlledBy) return `controlled by ${sessionLabel(tab.controlledBy)}`;
     if (users.length) return `used by ${users.map(s => s.label).join(', ')}`;
@@ -74,7 +75,7 @@ export function registerUiCommands(services: BridgeServices, state: UiState, tre
     }
     const picked = await vscode.window.showQuickPick(
       candidates.map(t => ({
-        label: `$(${t.paused ? 'debug-pause' : 'globe'}) ${tabTitle(t) || hostOf(t.url) || t.url}`,
+        label: `$(${t.request ? 'bell-dot' : t.paused ? 'debug-pause' : 'globe'}) ${tabTitle(t) || hostOf(t.url) || t.url}`,
         description: describeTab(t),
         detail: t.url,
         id: t.id,
@@ -248,7 +249,7 @@ export function registerUiCommands(services: BridgeServices, state: UiState, tre
       description: item.description,
       detail: item.detail,
       item,
-      buttons: item.kind === 'tab' ? [resume] : [],
+      buttons: item.kind === 'tab' && !item.waiting ? [resume] : [],
     }));
     await new Promise<void>(resolve => {
       quickPick.onDidTriggerItemButton(e => {
@@ -307,6 +308,14 @@ export function registerUiCommands(services: BridgeServices, state: UiState, tre
     command(Cmd.closeTab, async (arg?: unknown) => {
       const id = refOf(arg)?.tabId ?? (await pickTab(() => true, 'Close which browser tab?', 'No browser tab is open.'));
       if (id) await services.browser.closeTab(id);
+    }),
+    command(Cmd.finishTabRequest, async (arg?: unknown) => {
+      const id = refOf(arg)?.tabId ?? (await pickTab(t => !!t.request, 'Give which tab back to the agent waiting for you?', 'No agent is waiting for you in a browser tab.'));
+      if (id) services.browser.resolveUserRequest?.(id, 'done');
+    }),
+    command(Cmd.declineTabRequest, async (arg?: unknown) => {
+      const id = refOf(arg)?.tabId ?? (await pickTab(t => !!t.request, "Decline the agent's request in which tab?", 'No agent is waiting for you in a browser tab.'));
+      if (id) services.browser.resolveUserRequest?.(id, 'declined');
     }),
     command(Cmd.revealTerminal, async (arg?: unknown, options?: { preserveFocus?: boolean }) => {
       const id = refOf(arg)?.terminalId ?? (await pickTerminal(() => true, 'Show which agent terminal?', 'No agent terminal is open.'));

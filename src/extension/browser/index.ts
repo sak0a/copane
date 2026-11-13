@@ -3,6 +3,7 @@ import type { BridgeServices } from '../core/services';
 import { CertificateGate } from './certificates';
 import { registerBrowserCommands } from './commands';
 import { CredentialPrompts } from './credentials';
+import { BrowserHandoffs } from './handoff';
 import { FetchInterception } from './interception';
 import { registerPageTools } from './page';
 import { RequestRoutes } from './routes';
@@ -31,4 +32,7 @@ export function activateBrowser(services: BridgeServices): void {
   const page = registerPageTools(services, browser, { interception });
   registerTabTools(services, browser, page);
   registerBrowserCommands(services, browser);
+  // Handing a tab to the user (sign-ins, captchas, decisions): handoff.ts.
+  const handoffs = new BrowserHandoffs(services, browser, page);
+  services.context.subscriptions.push(handoffs, services.tools.register(handoffs.tools()));
 }
