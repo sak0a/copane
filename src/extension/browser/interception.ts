@@ -11,9 +11,15 @@
 //   the client aborts it (its rule went away), and before `Fetch` is disabled. When the tab or its
 //   connection closes, the browser drops the interception with it, so nothing stays paused.
 //
-// Scope: the page target of the tab. Requests of out-of-process (cross-site) iframes and of workers are
-// made by other CDP targets and are not paused here; `attach` takes any CdpPage-like target, so child
-// sessions can be added the same way once the bridge attaches to them.
+// Scope: the page target of the tab (`attach`) and every out-of-process (cross-site) iframe of it,
+// nested ones included (`attachFrame`, called by the frame registry in page/frames.ts before a new
+// frame's document runs). A frame's own document request belongs to its parent's target; everything
+// the frame loads afterwards (scripts, fetch, XHR, images, logins) to its own. Each target gets the
+// same `Fetch.enable`, and is answered on its own session; when a frame goes away the browser drops
+// what it had paused (the CDP session ends), and the bridge stops deciding about it. At most
+// MAX_FRAME_TARGETS frames per tab are served; requests of further frames go out unchanged, and the
+// driving agent is told. Workers are other CDP targets the bridge does not attach to: their requests
+// are not paused here.
 import { Emitter, type Disposable, type Event } from '../core/events';
 import type { Logger } from '../core/log';
 import type { CdpPage } from '../core/services';
@@ -83,7 +89,9 @@ export interface FetchClient {
 
 /** CDP `Fetch` methods are used by this class only; the rest of the extension goes through it. */
 interface Target {
+  /** The tab's page connection, or the child session of one of its frames (`frame` true). */
   page: CdpPage;
+  frame: boolean;
   /** JSON of the `Fetch.enable` params in effect, or "" when disabled. */
   applied: string;
   queue: Promise<void>;
@@ -93,12 +101,18 @@ interface Target {
 }
 
 const ANSWER_TIMEOUT_MS = 10_000;
+/** Frame targets served per tab; a page with more frames than this is rare (and mostly ads). */
+export const MAX_FRAME_TARGETS = 100;
 /** A client that takes longer than this to decide about a plain request is skipped. Login prompts have their own timeouts. */
 const DECIDE_TIMEOUT_MS = 15_000;
 
 export class FetchInterception implements Disposable {
   private readonly clients: FetchClient[] = [];
   private readonly targets = new Map<string, Target>();
+  /** Frame targets by tab. */
+  private readonly frames = new Map<string, Set<Target>>();
+  /** Tabs whose frames went over MAX_FRAME_TARGETS (logged and told once each). */
+  private readonly overflowed = new Set<string>();
   private readonly interceptEmitter = new Emitter<{ tabId: string; networkId: string; note: string }>();
   private readonly noteEmitter = new Emitter<{ tabId: string; text: string; topic?: string; to?: string }>();
   private disposed = false;
@@ -127,12 +141,7 @@ export class FetchInterception implements Disposable {
     const previous = this.targets.get(page.tabId);
     if (previous?.page === page) return;
     if (previous) this.drop(previous);
-    const target: Target = { page, applied: '', queue: Promise.resolve(), pending: new Map(), subscriptions: [] };
-    target.subscriptions.push(
-      page.on('Fetch.requestPaused', params => void this.onPaused(target, params)),
-      page.on('Fetch.authRequired', params => void this.onAuthRequired(target, params)),
-      page.onDidClose(() => this.drop(target)),
-    );
+    const target = this.target(page, false);
     this.targets.set(page.tabId, target);
     this.refresh(page.tabId);
     target.queue = target.queue.then(() => {
@@ -141,17 +150,49 @@ export class FetchInterception implements Disposable {
     });
   }
 
+  /**
+   * Serves a cross-origin frame of a tab too (`session` is its child session, see `CdpPage.childSession`).
+   * Resolves once what the clients need is in effect there, so a frame held before its document runs
+   * can be let go without missing a request. Until the session closes.
+   */
+  attachFrame(session: CdpPage): Promise<void> {
+    if (this.disposed || session.closed) return Promise.resolve();
+    const tabId = session.tabId;
+    let set = this.frames.get(tabId);
+    if (!set) this.frames.set(tabId, (set = new Set()));
+    for (const t of set) if (t.page === session) return t.queue;
+    if (set.size >= MAX_FRAME_TARGETS) {
+      if (!this.overflowed.has(tabId)) {
+        this.overflowed.add(tabId);
+        this.log.info(`${tabId}: more than ${MAX_FRAME_TARGETS} cross-origin frames; requests of further frames are not intercepted`);
+        if (this.wanted(tabId)) this.note(tabId, `This page has more than ${MAX_FRAME_TARGETS} cross-origin frames; request rules and login prompts only cover the first ${MAX_FRAME_TARGETS} of them.`, { topic: `frames-overflow\u0000${tabId}` });
+      }
+      return Promise.resolve();
+    }
+    const target = this.target(session, true);
+    set.add(target);
+    this.queueApply(target);
+    return target.queue;
+  }
+
   /** Re-applies what the clients need on a tab (all tabs without an id). Cheap when nothing changed. */
   refresh(tabId?: string): void {
     if (tabId === undefined) return this.refreshAll();
-    const target = this.targets.get(tabId);
-    if (!target || target.page.closed || this.disposed) return;
-    target.queue = target.queue.then(() => this.apply(target)).then(undefined, () => {});
+    if (this.disposed) return;
+    const main = this.targets.get(tabId);
+    if (main) this.queueApply(main);
+    for (const frame of this.frames.get(tabId) ?? []) this.queueApply(frame);
   }
 
   /** Whether `Fetch` is enabled on the tab now (for tests and diagnostics). */
   isActive(tabId: string): boolean {
     return !!this.targets.get(tabId)?.applied;
+  }
+
+  /** Frame targets of the tab being served, how many of them have `Fetch` enabled, and requests being decided there (tests, diagnostics). */
+  frameStats(tabId: string): { frames: number; active: number; pending: number } {
+    const set = [...(this.frames.get(tabId) ?? [])];
+    return { frames: set.length, active: set.filter(t => t.applied).length, pending: set.reduce((n, t) => n + t.pending.size, 0) };
   }
 
   /**
@@ -164,7 +205,27 @@ export class FetchInterception implements Disposable {
   }
 
   private refreshAll(): void {
-    for (const id of this.targets.keys()) this.refresh(id);
+    for (const id of new Set([...this.targets.keys(), ...this.frames.keys()])) this.refresh(id);
+  }
+
+  private target(page: CdpPage, frame: boolean): Target {
+    const target: Target = { page, frame, applied: '', queue: Promise.resolve(), pending: new Map(), subscriptions: [] };
+    target.subscriptions.push(
+      page.on('Fetch.requestPaused', params => void this.onPaused(target, params)),
+      page.on('Fetch.authRequired', params => void this.onAuthRequired(target, params)),
+      page.onDidClose(() => this.drop(target)),
+    );
+    return target;
+  }
+
+  private queueApply(target: Target): void {
+    if (target.page.closed || this.disposed) return;
+    target.queue = target.queue.then(() => this.apply(target)).then(undefined, () => {});
+  }
+
+  /** Whether any client needs requests of the tab paused now. */
+  private wanted(tabId: string): boolean {
+    return this.clients.some(c => this.guard(c, 'patterns', () => c.patterns(tabId), []).length > 0);
   }
 
   private async apply(target: Target): Promise<void> {
@@ -196,9 +257,10 @@ export class FetchInterception implements Disposable {
         await page.send('Fetch.disable', {}, { timeoutMs: ANSWER_TIMEOUT_MS });
       }
       target.applied = want;
-      this.log.debug(`${tabId}: ${want ? `intercepting ${patterns.map(p => p.urlPattern + (p.resourceType ? ` (${p.resourceType})` : '')).join(', ')}${auth ? ' + logins' : ''}` : 'interception off'}`);
+      // One line per tab, not per frame: a page can have dozens of frames.
+      if (!target.frame) this.log.debug(`${tabId}: ${want ? `intercepting ${patterns.map(p => p.urlPattern + (p.resourceType ? ` (${p.resourceType})` : '')).join(', ')}${auth ? ' + logins' : ''}` : 'interception off'}`);
     } catch (err) {
-      if (!page.closed) this.log.warn(`${tabId}: could not ${want ? 'enable' : 'disable'} request interception: ${errorText(err)}`);
+      if (!page.closed) this.log.warn(`${tabId}${target.frame ? ' (a frame)' : ''}: could not ${want ? 'enable' : 'disable'} request interception: ${errorText(err)}`);
     }
   }
 
@@ -302,15 +364,22 @@ export class FetchInterception implements Disposable {
     }
   }
 
+  /** The target's connection closed (or is replaced): the browser has dropped what it paused there; stop deciding about it. */
   private drop(target: Target): void {
     for (const { controller } of target.pending.values()) controller.abort();
     for (const s of target.subscriptions.splice(0)) s.dispose();
-    if (this.targets.get(target.page.tabId) === target) this.targets.delete(target.page.tabId);
+    const tabId = target.page.tabId;
+    if (this.targets.get(tabId) === target) this.targets.delete(tabId);
+    const set = this.frames.get(tabId);
+    if (set?.delete(target) && set.size === 0) {
+      this.frames.delete(tabId);
+      this.overflowed.delete(tabId);
+    }
   }
 
   dispose(): void {
     this.disposed = true;
-    for (const target of [...this.targets.values()]) {
+    for (const target of [...this.targets.values(), ...[...this.frames.values()].flatMap(set => [...set])]) {
       const wasActive = !!target.applied;
       const answered = this.answerAll(target);
       this.drop(target);

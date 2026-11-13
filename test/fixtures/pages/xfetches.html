@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Fetching frames fixture</title>
+<style>body { font: 13px sans-serif; margin: 8px; } iframe { display: block; margin: 4px 0; }</style></head>
+<body>
+<!-- ?b=<second origin>&c=<third origin>&n=<extra frames>. A fetching frame from b with a nested one from c;
+     "Add frame" appends another fetching frame from b later; ?n adds that many more at load. -->
+<h1>Fetching frames</h1>
+<button id="add" onclick="add('later')">Add frame</button>
+<button id="remove" onclick="document.querySelectorAll('iframe').forEach(f => f.remove())">Remove frames</button>
+<div id="frames"></div>
+<script>
+  const q = new URLSearchParams(location.search);
+  const b = q.get('b'), c = q.get('c');
+  function add(id, nested) {
+    const f = document.createElement('iframe');
+    f.id = id; f.title = 'Frame ' + id; f.width = 420; f.height = nested ? 240 : 110;
+    f.src = b + '/xfetch.html?id=' + id + (nested ? '&c=' + encodeURIComponent(c) : '');
+    document.getElementById('frames').appendChild(f);
+  }
+  add('outer', true);
+  for (let i = 1; i <= Number(q.get('n') || 0); i++) add('extra' + i);
+</script>
+</body></html>
