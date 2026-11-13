@@ -78,7 +78,8 @@ test('an agent tab shows the indicator and editor badge while controlled; releas
     await a.ok('session_set_title', { title: 'marking check' });
     const me = await label(a);
     const opened = await a.ok('browser_open', { url });
-    assert.match(opened, /opened by you, controlled by you/);
+    const id = /Opened (tab-\d+)/.exec(opened)?.[1];
+    assert.match(await a.ok('browser_list_tabs'), new RegExp(`${id} .*opened by you, controlled by you`));
     const page = await openPage(hostDir, url);
     try {
       const shown = await until(async () => {

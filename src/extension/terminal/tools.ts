@@ -5,21 +5,19 @@ import { ToolError } from '../core/errors';
 import type { BridgeServices } from '../core/services';
 import type { AgentSession } from '../core/sessions';
 import { defineTool, type ToolContext, type ToolDefinition } from '../core/tools';
-import { describeInput, encodeKeys, KEY_HELP, KeyError } from './keys';
+import { describeInput, encodeKeys, KeyError } from './keys';
 import { raceTimeout, sleep, type Execution, type HandoffOutcome, type TerminalManager, type Tracked } from './manager';
 import { clipLines, DEFAULT_MAX_CHARS, formatClip, formatDuration, MAX_MAX_CHARS, shortCommand } from './render';
 
-const terminalArg = z
-  .string()
-  .optional()
-  .describe('Terminal id like "term-2" (from terminal_list or an earlier result). Omit to use your current terminal.');
+/** Without it, tools act on the session's current terminal (said once, in instructions.ts). */
+const terminalArg = z.string().optional();
 const maxCharsArg = z
   .number()
   .int()
   .min(500)
   .max(MAX_MAX_CHARS)
   .optional()
-  .describe(`Most characters of output to return (default ${DEFAULT_MAX_CHARS}). Longer output keeps its end and says how to read the rest.`);
+  .describe(`Default ${DEFAULT_MAX_CHARS}; longer output keeps its end.`);
 
 export function terminalTools(services: BridgeServices, manager: TerminalManager): ToolDefinition<any>[] {
   // ---------------------------------------------------------------- helpers
@@ -155,14 +153,12 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
       name: 'terminal_run',
       title: 'Run a command in a terminal',
       description:
-        'Runs a shell command in a real VS Code terminal that the user watches and can type into, and returns what the terminal displayed (rendered: progress bars, colors and cursor movement are resolved) plus the exit code. ' +
-        'Without `terminal` it uses your current terminal, opening one named after your session the first time; if that one is busy, another free terminal of yours (or a new one) is used and the result says so. ' +
-        'If the command is still running after `timeout_seconds` (dev servers, watchers, a prompt waiting for input), the call returns what it printed so far and the command KEEPS RUNNING: then use terminal_wait, terminal_read, terminal_send or terminal_interrupt. For servers and watchers pass a short timeout (5-10). ' +
-        'Long output keeps its end and says how to read the rest. One command at a time per terminal. If the command needs a password, a login or another human decision, use terminal_request_user_input instead.',
+        'Runs a shell command in a VS Code terminal the user can watch (default: your current one, opened when needed) and returns its output and exit code. ' +
+        'A command still running after timeout_seconds keeps running: continue with terminal_wait, terminal_read, terminal_send or terminal_interrupt.',
       input: {
-        command: z.string().min(1).describe('The command line, as typed at the prompt (in the terminal\'s shell: bash/zsh, PowerShell or cmd).'),
+        command: z.string().min(1).describe("As typed at the prompt of the terminal's shell."),
         terminal: terminalArg,
-        timeout_seconds: z.number().min(1).max(600).optional().describe('How long to wait for the command to finish before returning while it keeps running (default 60).'),
+        timeout_seconds: z.number().min(1).max(600).optional().describe('Default 60; 5-10 for servers and watchers.'),
         max_chars: maxCharsArg,
       },
       handler: async (args, ctx) => {
@@ -192,11 +188,11 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
       name: 'terminal_read',
       title: 'Read terminal output',
       description:
-        'Reads a terminal without changing it. what="new" (default): output since your last look at this terminal. what="command": the full output of the current or most recent command, from `from_line` (1-based) for paging through long output. what="screen": the visible screen as the user sees it, for full-screen programs (editors, pagers, top) and menus. Also says what the terminal is doing (working, probably waiting for input, idle).',
+        'Reads a terminal and says what it is doing. what: "new" (default) output since your last look, "command" the latest command\'s whole output, "screen" the visible screen.',
       input: {
         terminal: terminalArg,
-        what: z.enum(['new', 'command', 'screen']).optional().describe('"new" (default), "command" or "screen".'),
-        from_line: z.number().int().min(1).optional().describe('With what="command": first line to return (1-based); returns forward from there.'),
+        what: z.enum(['new', 'command', 'screen']).optional(),
+        from_line: z.number().int().min(1).optional().describe('With what "command": first line (1-based), for paging.'),
         max_chars: maxCharsArg,
       },
       annotations: { readOnlyHint: true },
@@ -230,11 +226,11 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
       name: 'terminal_wait',
       title: 'Wait for a terminal',
       description:
-        'Waits until the running command in a terminal finishes, or, with `for_text`, until that text appears in new output (e.g. "Listening on" or "ready" for a dev server). Returns the new output since your last look, the exit code if it finished, and what the terminal is doing if the wait timed out.',
+        'Waits until the terminal\'s command finishes or, with for_text, until that text appears in new output (e.g. "ready" for a dev server), and returns the new output.',
       input: {
         terminal: terminalArg,
-        for_text: z.string().min(1).optional().describe('Regular expression (or plain text) to wait for in new output, case-insensitive.'),
-        timeout_seconds: z.number().min(1).max(600).optional().describe('Longest wait (default 60).'),
+        for_text: z.string().min(1).optional().describe('Regex or plain text, case-insensitive.'),
+        timeout_seconds: z.number().min(1).max(600).optional().describe('Default 60.'),
         max_chars: maxCharsArg,
       },
       annotations: { readOnlyHint: true },
@@ -277,13 +273,12 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
       name: 'terminal_send',
       title: 'Type into a terminal',
       description:
-        `Types text and/or presses keys in a terminal: answering a prompt ("y" + Enter), driving a menu (Down, Enter), or a full-screen program. Keys: ${KEY_HELP}. ` +
-        'Text is typed as is; add keys ["Enter"] to submit. Returns the output that followed (waits briefly for it to settle). To run a new command use terminal_run instead. Never type passwords, tokens or other secrets you were not given for this purpose: use terminal_request_user_input so the user types them.',
+        'Types text and/or presses keys in a terminal, to answer a prompt or drive a menu or full-screen program, and returns the output that followed. Text is typed as is; add keys ["Enter"] to submit. Never type secrets you were not given.',
       input: {
         terminal: terminalArg,
-        text: z.string().optional().describe('Text to type.'),
-        keys: z.array(z.string()).optional().describe('Keys to press after the text, in order, e.g. ["Enter"] or ["Down", "Down", "Enter"] or ["Ctrl+D"].'),
-        wait_seconds: z.number().min(0).max(30).optional().describe('Longest wait for the response to settle (default 2).'),
+        text: z.string().optional(),
+        keys: z.array(z.string()).optional().describe('Pressed after the text, e.g. ["Down", "Enter"], ["Ctrl+C"], ["Escape"].'),
+        wait_seconds: z.number().min(0).max(30).optional().describe('Longest wait for output to settle, default 2.'),
         max_chars: maxCharsArg,
       },
       handler: async (args, ctx) => {
@@ -316,7 +311,7 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
     defineTool({
       name: 'terminal_interrupt',
       title: 'Interrupt a terminal command',
-      description: 'Presses Ctrl+C in a terminal to stop the running command, waits up to 5 seconds for it to end, and reports the result and the last output.',
+      description: 'Presses Ctrl+C in a terminal to stop its command, waits up to 5 s for it to end, and returns the last output.',
       input: { terminal: terminalArg, max_chars: maxCharsArg },
       handler: async (args, ctx) => {
         const t = await existing(ctx, args.terminal);
@@ -337,15 +332,13 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
       name: 'terminal_request_user_input',
       title: 'Hand the terminal to the user',
       description:
-        'Asks the user to do something in a terminal that you must not or cannot do yourself: type a password or passphrase, enter a 2FA code, finish a browser or device login (gh auth login, npm login, az login, sudo ...), or make a decision at an interactive prompt. ' +
-        'Optionally starts `command` for them first. The terminal is brought into view and focus, and the user gets a notification naming your session with your `message` and the buttons Done and Won\'t Do. ' +
-        'Returns when the started command finishes, when the user clicks Done or Won\'t Do, or on timeout, with the terminal output since the request. You never see what the user types beyond what the terminal itself displays, so passwords typed at hidden prompts stay private. ' +
-        'ALWAYS use this instead of asking for passwords, tokens or codes in chat, and instead of guessing them. If a command you ran is already waiting at such a prompt, call this without `command` on that terminal.',
+        'Hands a terminal to the user for what you must not or cannot do: a password, a 2FA code, a login (gh auth login, sudo ...) or a decision at a prompt. ' +
+        'Optionally starts `command` first (omit it when a prompt is already waiting). Returns when it ends or the user clicks Done or Won\'t Do, with the output; what the user types stays private.',
       input: {
-        message: z.string().min(1).max(300).describe('What the user should do, one or two short sentences, e.g. "Log in to GitHub: pick HTTPS and finish the login in the browser."'),
-        command: z.string().optional().describe('A command to start for the user first, e.g. "gh auth login". Omit if the prompt is already showing.'),
+        message: z.string().min(1).max(300).describe('One or two sentences, e.g. "Log in to GitHub: pick HTTPS and finish in the browser."'),
+        command: z.string().optional(),
         terminal: terminalArg,
-        timeout_seconds: z.number().min(10).max(3600).optional().describe('Longest wait for the user (default 600).'),
+        timeout_seconds: z.number().min(10).max(3600).optional().describe('Default 600.'),
         max_chars: maxCharsArg,
       },
       handler: async (args, ctx) => {
@@ -386,13 +379,13 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
       name: 'terminal_create',
       title: 'Open a terminal',
       description:
-        'Opens a new terminal for your session, visible to the user in the terminal panel, named after your session and in your session\'s color. It becomes your current terminal. You rarely need this: terminal_run opens one when needed. Use it for a second terminal (e.g. one for a dev server, one for commands), a different working directory, or extra environment variables. Pagers are disabled (PAGER=cat, GIT_PAGER=cat) unless you set them.',
+        'Opens another terminal for your session, which becomes your current one, e.g. for a dev server, another directory or environment. Pagers are off (PAGER=cat).',
       input: {
-        name: z.string().max(40).optional().describe('Short purpose, e.g. "dev server". Shown as "<your session>: <name>".'),
-        cwd: z.string().optional().describe('Working directory (absolute path). Default: your working directory or the workspace folder.'),
-        env: z.record(z.string(), z.string()).optional().describe('Extra environment variables for the shell.'),
-        shell: z.string().optional().describe('Shell executable instead of the user\'s default terminal profile, e.g. "bash", "/bin/zsh", "pwsh". Shell integration (exit codes) works with bash, zsh, fish and PowerShell.'),
-        shell_args: z.array(z.string()).optional().describe('Arguments for `shell`.'),
+        name: z.string().max(40).optional().describe('e.g. "dev server".'),
+        cwd: z.string().optional().describe('Absolute path; default your working directory.'),
+        env: z.record(z.string(), z.string()).optional(),
+        shell: z.string().optional().describe('e.g. "bash", "pwsh"; default the user\'s profile. Exit codes need bash, zsh, fish or PowerShell.'),
+        shell_args: z.array(z.string()).optional(),
       },
       handler: async (args, ctx) => {
         await manager.ready;
@@ -411,7 +404,7 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
       name: 'terminal_list',
       title: 'List terminals',
       description:
-        'Lists the terminals of this VS Code window: yours, other agent sessions\' and the user\'s, with state (idle, running, waiting-for-user), the running command and last exit code where you may see them, and whether you may use them. Using the user\'s or another session\'s terminal asks the user first.',
+        'Lists this window\'s terminals with owner, state, running command and last exit code.',
       input: {},
       annotations: { readOnlyHint: true },
       handler: async (_args, ctx) => {
@@ -450,8 +443,8 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
     defineTool({
       name: 'terminal_close',
       title: 'Close a terminal',
-      description: 'Closes one of your terminals, stopping whatever runs in it. Close terminals you no longer need, but leave ones the user may still want to read (e.g. a running dev server they use). The user\'s own terminals and other sessions\' terminals cannot be closed by agents.',
-      input: { terminal: z.string().describe('Terminal id, e.g. "term-3".') },
+      description: 'Closes one of your terminals and stops what runs in it. Leave open the ones the user may still use, such as a running dev server.',
+      input: { terminal: z.string() },
       annotations: { destructiveHint: true },
       handler: async (args, ctx) => {
         await manager.ready;

@@ -8,10 +8,11 @@ import { clip } from './ringBuffer';
 import { elementArgs, tabArg } from './schema';
 import { fullPageHeight, screenshotScale } from './screenshotMath';
 import { TOGGLE_BRIDGE_UI } from './scripts';
-import { renderSnapshot, type AXNode } from './snapshot';
+import { buildTree, findInTree, renderText, renderTree, snapshotLines, textWindow, type AXNode, type RefNode, type Tree } from './snapshot';
 import { elementBox, resolveTarget, scrollIntoView, viewport, type ElementTarget } from './targets';
 
 const DEFAULT_SNAPSHOT_CHARS = 20_000;
+const DEFAULT_FIND_CHARS = 6000;
 const MAX_SNAPSHOT_CHARS = 60_000;
 const MAX_FRAMES = 25;
 
@@ -60,8 +61,17 @@ async function domFacts(call: PageCall): Promise<DomFacts | undefined> {
   return facts;
 }
 
-export async function snapshotText(call: PageCall, root: ElementTarget | undefined, maxChars: number): Promise<string> {
+export interface PageCapture {
+  tree: Tree;
+  title: string;
+  url: string;
+  loaderId: string | undefined;
+}
+
+/** Reads the page's accessibility tree (main frame and same-process frames) into a Tree. */
+export async function capturePage(call: PageCall, root?: number): Promise<PageCapture> {
   const { state } = call;
+  const loaderId = state.loaderId;
   const facts = (await domFacts(call)) ?? { pointer: new Set<number>(), hidden: new Set<number>(), frameOwners: new Map<number, string>() };
   const mainFrameId = state.mainFrameId ?? (await call.send('Page.getFrameTree')).frameTree.frame.id;
   const frames = new Map<string, AXNode[]>();
@@ -91,56 +101,96 @@ export async function snapshotText(call: PageCall, root: ElementTarget | undefin
       }
     }),
   );
-
-  const loaderId = state.loaderId;
-  const output = renderSnapshot({
-    frames,
-    mainFrameId,
-    frameOwners: facts.frameOwners,
-    pointer: facts.pointer,
-    hidden: facts.hidden,
-    root: root?.backendNodeId,
-    maxChars,
-    pageUrl: state.url,
-    refFor: node => call.refs.assign(node, loaderId),
-  });
+  const tree = buildTree({ frames, mainFrameId, frameOwners: facts.frameOwners, pointer: facts.pointer, hidden: facts.hidden, root, pageUrl: state.url });
   const title = String(main.nodes.find(n => n.role?.value === 'RootWebArea')?.name?.value ?? '');
-  const scope = root ? `- Part of the page: ${root.label}\n` : '';
-  const body = output.text || (root ? '(this element has no accessible content)' : '(the page is empty)');
-  if (root && !output.rootFound) {
-    return `- Page URL: ${state.url}\n- Page Title: ${title}\n${scope}(${root.label} is not part of the accessibility tree: it is hidden or presentational. Pick a visible container instead.)`;
+  return { tree, title, url: state.url, loaderId };
+}
+
+/** Remembers a whole-page capture as what this session last saw of the page (see changes.ts). */
+export function rememberPage(call: PageCall, capture: PageCapture): { loaderId: string | undefined; lines: string[] } {
+  const seen = { loaderId: capture.loaderId, lines: snapshotLines(capture.tree, capture.url) };
+  call.env.baselines.set(call.sessionTabKey, seen);
+  return seen;
+}
+
+interface ReadArgs {
+  mode?: 'snapshot' | 'text';
+  find?: string;
+  urls?: boolean;
+  offset?: number;
+  maxChars?: number;
+}
+
+/** browser_snapshot's result for a capture. */
+export function readResult(call: PageCall, capture: PageCapture, root: ElementTarget | undefined, args: ReadArgs): string {
+  const { tree, title, url } = capture;
+  const head = `- Page URL: ${clip(url, 500)}\n- Page Title: ${clip(title, 200)}\n`;
+  if (root && !tree.rootFound) {
+    return `${head}(${root.label} is not part of the accessibility tree: it is hidden or presentational. Pick a visible container instead.)`;
   }
-  return `- Page URL: ${clip(state.url, 500)}\n- Page Title: ${clip(title, 200)}\n${scope}- Snapshot of ${call.tab.id}:\n\`\`\`yaml\n${body}\n\`\`\``;
+  const scope = root ? `- Part of the page: ${root.label}\n` : '';
+  const maxChars = args.maxChars ?? (args.find !== undefined ? DEFAULT_FIND_CHARS : DEFAULT_SNAPSHOT_CHARS);
+  const refFor = (node: RefNode) => call.refs.assign(node, capture.loaderId);
+  const options = { refFor, maxChars, urls: args.urls, pageUrl: url, offset: args.offset };
+
+  if (args.find !== undefined) {
+    const found = findInTree(tree, args.find, options);
+    if (found.matches === 0) return `${head}${scope}Nothing in ${call.tab.id} matches "${clip(args.find, 100)}" (names, values and text${args.urls ? ' and link targets' : ''} of ${root ? 'that part' : 'the whole page'} were searched, case-insensitive).`;
+    const more = found.matches > found.shown ? `\n[${found.matches - found.shown} more matches not shown: make find more specific, or raise maxChars.]` : '';
+    return `${head}${scope}- ${found.matches} match${found.matches === 1 ? '' : 'es'} for "${clip(args.find, 100)}" in ${call.tab.id}:\n\`\`\`yaml\n${found.text}\n\`\`\`${more}`;
+  }
+
+  if (args.mode === 'text') {
+    const rendered = renderText(tree);
+    const what = root ? 'that part' : rendered.scope;
+    if (!rendered.text) return `${head}${scope}${what === 'the whole page' ? 'The page shows no text.' : `There is no text in ${what}.`} Use browser_snapshot without mode to see its elements.`;
+    const win = textWindow(rendered.text, args.offset ?? 0, maxChars);
+    const left = root || rendered.scope === 'the whole page' ? 'controls left out' : 'menus, sidebars and controls left out';
+    const cut = win.end < win.total ? `\n[Cut at character ${win.end} of ${win.total}: call again with offset ${win.end} to read on.]` : '';
+    return `${head}${scope}- Text of ${what} in ${call.tab.id} (${left}; browser_snapshot without mode gives refs to act on):\n${win.text}${cut}`;
+  }
+
+  const output = renderTree(tree, options);
+  const body = output.text || (root ? '(this element has no accessible content)' : '(the page is empty)');
+  const urlsNote = output.urlsOmitted ? '\n[Link targets are left out; pass urls: true to see them.]' : '';
+  return `${head}${scope}- Snapshot of ${call.tab.id}:\n\`\`\`yaml\n${body}\n\`\`\`${urlsNote}`;
 }
 
 export function snapshotTools(env: PageEnv): ToolDefinition<any>[] {
   return [
     defineTool({
       name: 'browser_snapshot',
-      title: 'Read page (accessibility snapshot)',
+      title: 'Read page',
       description:
-        'Returns a text snapshot of the page from its accessibility tree: roles, names, values and states, one element per line, each with a ref (e.g. [ref=e12]) that browser_click, browser_type and the other action tools accept. Better than a screenshot for finding and acting on elements. Includes same-origin iframes and shadow DOM. Large pages are cut at maxChars with a list of the parts left out; pass ref or selector to read just one part.',
+        'Reads the page: an accessibility snapshot with a ref (e.g. [ref=e12]) on each element you can act on, for the action tools. mode "text" returns just the readable text, find just the matching elements.',
       input: {
+        mode: z.enum(['snapshot', 'text']).optional().describe('text: main content as markdown, no refs; cheapest for reading.'),
+        find: z.string().min(1).optional().describe('Only elements whose text contains this, with where they are.'),
         ...elementArgs,
-        maxChars: z.number().int().min(2000).max(MAX_SNAPSHOT_CHARS).optional().describe(`Size budget in characters. Default ${DEFAULT_SNAPSHOT_CHARS}.`),
+        urls: z.boolean().optional().describe('Show all link targets.'),
+        offset: z.number().int().min(0).optional().describe('Continue a cut result from this character.'),
+        maxChars: z.number().int().min(2000).max(MAX_SNAPSHOT_CHARS).optional().describe(`Default ${DEFAULT_SNAPSHOT_CHARS}.`),
         tab: tabArg,
       },
       annotations: { readOnlyHint: true },
       handler: (args, ctx) =>
         withPage(env, ctx, args.tab, { access: 'read' }, async call => {
+          if (args.find !== undefined && args.mode === 'text') throw new ToolError('invalid_input', 'Pass either find or mode "text", not both.');
+          if (args.find !== undefined && !args.find.trim()) throw new ToolError('invalid_input', 'find needs some text to look for.');
           const root = (await resolveTarget(call, args, { waitMs: 0 })) as ElementTarget | undefined;
-          return snapshotText(call, root, args.maxChars ?? DEFAULT_SNAPSHOT_CHARS);
+          const capture = await capturePage(call, root?.backendNodeId);
+          if (!root) rememberPage(call, capture);
+          return readResult(call, capture, root, args);
         }),
     }),
     defineTool({
       name: 'browser_screenshot',
       title: 'Screenshot page',
-      description:
-        "Takes a screenshot of the visible part of the page (default), the full page, or one element, and returns it as an image sized for reading (at most ~1568 px on the long edge). Use it to check layout and visual state; use browser_snapshot to find elements to act on. The bridge's own session indicator is hidden in the image.",
+      description: 'Takes a screenshot of the viewport, the full page or one element, to check layout and visual state.',
       input: {
         ...elementArgs,
-        fullPage: z.boolean().optional().describe('Capture the whole scrollable page instead of the viewport. Very tall pages are cut at the bottom to stay readable.'),
-        format: z.enum(['jpeg', 'png']).optional().describe('Default jpeg (smaller). png for pixel-exact text and colors.'),
+        fullPage: z.boolean().optional(),
+        format: z.enum(['jpeg', 'png']).optional().describe('Default jpeg; png for exact pixels.'),
         tab: tabArg,
       },
       annotations: { readOnlyHint: true },
@@ -191,9 +241,9 @@ export function snapshotTools(env: PageEnv): ToolDefinition<any>[] {
           const h = Math.round(region.height * scale);
           const mapping =
             !target && !args.fullPage
-              ? scale === 1 ? ' Image pixels are viewport CSS pixels, so a point in it can be passed as x/y to browser_click.' : ` To click a point in it, divide its image coordinates by ${scale.toFixed(3)} and pass them as x/y to browser_click.`
+              ? scale === 1 ? ' Its pixels are CSS px: usable as x/y for browser_click.' : ` For browser_click x/y, divide its coordinates by ${scale.toFixed(3)}.`
               : '';
-          return [image(data, `image/${format}`), text(`Screenshot of ${what} in ${call.tab.id} (${w}×${h} px; viewport ${Math.round(vp.width)}×${Math.round(vp.height)} CSS px).${mapping}${cut}`)];
+          return [image(data, `image/${format}`), text(`Screenshot of ${what} in ${call.tab.id}, ${w}×${h} px.${mapping}${cut}`)];
         }),
     }),
   ];

@@ -82,7 +82,10 @@ export async function describeEffects(call: PageCall, mark: ActionMark): Promise
     }
   }
 
-  const consoleEntries = state.console.entries.after(mark.seq);
+  // After a navigation, only what the new document logged and requested counts: messages and failed
+  // requests of the page being left (aborted fetches, unload errors) say nothing about the new one.
+  const committed = [...navs].reverse().find(n => !n.sameDocument && n.loaderId === state.loaderId);
+  const consoleEntries = state.console.entries.after(committed ? committed.seq : mark.seq);
   // "Failed to load resource" duplicates the failed request reported below.
   const errors = consoleEntries.filter(e => e.level === 'error' && !(e.source === 'browser' && e.text.startsWith('Failed to load resource')));
   const warnings = consoleEntries.filter(e => e.level === 'warning');
@@ -90,7 +93,9 @@ export async function describeEffects(call: PageCall, mark: ActionMark): Promise
   const extra = [errors.length > 3 ? `${errors.length - 3} more errors` : '', warnings.length ? `${warnings.length} warning${warnings.length > 1 ? 's' : ''}` : ''].filter(Boolean);
   if (extra.length) lines.push(`Console also has ${extra.join(' and ')} (browser_console_messages shows them).`);
 
-  const failures = state.network.entries.after(mark.seq).filter(e => isFailure(e) && !(e.loaderId && e.requestId === e.loaderId && e.status !== undefined));
+  const failures = state.network.entries
+    .after(mark.seq)
+    .filter(e => isFailure(e) && !(e.loaderId && e.requestId === e.loaderId && e.status !== undefined) && !(committed && e.loaderId !== undefined && e.loaderId !== state.loaderId));
   for (const f of failures.slice(0, 3)) lines.push(`Request failed: ${f.method} ${clip(f.url, 200)} → ${f.failed ?? `HTTP ${f.status}`} (${f.id}).`);
   if (failures.length > 3) lines.push(`${failures.length - 3} more requests failed (browser_network_requests with status "failed").`);
 

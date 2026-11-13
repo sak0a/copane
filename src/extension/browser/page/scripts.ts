@@ -370,3 +370,20 @@ export function wrapUserFunction(source: string): string {
   return typeof __f === 'function' ? await __f(element) : await __f;
 }`;
 }
+
+/**
+ * With `this` = an element of the main frame: whether the page's own hit test at viewport (x, y)
+ * lands on it or inside it (through open shadow roots). False for elements in frames.
+ */
+export const PAGE_HIT_TEST = `function (x, y) {
+  const view = this.ownerDocument.defaultView;
+  if (!view || view !== view.top) return false;
+  let el = this.ownerDocument.elementFromPoint(x, y);
+  while (el && el.shadowRoot) {
+    const inner = el.shadowRoot.elementFromPoint(x, y);
+    if (!inner || inner === el) break;
+    el = inner;
+  }
+  for (let n = el; n; n = n.parentNode || n.host) if (n === this) return true;
+  return false;
+}`;

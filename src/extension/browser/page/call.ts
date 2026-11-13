@@ -15,6 +15,8 @@ export interface PageEnv {
   refs: RefStore;
   /** Read cursors for console and network, per `${sessionId}\0${tabId}`. */
   cursors: Map<string, { console: number; network: number }>;
+  /** The page as this session last saw it, per `${sessionId}\0${tabId}`: what action results compare against. */
+  baselines: Map<string, { loaderId: string | undefined; lines: string[] }>;
 }
 
 /** An object handle argument for `callOn`. */
@@ -42,6 +44,11 @@ export class PageCall {
 
   get signal(): AbortSignal {
     return this.ctx.signal;
+  }
+
+  /** Key of per-session, per-tab state (cursors, baselines). */
+  get sessionTabKey(): string {
+    return `${this.ctx.session.id}\u0000${this.tab.id}`;
   }
 
   /** This session's refs for this tab. */
@@ -252,7 +259,9 @@ export async function keepPageActive(call: PageCall): Promise<void> {
 export async function ensureReady(call: PageCall, timeoutMs = 10_000): Promise<void> {
   const { state } = call;
   if (state.crashed) throw new ToolError('failed', `The page in ${call.tab.id} crashed. Reload it with browser_history (action "reload").`);
-  const expectsNavigation = () => state.url === 'about:blank' && call.tab.url !== '' && !call.tab.url.startsWith('about:');
+  // A tab that was just opened starts on an empty document ("" or about:blank) until its first
+  // navigation commits; reading it before then would show an empty page.
+  const expectsNavigation = () => (state.url === '' || state.url === 'about:blank') && call.tab.url !== '' && !call.tab.url.startsWith('about:');
   await state.waitFor(() => state.lifecycleOf().has('DOMContentLoaded') && !expectsNavigation(), { timeoutMs, signal: call.signal });
   try {
     await call.evaluate('function () { return 1; }', [], { timeoutMs: 3000 });

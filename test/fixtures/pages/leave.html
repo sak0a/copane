@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Leave fixture</title></head>
+<body>
+<h1>Leave</h1>
+<p><a id="next" href="/slow?ms=800">Slow next page</a></p>
+<script>
+  // Keeps logging errors and failing requests, also while the next page is loading (it takes 800 ms):
+  // those belong to this page, not to the next one.
+  setInterval(() => {
+    console.error('error from the page being left');
+    fetch('/status/503?leaving').catch(() => {});
+  }, 100);
+</script>
+</body></html>

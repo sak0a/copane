@@ -12,7 +12,7 @@ export function activateSessionTools(services: BridgeServices): void {
         name: 'session_info',
         title: 'Session info',
         description:
-          'Shows who you are in this VS Code window (your session label and color, as the user sees them on your tabs and terminals), the window and workspace, and the other agent sessions connected to it.',
+          'Shows your session label and color as the user sees them, the window and workspace, and the other agent sessions in it.',
         input: {},
         annotations: { readOnlyHint: true },
         handler: (_args, ctx) =>
@@ -32,8 +32,8 @@ export function activateSessionTools(services: BridgeServices): void {
         name: 'session_set_title',
         title: 'Name this session',
         description:
-          'Sets a short title (2-5 words) for what this session is working on, e.g. "checkout flow tests". The user sees it next to your label on your browser tabs and terminals, which helps when several agent sessions run at once. Call it once near the start of a task.',
-        input: { title: z.string().max(60).describe('Short task summary. Empty string clears it.') },
+          'Sets a 2-5 word title for your task (e.g. "checkout flow tests"), shown next to your label on your tabs and terminals. Call it once near the start of a task.',
+        input: { title: z.string().max(60).describe('Empty clears it.') },
         annotations: { idempotentHint: true },
         handler: (args, ctx) => {
           sessions.setTitle(ctx.session.id, args.title);

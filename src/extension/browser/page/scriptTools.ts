@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ToolError } from '../../core/errors';
 import { defineTool, type ToolDefinition } from '../../core/tools';
 import { exceptionText, withPage, type PageCall, type PageEnv } from './call';
+import { describeChanges, pageBefore } from './changes';
 import { markAction, report, settle } from './effects';
 import { DialogInterrupt } from './pageState';
 import { clip } from './ringBuffer';
@@ -27,10 +28,9 @@ export function scriptTools(env: PageEnv): ToolDefinition<any>[] {
     defineTool({
       name: 'browser_evaluate',
       title: 'Run JavaScript in page',
-      description:
-        "Runs JavaScript in the page's own context and returns the result: an expression (\"document.title\"), statements, or a function (\"() => ...\", awaited if async). With ref/selector the function gets that element as its argument: \"(el) => el.getBoundingClientRect()\". Strings come back as-is, other values as JSON (DOM nodes described, size-limited). Prefer the dedicated tools for clicking and typing; use this for reading state or what no tool covers.",
+      description: 'Runs JavaScript in the page and returns the result: an expression, statements or a function (awaited). With ref/selector a function gets the element: "(el) => el.value".',
       input: {
-        function: z.string().min(1).describe('JavaScript expression, statements, or function source.'),
+        function: z.string().min(1),
         ...elementArgs,
         tab: tabArg,
       },
@@ -81,16 +81,16 @@ export function scriptTools(env: PageEnv): ToolDefinition<any>[] {
     defineTool({
       name: 'browser_handle_dialog',
       title: 'Answer dialog',
-      description:
-        'Answers the JavaScript dialog (alert, confirm, prompt, or "leave this page?") that blocks the tab. While a dialog is open, other tools on the tab fail and tell you so. The user does not see these dialogs in VS Code, so answer them yourself.',
+      description: 'Answers the alert, confirm, prompt or "leave this page?" dialog that blocks the tab. The user does not see these dialogs.',
       input: {
-        accept: z.boolean().describe('true = OK / Leave, false = Cancel / Stay.'),
-        promptText: z.string().optional().describe('For a prompt: the text to answer with.'),
+        accept: z.boolean().describe('OK / Leave, or Cancel / Stay.'),
+        promptText: z.string().optional(),
         tab: tabArg,
       },
       handler: (args, ctx) =>
         withPage(env, ctx, args.tab, { access: 'control', allowDialog: true, skipReady: true }, async call => {
           const dialog = call.state.dialog;
+          const before = await pageBefore(call, { cachedOnly: true });
           const mark = markAction(call);
           try {
             await call.send('Page.handleJavaScriptDialog', { accept: args.accept, ...(args.promptText !== undefined ? { promptText: args.promptText } : {}) }, { allowDialog: true, timeoutMs: 5000 });
@@ -101,8 +101,9 @@ export function scriptTools(env: PageEnv): ToolDefinition<any>[] {
           }
           const what = dialog ? `the ${dialog.type} dialog${dialog.message ? ` "${clip(dialog.message, 200)}"` : ''}` : 'the dialog';
           const verb = args.accept ? 'Accepted' : 'Dismissed';
-          const effects = await settle(call, { ...mark, seq: mark.seq }, {});
-          return report(`${verb} ${what}${args.promptText !== undefined && args.accept ? ` with "${clip(args.promptText, 100)}"` : ''}.`, effects);
+          const effects = await settle(call, mark, {});
+          const changes = await describeChanges(call, before);
+          return report(`${verb} ${what}${args.promptText !== undefined && args.accept ? ` with "${clip(args.promptText, 100)}"` : ''}.`, [...effects, ...changes]);
         }),
     }),
   ];

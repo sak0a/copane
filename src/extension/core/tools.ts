@@ -61,7 +61,8 @@ export class ToolRegistry {
     for (const definition of definitions) {
       if (this.tools.has(definition.name) || batch.has(definition.name)) throw new Error(`tool "${definition.name}" is already registered`);
       const schema = z.object(definition.input);
-      const { $schema: _ignored, ...inputSchema } = z.toJSONSchema(schema) as Record<string, unknown>;
+      const { $schema: _ignored, additionalProperties: _closed, ...inputSchema } = z.toJSONSchema(schema) as Record<string, unknown>;
+      dropDefaultBounds(inputSchema);
       batch.set(definition.name, {
         definition,
         schema,
@@ -102,6 +103,22 @@ export class ToolRegistry {
       ctx.log.error(`tool ${name} failed`, err);
       return errorResult(`${name} failed: ${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+}
+
+/**
+ * Removes what zod adds to every schema without telling the agent anything: the safe-integer bounds
+ * of `.int()` fields. (`additionalProperties: false` is dropped at the top level above.) Tool
+ * definitions are part of every conversation, so every character counts.
+ */
+function dropDefaultBounds(node: unknown): void {
+  if (!node || typeof node !== 'object') return;
+  const n = node as Record<string, unknown>;
+  if (n.maximum === Number.MAX_SAFE_INTEGER) delete n.maximum;
+  if (n.minimum === Number.MIN_SAFE_INTEGER) delete n.minimum;
+  for (const value of Object.values(n)) {
+    if (Array.isArray(value)) value.forEach(dropDefaultBounds);
+    else dropDefaultBounds(value);
   }
 }
 
