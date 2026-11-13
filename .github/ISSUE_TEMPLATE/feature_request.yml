@@ -1,0 +1,21 @@
+name: Feature request
+description: Something an agent or you should be able to do with Copane.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What do you want to do?
+      description: The task you or your agent were trying to get done, and where Copane falls short. A concrete example helps more than a proposed solution.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Ideas for how it could work
+  - type: textarea
+    id: status
+    attributes:
+      label: Status report (optional)
+      description: The output of **Copane: Copy Status Report**, if your setup matters for this.
+      render: markdown

@@ -16,6 +16,7 @@ facts about the VS Code APIs this builds on.
 
     node scripts/ui.mjs --name <n> shot|text|eval   # look at the dev host's UI (screenshot, DOM) without touching the desktop
     node test/e2e/<module>.e2e.mjs --name <n>       # end-to-end cases against a running dev host
+    node scripts/e2e.mjs [suite...] [--vscode insiders]  # suites on fresh dev hosts, as CI runs them
 
 `--session <key>` makes separate calls one agent session; use two keys to act as two agents.
 In a dev host two extra tools exist (`core/debugTools.ts`): `debug_vscode_command` runs any VS Code
@@ -46,4 +47,7 @@ After changing extension code, restart the dev host (`--stop`, then start) to lo
 - Every module leaves a repeatable `test/e2e/<module>.e2e.mjs` built on `test/e2e/harness.mjs`
   (see `core.e2e.mjs`) that passes against a fresh dev host. Fixture pages and servers it needs live
   in `test/fixtures/` and are started by the test itself on a free port.
+  A case that needs something a machine may lack (a command, IPv6 loopback, a public site) declares it
+  with `test(name, fn, { skip: reason })` so it reports `SKIP` with the reason; new suites go into
+  `SUITES` in `scripts/e2e.mjs`, which CI (`.github/workflows/`) runs.
 - TypeScript strict, no new runtime dependencies without a reason (they are bundled into the VSIX).

@@ -12,6 +12,7 @@
   <a href="https://marketplace.visualstudio.com/items?itemName=saka.copane"><img src="https://vsmarketplacebadges.dev/version-short/saka.copane.svg" alt="VS Marketplace version"></a>
   <a href="https://marketplace.visualstudio.com/items?itemName=saka.copane"><img src="https://vsmarketplacebadges.dev/installs-short/saka.copane.svg" alt="VS Marketplace installs"></a>
   <a href="https://github.com/sak0a/copane/releases"><img src="https://img.shields.io/github/v/release/sak0a/copane?include_prereleases&label=release" alt="Latest release"></a>
+  <a href="https://github.com/sak0a/copane/actions/workflows/checks.yml"><img src="https://github.com/sak0a/copane/actions/workflows/checks.yml/badge.svg?branch=main" alt="Checks"></a>
   <a href="https://github.com/sak0a/copane/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Shield%201.0.0-blue" alt="License: PolyForm Shield 1.0.0"></a>
   <img src="https://img.shields.io/badge/VS%20Code-1.140%2B-007ACC?logo=visualstudiocode&logoColor=white" alt="VS Code 1.140 or newer">
 </p>
@@ -34,7 +35,7 @@ CLI** in the integrated terminal, and with **Codex** (`codex` CLI and extension)
 
 ## Install
 
-1. Download `copane-<version>.vsix` from the [latest release](https://github.com/sak0a/copane/releases/latest)
+1. Download `copane-<version>.vsix` from the [newest release](https://github.com/sak0a/copane/releases)
    and install it: Extensions view → `…` → *Install from VSIX…*, or
    `code --install-extension copane-<version>.vsix`.
 2. When VS Code asks *"let Claude Code and Codex use this VS Code's browser tabs and terminals?"*,
@@ -296,9 +297,10 @@ Still stuck: copy the status report and the output of **Copane: Show Log** into 
 
 ## Development
 
-See `CLAUDE.md` and `docs/ARCHITECTURE.md`. `npm run check` type-checks, tests and builds;
-`node scripts/dev-host.mjs --name <name>` starts an isolated VS Code with the extension and with
-throwaway Claude Code, Codex and `argv.json` configuration.
+See [CONTRIBUTING.md](CONTRIBUTING.md), `CLAUDE.md` and `docs/ARCHITECTURE.md`. `npm run check`
+type-checks, tests and builds; `node scripts/dev-host.mjs --name <name>` starts an isolated VS Code
+with the extension and with throwaway Claude Code, Codex and `argv.json` configuration;
+`node scripts/e2e.mjs` runs the end-to-end suites.
 
 ## Acknowledgements
 
