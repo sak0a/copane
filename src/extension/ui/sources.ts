@@ -65,6 +65,17 @@ export class UiSources {
     return this.safe('list browser tabs', () => this.services.browser.listTabs(), []);
   }
 
+  /** The login profile of each session's new tabs, where it is not the default store. */
+  sessionProfiles(sessionIds: readonly string[]): Map<string, { label: string; setBy: 'user' | 'agent' | 'setting' }> {
+    const out = new Map<string, { label: string; setBy: 'user' | 'agent' | 'setting' }>();
+    if (!this.browserAvailable || !this.services.browser.sessionProfile) return out;
+    for (const id of sessionIds) {
+      const p = this.safe('read a session profile', () => this.services.browser.sessionProfile?.(id), undefined);
+      if (p) out.set(id, { label: p.name === 'default' ? 'default store' : p.label, setBy: p.setBy });
+    }
+    return out;
+  }
+
   terminals(): TerminalInfo[] {
     const real = this.safe('list terminals', () => this.services.terminals?.list() ?? [], []);
     return this.fixtures ? [...real, ...this.fixtures.list()] : real;

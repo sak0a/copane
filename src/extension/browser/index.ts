@@ -8,6 +8,7 @@ import { registerPageTools } from './page';
 import { RequestRoutes } from './routes';
 import { BrowserServiceImpl } from './service';
 import { registerTabTools } from './tabTools';
+import { activateProfiles } from './profiles';
 
 /** Integrated browser: tab tracking, CDP, consent and leases, marking, and the browser_* tools. */
 export function activateBrowser(services: BridgeServices): void {
@@ -31,4 +32,5 @@ export function activateBrowser(services: BridgeServices): void {
   const page = registerPageTools(services, browser, { interception });
   registerTabTools(services, browser, page);
   registerBrowserCommands(services, browser);
+  services.context.subscriptions.push(...activateProfiles(services, browser));
 }

@@ -95,6 +95,18 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
 
   /** Set by the certificate gate (see `BrowserService.certificateRefusal`). */
   certificateRefusal: ((url: string) => string | undefined) | undefined;
+  /**
+   * Set by login profiles (`profiles/`): opens the tab of `openTab` itself when it belongs in a separate
+   * login store, and returns it; undefined means "open it the usual way" (the window's default store).
+   * Throws a ToolError to refuse.
+   */
+  opener: ((session: AgentSession, url: string, options: { background?: boolean; profile?: string }) => Promise<vscode.BrowserTab | undefined>) | undefined;
+  /** Set by login profiles: a short note added to the in-page indicator's label ("profile dev"). */
+  markerNote: ((tabId: string) => string | undefined) | undefined;
+  /** Set by login profiles: what browser_open tells the agent about the store of a tab it just opened (once). */
+  openNote: ((tabId: string) => string | undefined) | undefined;
+  /** Set by login profiles (see `BrowserService.sessionProfile`). */
+  sessionProfile: ((sessionId: string) => { name: string; label: string; setBy: 'user' | 'agent' | 'setting' } | undefined) | undefined;
   /** Features that add fields to a tab's info (downloads, emulation); see `addTabInfoProvider`. */
   private readonly infoProviders = new Set<(tabId: string) => Partial<BrowserTabInfo> | undefined>();
 
@@ -172,13 +184,13 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
     return { tab: this.describe(record), page };
   }
 
-  async openTab(session: AgentSession, url: string, options: { background?: boolean } = {}): Promise<BrowserTabInfo> {
+  async openTab(session: AgentSession, url: string, options: { background?: boolean; profile?: string } = {}): Promise<BrowserTabInfo> {
     this.assertAvailable();
     await this.ready;
     this.openingCount++;
     let record: TabRecord;
     try {
-      const tab = await vscode.window.openBrowserTab(url, { background: options.background ?? false, preserveFocus: true });
+      const tab = (await this.opener?.(session, url, options)) ?? (await vscode.window.openBrowserTab(url, { background: options.background ?? false, preserveFocus: true }));
       record = this.records.get(tab) ?? this.track(tab, this.freshId());
       this.unannounced.delete(record);
       record.origin = 'agent';
@@ -347,6 +359,22 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
   /** Fires `onDidChange` for a change only a tab info provider knows about. */
   tabInfoChanged(): void {
     this.changeEmitter.fire();
+  }
+
+  /** The VS Code tab behind a tab id. */
+  browserTabOf(tabId: string): vscode.BrowserTab | undefined {
+    return this.find(normalizeTabId(tabId))?.tab;
+  }
+
+  /** The tab id of a VS Code tab, once it has one. */
+  tabIdOf(tab: vscode.BrowserTab): string | undefined {
+    return this.records.get(tab)?.id || undefined;
+  }
+
+  /** Redraws a tab's in-page indicator and editor tab decoration (e.g. after `markerNote` changed). */
+  remark(tabId: string): void {
+    const record = this.find(normalizeTabId(tabId));
+    if (record) this.refreshMarking(record);
   }
 
   dispose(): void {
@@ -713,11 +741,21 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
     if (!config().get<boolean>('pageIndicator', true)) return null;
     if (record.paused) {
       const last = record.lastController ? this.services.sessions.get(record.lastController) : undefined;
-      return { label: last ? sessionDisplayName(last) : 'agents', color: last?.color.hex ?? NEUTRAL_COLOR, paused: true };
+      return { label: this.withNote(record, last ? sessionDisplayName(last) : 'agents'), color: last?.color.hex ?? NEUTRAL_COLOR, paused: true };
     }
     const holder = this.services.tabLeases.holder(record.id);
     const session = holder && this.services.sessions.get(holder.sessionId);
-    return session ? { label: sessionDisplayName(session), color: session.color.hex, paused: false } : null;
+    return session ? { label: this.withNote(record, sessionDisplayName(session)), color: session.color.hex, paused: false } : null;
+  }
+
+  private withNote(record: TabRecord, label: string): string {
+    let note: string | undefined;
+    try {
+      note = this.markerNote?.(record.id);
+    } catch (err) {
+      this.log.warn(`marker note failed for ${record.id}: ${errorText(err)}`);
+    }
+    return note ? `${label} · ${note}` : label;
   }
 
   private refreshMarking(...records: TabRecord[]): void {
