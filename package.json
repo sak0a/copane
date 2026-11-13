@@ -190,6 +190,16 @@
         "title": "Resume Agent on All Its Tabs",
         "category": "Agent Bridge",
         "icon": "$(debug-continue)"
+      },
+      {
+        "command": "agentBridge.ui.showSession",
+        "title": "Show Agent Session",
+        "icon": "$(robot)"
+      },
+      {
+        "command": "agentBridge.ui.showSessionInView",
+        "title": "Show Agent Session in Sessions View",
+        "icon": "$(list-tree)"
       }
     ],
     "configuration": {
@@ -405,6 +415,14 @@
         {
           "command": "agentBridge.ui.resumeSessionTabs",
           "when": "agentBridge.ui.hasSessions && !agentBridge.ui.browserUnavailable"
+        },
+        {
+          "command": "agentBridge.ui.showSession",
+          "when": "agentBridge.ui.hasSessions"
+        },
+        {
+          "command": "agentBridge.ui.showSessionInView",
+          "when": "agentBridge.ui.hasSessions"
         }
       ],
       "view/item/context": [
@@ -487,6 +505,66 @@
           "command": "agentBridge.ui.endSession",
           "when": "view == agentBridge.sessions && viewItem =~ /\\bsession\\b/",
           "group": "9_end@1"
+        },
+        {
+          "command": "agentBridge.ui.showSession",
+          "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/",
+          "group": "inline@1"
+        },
+        {
+          "command": "agentBridge.ui.pauseTab",
+          "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bnotPaused\\b/",
+          "group": "inline@2"
+        },
+        {
+          "command": "agentBridge.ui.resumeTab",
+          "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bpaused\\b/",
+          "group": "inline@2"
+        },
+        {
+          "command": "agentBridge.ui.releaseTab",
+          "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\breleasable\\b/",
+          "group": "inline@3"
+        },
+        {
+          "command": "agentBridge.ui.closeTab",
+          "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/",
+          "group": "inline@4"
+        },
+        {
+          "command": "agentBridge.ui.revealTab",
+          "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/",
+          "group": "1_show@1"
+        },
+        {
+          "command": "agentBridge.ui.showSession",
+          "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/",
+          "group": "1_show@2"
+        },
+        {
+          "command": "agentBridge.ui.showSessionInView",
+          "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/",
+          "group": "1_show@3"
+        },
+        {
+          "command": "agentBridge.ui.pauseTab",
+          "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bnotPaused\\b/",
+          "group": "2_control@1"
+        },
+        {
+          "command": "agentBridge.ui.resumeTab",
+          "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bpaused\\b/",
+          "group": "2_control@1"
+        },
+        {
+          "command": "agentBridge.ui.releaseTab",
+          "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\breleasable\\b/",
+          "group": "2_control@2"
+        },
+        {
+          "command": "agentBridge.ui.closeTab",
+          "when": "view == agentBridge.tabs && viewItem =~ /\\btab\\b/",
+          "group": "3_close@1"
         }
       ]
     },
@@ -496,6 +574,13 @@
           "id": "agentBridge",
           "title": "Agent Bridge",
           "icon": "media/agent-bridge.svg"
+        }
+      ],
+      "panel": [
+        {
+          "id": "agentBridgeTabs",
+          "title": "Agent Tabs",
+          "icon": "media/agent-tabs.svg"
         }
       ]
     },
@@ -508,6 +593,15 @@
           "icon": "media/agent-bridge.svg",
           "contextualTitle": "Agent Bridge"
         }
+      ],
+      "agentBridgeTabs": [
+        {
+          "id": "agentBridge.tabs",
+          "name": "Agent Tabs",
+          "type": "tree",
+          "icon": "media/agent-tabs.svg",
+          "contextualTitle": "Agent Tabs"
+        }
       ]
     },
     "viewsWelcome": [
@@ -519,6 +613,16 @@
         "view": "agentBridge.sessions",
         "when": "agentBridge.ui.browserUnavailable",
         "contents": "The integrated browser is not enabled for Agent Bridge, so agents can use terminals but no browser tabs.\n[Enable Integrated Browser](command:agentBridge.enableBrowser)\nVS Code restarts once to turn it on."
+      },
+      {
+        "view": "agentBridge.tabs",
+        "when": "!agentBridge.ui.browserUnavailable",
+        "contents": "No agent session is using a browser tab in this window.\nTabs that agents open or control are listed here in the color of their session. Click one to bring it to the front."
+      },
+      {
+        "view": "agentBridge.tabs",
+        "when": "agentBridge.ui.browserUnavailable",
+        "contents": "The integrated browser is not enabled, so agents cannot open or use browser tabs.\n[Enable Integrated Browser](command:agentBridge.enableBrowser)"
       }
     ]
   },

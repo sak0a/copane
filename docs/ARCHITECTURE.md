@@ -78,7 +78,7 @@ agent and its MCP server also run; the browser itself stays on the UI side and V
     src/extension/core/    sessions, leases, tool registry, bridge server, service interfaces
     src/extension/browser/ BrowserService, CDP, browser_* tools, tab marking
     src/extension/terminal/ TerminalService, terminal_* tools
-    src/extension/ui/      Sessions view, status bar, user commands, browser-API setup
+    src/extension/ui/      Sessions view, Agent Tabs panel view, status bar, user commands, browser-API setup
     src/extension/registration/  registering the MCP server with Claude Code and Codex
     contributes/*.json     per-module manifest fragments, merged into package.json by the build
     scripts/               dev host and MCP test client

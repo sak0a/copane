@@ -3,8 +3,9 @@
 import * as vscode from 'vscode';
 import type { BridgeServices, BrowserTabInfo, TerminalInfo } from '../core/services';
 import type { AgentSession } from '../core/sessions';
+import { findTerminalRunning } from './agentTerminal';
 import { Cmd } from './ids';
-import { hostOf, plural, tabTitle, tabBelongsTo, tabState, terminalBelongsTo, type AttentionItem, type ViewNode } from './model';
+import { hostOf, plural, sessionNodeId, tabTitle, tabBelongsTo, tabState, terminalBelongsTo, type AttentionItem, type ViewNode } from './model';
 import type { UiState } from './state';
 import type { SessionsTree } from './tree';
 
@@ -33,7 +34,9 @@ export function registerUiCommands(services: BridgeServices, state: UiState, tre
   const refOf = (arg: unknown): Ref | undefined => {
     if (arg === undefined || arg === null) return undefined;
     if (typeof arg === 'object' && typeof (arg as { id?: unknown }).id === 'string') {
-      const ref = state.flush().nodes.get((arg as { id: string }).id)?.ref;
+      // A row of the Sessions view or of the Agent Tabs panel (their ids do not overlap).
+      const id = (arg as { id: string }).id;
+      const ref = state.flush().nodes.get(id)?.ref ?? state.panel.nodes.get(id)?.ref;
       if (ref) return ref;
     } else if (typeof arg === 'string') {
       if (tabs().some(t => t.id === arg)) return { tabId: arg };
@@ -194,6 +197,34 @@ export function registerUiCommands(services: BridgeServices, state: UiState, tre
     }
   }
 
+  /** Selects the session's row in the Sessions view, opening the view if needed. */
+  async function showSessionInView(sessionId: string): Promise<void> {
+    const model = state.flush();
+    const nodeId = [sessionNodeId(sessionId, true), sessionNodeId(sessionId, false)].find(id => model.nodes.has(id));
+    if (!nodeId) throw new TargetGone();
+    await vscode.commands.executeCommand(Cmd.focusSessions);
+    await tree.reveal(nodeId, { focus: true });
+  }
+
+  /**
+   * The closest thing to "go to the conversation" there is: an agent running in a terminal of this
+   * window (a \`claude\` CLI) is that terminal. Chat panels of other extensions cannot be brought to
+   * the front by session (Claude Code has no public command for it), so for those the session's row
+   * in the Sessions view is shown, and the status bar says why.
+   */
+  async function showSession(sessionId: string): Promise<void> {
+    const session = sessions.get(sessionId);
+    if (!session) throw new TargetGone();
+    const terminal = await findTerminalRunning(session.pid).catch(() => undefined);
+    if (terminal) {
+      terminal.show(false);
+      return;
+    }
+    await showSessionInView(sessionId);
+    const app = AGENT_APPS[session.client.kind];
+    vscode.window.setStatusBarMessage(`$(info) ${session.label} is not running in a terminal of this window${app ? ` (likely a ${app} chat)` : ''}, so its row in Sessions is shown.`, 6000);
+  }
+
   async function goTo(item: AttentionItem): Promise<void> {
     if (item.kind === 'terminal') revealTerminal(item.targetId, false);
     else await revealTab(item.targetId);
@@ -316,6 +347,14 @@ export function registerUiCommands(services: BridgeServices, state: UiState, tre
       const id = refOf(arg)?.sessionId ?? (await pickSession('Resume every tab of which agent session?'));
       if (!id) return;
       for (const t of tabs()) if (tabBelongsTo(t, id) && t.paused) setPaused(t.id, false);
+    }),
+    command(Cmd.showSession, async (arg?: unknown) => {
+      const id = refOf(arg)?.sessionId ?? (await pickSession('Show which agent session?'));
+      if (id) await showSession(id);
+    }),
+    command(Cmd.showSessionInView, async (arg?: unknown) => {
+      const id = refOf(arg)?.sessionId ?? (await pickSession('Show which agent session?'));
+      if (id) await showSessionInView(id);
     }),
   ];
 }
