@@ -7,7 +7,11 @@
 // workbench.action.terminal.sendSequence) and `debug_answer_prompts` (answering the extension's
 // notifications). Assumes a POSIX shell with shell integration as the default profile (bash/zsh).
 import { join } from 'node:path';
-import { agent, assert, root, run, sleep, test, until } from './harness.mjs';
+import { agent, assert, root, run, sleep, test as testCase, until } from './harness.mjs';
+
+// The commands below (seq, sleep, quoting, /bin/sh) are POSIX; Windows' default terminal is PowerShell.
+const notPosix = process.platform === 'win32' ? 'needs a POSIX shell (bash or zsh) as the default terminal; Windows uses PowerShell' : undefined;
+const test = (name, fn) => testCase(name, fn, { skip: notPosix });
 
 const fixture = name => join(root, 'test', 'fixtures', 'terminal', name);
 const q = s => `'${s.replace(/'/g, `'\\''`)}'`;

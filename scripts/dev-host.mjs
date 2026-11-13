@@ -4,8 +4,12 @@
 // configuration are never touched, and several dev hosts (one per --name) can run side by side.
 //
 //   node scripts/dev-host.mjs --name <name> [--folder <dir>] [--no-build] [--no-proposed] [--no-ui-port] [--foreground] [--test-proxy]
+//                             [--code <executable>] [--code-arg <arg>]...
 //   node scripts/dev-host.mjs --name <name> --stop
 //
+// --code (or COPANE_DEV_CODE) runs that VS Code executable instead of `code` on the PATH, e.g. one
+// downloaded by scripts/vscode-download.mjs; --code-arg passes an extra argument to it (repeatable;
+// CI on Linux uses --no-sandbox, --disable-gpu and --password-store=basic).
 // --folder may be repeated to open several windows. On macOS the windows open in the background
 // (they do not take focus) unless --foreground. Prints the bridge home and live instances.
 // The workbench UI is inspectable through scripts/ui.mjs (screenshots, DOM) unless --no-ui-port.
@@ -27,9 +31,15 @@ const base = join(process.platform === 'win32' ? process.env.TEMP : '/tmp', 'cop
 const dirs = { userData: join(base, 'ud'), extensions: join(base, 'ext'), home: join(base, 'home'), workspace: join(base, 'ws') };
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const extensionId = `${pkg.publisher}.${pkg.name}`;
+const codeExecutable = values('code')[0] ?? process.env.COPANE_DEV_CODE;
 
 function stop() {
-  if (process.platform === 'win32') return console.log('Close the dev host window manually on Windows.');
+  if (process.platform === 'win32') {
+    // Only processes started with this dev host's own user-data dir, never another VS Code.
+    const filter = `$_.CommandLine -and $_.CommandLine.Contains('${dirs.userData.replace(/'/g, "''")}')`;
+    spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `Get-CimInstance Win32_Process | Where-Object { ${filter} } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`], { stdio: 'ignore' });
+    return;
+  }
   spawnSync('pkill', ['-f', `user-data-dir ${dirs.userData}`]);
 }
 
@@ -141,10 +151,14 @@ for (const folder of folders) {
     '--disable-backgrounding-occluded-windows',
     '--disable-renderer-backgrounding',
     ...testProxyArgs,
+    ...values('code-arg'),
     '--new-window',
     folder,
   ];
-  if (process.platform === 'darwin' && !flag('foreground')) {
+  if (codeExecutable) {
+    // An explicit executable (CI, a downloaded VS Code): started directly, also on macOS.
+    spawn(codeExecutable, codeArgs, { env, stdio: 'ignore', detached: true }).unref();
+  } else if (process.platform === 'darwin' && !flag('foreground')) {
     // `open -g` starts the window in the background, so it does not take focus from whoever is working.
     const app = execFileSync('sh', ['-c', 'dirname "$(dirname "$(dirname "$(dirname "$(dirname "$(readlink -f "$(command -v code)" 2>/dev/null || python3 -c "import os,sys;print(os.path.realpath(sys.argv[1]))" "$(command -v code)")")")")")"'], { encoding: 'utf8' }).trim();
     spawn('open', ['-g', '-n', '-a', app, ...Object.entries(sandboxEnv).flatMap(([k, v]) => ['--env', `${k}=${v}`]), '--args', ...codeArgs], { env, stdio: 'ignore', detached: true }).unref();

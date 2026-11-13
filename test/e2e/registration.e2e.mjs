@@ -396,7 +396,7 @@ test('the status report has what is needed to diagnose remotely, and Copy return
     assert.match(report, /## Platform\n- OS: .*\n- Extension host runtime: .*\(Node v[\d.]+, Electron [\d.]+\)/);
     assert.match(report, /### Claude Code[\s\S]*Registered command: ".*mcp-server" — exists ✓[\s\S]*Registered env: COPANE_HOME=/);
     assert.match(report, /Start test \(MCP handshake and tool list, as an agent starts it\): ok ✓\n  answered the MCP handshake/);
-    assert.match(report, /Self-test .*: ok ✓\n  runs on .*finds this window .*and the window answers.*process lookup: ps/);
+    assert.match(report, /Self-test .*: ok ✓\n  runs on .*finds this window .*and the window answers.*process lookup: (ps|proc|powershell|pwsh|wmic)/); // proc: Linux reads /proc
     assert.match(report, /## Recent registration changes\n[\s\S]*- \S+ · Claude Code · add \(turn-on\) → changed: registered\. Why: the user ran "Copane: Turn On/);
     assert.match(report, /## Last "Copane: Check and Repair Setup" \(/);
     const copied = await command(a, 'copane.copyStatus', { quiet: true, toClipboard: false });
