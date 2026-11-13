@@ -59,6 +59,8 @@ export interface AttentionItem {
   detail: string | undefined;
   /** Sessions that wait on it. */
   sessionIds: string[];
+  /** An agent asked the user for something here (a terminal or tab waiting for them), as opposed to a tab the user paused. */
+  waiting?: boolean;
 }
 
 export interface StatusModel {
@@ -118,10 +120,13 @@ export function buildViewModel(input: UiInput): ViewModel {
   for (const root of roots) index(root, undefined);
 
   const attention = collectAttention(input, tabs, terminals);
-  const pausedCount = attention.filter(a => a.kind === 'tab').length;
-  const waitingCount = attention.length - pausedCount;
+  const pausedCount = attention.filter(a => !a.waiting).length;
+  const waitingTerminals = attention.filter(a => a.waiting && a.kind === 'terminal').length;
+  const waitingTabs = attention.filter(a => a.waiting && a.kind === 'tab').length;
+  const waitingCount = waitingTerminals + waitingTabs;
   const badgeParts = [
-    waitingCount ? plural(waitingCount, 'terminal is', 'terminals are') + ' waiting for you' : undefined,
+    waitingTerminals ? plural(waitingTerminals, 'terminal is', 'terminals are') + ' waiting for you' : undefined,
+    waitingTabs ? plural(waitingTabs, 'tab is', 'tabs are') + ' waiting for you' : undefined,
     pausedCount ? plural(pausedCount, 'tab is', 'tabs are') + ' paused' : undefined,
   ].filter(isString);
 
@@ -132,7 +137,7 @@ export function buildViewModel(input: UiInput): ViewModel {
     nodes,
     parents,
     attention,
-    status: buildStatus(input, attention, waitingCount, pausedCount, sessionsById),
+    status: buildStatus(input, attention, { terminals: waitingTerminals, tabs: waitingTabs }, pausedCount, sessionsById),
     badge: attention.length ? { value: attention.length, tooltip: badgeParts.join(', ') } : undefined,
     viewDescription: input.sessions.length
       ? [connected ? `${connected} connected` : undefined, disconnected ? `${disconnected} reconnecting` : undefined].filter(isString).join(', ')
@@ -179,8 +184,10 @@ function sessionNode(
   children: ViewNode[],
   graceSeconds: number,
 ): ViewNode {
-  const waiting = terminals.filter(t => t.state === 'waiting-for-user').length;
-  const paused = tabs.filter(t => t.paused).length;
+  const waitingTerminals = terminals.filter(t => t.state === 'waiting-for-user').length;
+  const waitingTabs = tabs.filter(t => t.request).length;
+  const waiting = waitingTerminals + waitingTabs;
+  const paused = tabs.filter(t => t.paused && !t.request).length;
   const state = !session.connected ? 'disconnected' : waiting ? 'needs you' : undefined;
   const contents = [tabs.length ? plural(tabs.length, 'tab') : undefined, terminals.length ? plural(terminals.length, 'terminal') : undefined]
     .filter(isString)
@@ -195,7 +202,8 @@ function sessionNode(
     session.cwd ? code(session.cwd) : undefined,
     [
       contents || 'No tabs or terminals yet.',
-      waiting ? `${plural(waiting, 'terminal')} waiting for you.` : undefined,
+      waitingTerminals ? `${plural(waitingTerminals, 'terminal')} waiting for you.` : undefined,
+      waitingTabs ? `${plural(waitingTabs, 'tab')} waiting for you.` : undefined,
       paused ? `${plural(paused, 'tab')} paused by you.` : undefined,
     ]
       .filter(isString)
@@ -224,7 +232,8 @@ function sessionNode(
       `${session.label} agent session`,
       session.title,
       session.connected ? 'connected' : 'disconnected, waiting to reconnect',
-      waiting ? `${plural(waiting, 'terminal')} waiting for you` : undefined,
+      waitingTerminals ? `${plural(waitingTerminals, 'terminal')} waiting for you` : undefined,
+      waitingTabs ? `${plural(waitingTabs, 'tab')} waiting for you` : undefined,
       contents || 'no tabs or terminals',
     ]
       .filter(isString)
@@ -235,10 +244,11 @@ function sessionNode(
   };
 }
 
-export type TabState = 'paused' | 'controlling' | 'controlled-by-other' | 'idle';
+export type TabState = 'waiting-for-user' | 'paused' | 'controlling' | 'controlled-by-other' | 'idle';
 
 /** The state of a tab as seen from one session. */
 export function tabState(tab: BrowserTabInfo, sessionId: string): TabState {
+  if (tab.request) return 'waiting-for-user';
   if (tab.paused) return 'paused';
   if (tab.controlledBy === sessionId) return 'controlling';
   if (tab.controlledBy) return 'controlled-by-other';
@@ -249,7 +259,9 @@ function tabNode(tab: BrowserTabInfo, session: AgentSession, name: (id: string |
   const state = tabState(tab, session.id);
   const host = hostOf(tab.url);
   const label = tabTitle(tab) || host || tab.url || 'New tab';
+  const request = tab.request;
   const stateText = {
+    'waiting-for-user': `waiting for you: ${truncate(request?.message ?? '', 60)}`,
     paused: 'paused by you',
     controlling: 'controlling',
     'controlled-by-other': `controlled by ${name(tab.controlledBy)}`,
@@ -271,6 +283,7 @@ function tabNode(tab: BrowserTabInfo, session: AgentSession, name: (id: string |
         ? `Opened by ${session.label}.`
         : `Opened by ${name(tab.openedBy) ?? 'an ended session'}.`;
   const control = {
+    'waiting-for-user': `**${md(name(request?.sessionId) ?? 'An agent')} is waiting for you** in this tab: ${md(request?.message ?? '')} Click to go there; the agent continues when you click Done in the page, or by itself once it sees what it needs.`,
     paused: `**Paused by you.** Agents cannot act on it until you resume it.`,
     controlling: `${session.label} is controlling it.`,
     'controlled-by-other': `${name(tab.controlledBy)} is controlling it.`,
@@ -278,7 +291,7 @@ function tabNode(tab: BrowserTabInfo, session: AgentSession, name: (id: string |
   }[state];
   const flags = [
     'tab',
-    tab.paused ? 'paused' : 'notPaused',
+    request ? 'waitingForUser' : tab.paused ? 'paused' : 'notPaused',
     tab.controlledBy === session.id ? 'releasable' : undefined,
     tab.origin === 'agent' ? 'agentTab' : 'userTab',
   ];
@@ -289,7 +302,9 @@ function tabNode(tab: BrowserTabInfo, session: AgentSession, name: (id: string |
     description,
     tooltip: [`$(globe) **${md(label)}**`, md(tab.url), `${opened} ${control}`].join('\n\n'),
     icon:
-      state === 'paused'
+      state === 'waiting-for-user'
+        ? { id: 'bell-dot', color: WARNING }
+        : state === 'paused'
         ? { id: 'debug-pause', color: WARNING }
         : state === 'controlling'
           ? { id: 'globe', color: session.color.themeColor }
@@ -388,10 +403,27 @@ function collectAttention(input: UiInput, tabs: BrowserTabInfo[], terminals: Ter
       description: terminal.name,
       detail: terminal.userInputRequest ?? (terminal.currentCommand ? `in: ${terminal.currentCommand}` : undefined),
       sessionIds,
+      waiting: true,
+    });
+  }
+  // Tabs an agent handed to the user, like terminals waiting for them; then tabs the user paused.
+  for (const tab of tabs) {
+    if (!tab.request) continue;
+    const sessionIds = input.sessions.filter(s => s.id === tab.request!.sessionId || tabBelongsTo(tab, s.id)).map(s => s.id);
+    if (!sessionIds.length) continue;
+    items.push({
+      kind: 'tab',
+      targetId: tab.id,
+      icon: { id: 'bell-dot', color: WARNING },
+      label: `${label(tab.request.sessionId)} is waiting for you`,
+      description: tabTitle(tab) || hostOf(tab.url) || tab.url,
+      detail: tab.request.message,
+      sessionIds,
+      waiting: true,
     });
   }
   for (const tab of tabs) {
-    if (!tab.paused) continue;
+    if (!tab.paused || tab.request) continue;
     const sessionIds = input.sessions.filter(s => tabBelongsTo(tab, s.id)).map(s => s.id);
     if (!sessionIds.length) continue;
     const title = tabTitle(tab) || hostOf(tab.url) || tab.url;
@@ -411,10 +443,11 @@ function collectAttention(input: UiInput, tabs: BrowserTabInfo[], terminals: Ter
 function buildStatus(
   input: UiInput,
   attention: AttentionItem[],
-  waiting: number,
+  waitingBy: { terminals: number; tabs: number },
   paused: number,
   sessionsById: Map<string, AgentSession>,
 ): StatusModel {
+  const waiting = waitingBy.terminals + waitingBy.tabs;
   const total = input.sessions.length;
   const connected = input.sessions.filter(s => s.connected).length;
   const disconnected = total - connected;
@@ -424,7 +457,7 @@ function buildStatus(
 
   let text: string;
   if (waiting) {
-    const first = attention.find(a => a.kind === 'terminal')!;
+    const first = attention.find(a => a.waiting)!;
     const who = sessionsById.get(first.sessionIds[0]!)?.label ?? 'An agent';
     text = waiting === 1 ? `$(bell-dot) ${who} needs you` : `$(bell-dot) ${waiting} need you`;
   } else {
@@ -462,7 +495,8 @@ function buildStatus(
   const accessibilityLabel = [
     `Copane: ${plural(connected, 'agent session')} connected`,
     disconnected ? `${disconnected} reconnecting` : undefined,
-    waiting ? `${plural(waiting, 'terminal')} waiting for you` : undefined,
+    waitingBy.terminals ? `${plural(waitingBy.terminals, 'terminal')} waiting for you` : undefined,
+    waitingBy.tabs ? `${plural(waitingBy.tabs, 'tab')} waiting for you` : undefined,
     paused ? `${plural(paused, 'tab')} paused` : undefined,
   ]
     .filter(isString)

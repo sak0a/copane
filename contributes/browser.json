@@ -62,7 +62,7 @@
       },
       {
         "command": "copane.browser.resumeTab",
-        "when": "activeEditor == workbench.editor.browser && copane.browser.activeTabPaused",
+        "when": "activeEditor == workbench.editor.browser && copane.browser.activeTabPaused && !copane.browser.activeTabWaiting",
         "group": "navigation@-10"
       },
       {

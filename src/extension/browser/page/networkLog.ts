@@ -39,6 +39,11 @@ export interface NetworkEntry {
   bodyUnavailable: boolean;
   /** Set when the bridge answered or changed the request itself, e.g. "mocked by m1 (Claude 1)" (browser_route). */
   intercepted?: string;
+  /**
+   * Sent while the user had the tab (browser_request_user_input): its URL query, headers and bodies are
+   * withheld from agents (see privacy.ts), also when they arrive later.
+   */
+  withheld?: boolean;
 }
 
 const MAX_URL = 2000;
@@ -105,10 +110,10 @@ export class NetworkLog {
     if (previous && p.redirectResponse) {
       previous.status = p.redirectResponse.status;
       previous.statusText = p.redirectResponse.statusText;
-      previous.responseHeaders = capHeaders(p.redirectResponse.headers);
+      previous.responseHeaders = previous.withheld ? undefined : capHeaders(p.redirectResponse.headers);
       previous.mimeType = p.redirectResponse.mimeType;
       previous.end = p.timestamp;
-      previous.redirectedTo = url;
+      previous.redirectedTo = previous.withheld ? withheldUrl(url) : url;
       previous.bodyUnavailable = true;
     }
     const entry: NetworkEntry = {
@@ -151,7 +156,7 @@ export class NetworkLog {
   /** `Network.requestWillBeSentExtraInfo`: the headers actually sent (cookies included). */
   onRequestExtra(p: { requestId: string; headers?: Record<string, unknown> }): void {
     const entry = this.live.get(p.requestId);
-    if (entry && p.headers) entry.requestHeaders = capHeaders({ ...entry.requestHeaders, ...p.headers });
+    if (entry && p.headers && !entry.withheld) entry.requestHeaders = capHeaders({ ...entry.requestHeaders, ...p.headers });
   }
 
   /** `Network.responseReceived` */
@@ -163,7 +168,7 @@ export class NetworkLog {
     entry.respondedAt = Date.now();
     entry.statusText = r.statusText;
     entry.mimeType = r.mimeType;
-    entry.responseHeaders = capHeaders(r.headers);
+    entry.responseHeaders = entry.withheld ? undefined : capHeaders(r.headers);
     entry.fromCache ||= Boolean(r.fromDiskCache || r.fromPrefetchCache);
     if (p.type) entry.type = p.type;
   }
@@ -228,6 +233,12 @@ export class NetworkLog {
     const keep = new Set(this.entries.all().map(e => e.requestId));
     for (const id of this.live.keys()) if (!keep.has(id)) this.live.delete(id);
   }
+}
+
+/** A URL without its query and fragment, which may carry tokens: "https://idp/authorize?…". */
+export function withheldUrl(url: string): string {
+  const cut = url.search(/[?#]/);
+  return cut < 0 ? url : `${url.slice(0, cut)}${url[cut]}…`;
 }
 
 export function isFailure(e: NetworkEntry): boolean {
@@ -304,6 +315,6 @@ export function formatNetworkEntry(e: NetworkEntry, now: number): string {
     : e.failed ? ''
     : e.respondedAt !== undefined ? `headers after ${formatMs(e.respondedAt - e.startedAt)}, body not finished`
     : `${formatMs(now - e.startedAt)} so far`;
-  const details = [timing, e.size !== undefined && !e.failed ? formatBytes(e.size) : '', e.fromCache ? 'cache' : '', e.intercepted ?? ''].filter(Boolean).join(', ');
+  const details = [timing, e.size !== undefined && !e.failed ? formatBytes(e.size) : '', e.fromCache ? 'cache' : '', e.intercepted ?? '', e.withheld ? 'sent while the user had the tab: details withheld' : ''].filter(Boolean).join(', ');
   return `${e.id}  ${e.method} ${state} ${e.type.toLowerCase()}  ${clip(e.url, 300)}${details ? `  (${details})` : ''}`;
 }

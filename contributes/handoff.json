@@ -1,0 +1,26 @@
+{
+  "commands": [
+    { "command": "copane.browser.finishRequest", "title": "Done: Hand Browser Tab Back to Agent", "shortTitle": "Done", "category": "Copane", "icon": "$(check)" },
+    { "command": "copane.browser.declineRequest", "title": "Won't Do: Decline Agent's Browser Tab Request", "shortTitle": "Won't Do", "category": "Copane", "icon": "$(circle-slash)" },
+    { "command": "copane.ui.finishTabRequest", "title": "Done: Hand Tab Back to Agent", "category": "Copane", "icon": "$(check)" },
+    { "command": "copane.ui.declineTabRequest", "title": "Won't Do: Decline Agent's Request", "category": "Copane", "icon": "$(circle-slash)" }
+  ],
+  "menus": {
+    "editor/title": [
+      { "command": "copane.browser.finishRequest", "when": "activeEditor == workbench.editor.browser && copane.browser.activeTabWaiting", "group": "navigation@-12" },
+      { "command": "copane.browser.declineRequest", "when": "activeEditor == workbench.editor.browser && copane.browser.activeTabWaiting", "group": "navigation@-11" }
+    ],
+    "commandPalette": [
+      { "command": "copane.browser.finishRequest", "when": "copane.browser.waitingForUser" },
+      { "command": "copane.browser.declineRequest", "when": "copane.browser.waitingForUser" },
+      { "command": "copane.ui.finishTabRequest", "when": "false" },
+      { "command": "copane.ui.declineTabRequest", "when": "false" }
+    ],
+    "view/item/context": [
+      { "command": "copane.ui.finishTabRequest", "when": "(view == copane.sessions || view == copane.tabs) && viewItem =~ /\\bwaitingForUser\\b/", "group": "inline@0" },
+      { "command": "copane.ui.declineTabRequest", "when": "(view == copane.sessions || view == copane.tabs) && viewItem =~ /\\bwaitingForUser\\b/", "group": "inline@1" },
+      { "command": "copane.ui.finishTabRequest", "when": "(view == copane.sessions || view == copane.tabs) && viewItem =~ /\\bwaitingForUser\\b/", "group": "2_control@0" },
+      { "command": "copane.ui.declineTabRequest", "when": "(view == copane.sessions || view == copane.tabs) && viewItem =~ /\\bwaitingForUser\\b/", "group": "2_control@1" }
+    ]
+  }
+}

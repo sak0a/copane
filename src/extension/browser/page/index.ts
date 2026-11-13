@@ -18,6 +18,8 @@ import { debugCdpTools } from './debugCdp';
 import { logTools } from './logTools';
 import { describeOpened, navigationTools } from './navigationTools';
 import { PageStates } from './pageState';
+import { scrubSecretFields, withholdSince } from './privacy';
+import { SignInHint } from './signInHint';
 import { RefStore } from './refs';
 import { scriptTools } from './scriptTools';
 import { snapshotTools } from './snapshotTools';
@@ -36,6 +38,15 @@ export interface PageToolExtras {
 export interface PageHooks {
   /** Waits for a tab just opened on `url` to load, and describes it (see describeOpened). */
   describeOpened(ctx: ToolContext, tabId: string, url: string): Promise<string>;
+  /** For handing a tab to the user (../handoff.ts): keeps what happens while they have it from agents (privacy.ts). */
+  privacy: {
+    /** Where the tab's logs are now; pass it to `withhold` later. */
+    mark(tabId: string): number;
+    /** Withholds the requests and console messages the tab recorded after `mark`. */
+    withhold(tabId: string, mark: number): { requests: number; messages: number };
+    /** Empties password and one-time-code fields in the page and its frames; resolves how many had a value. */
+    scrub(tabId: string): Promise<number>;
+  };
 }
 
 export function registerPageTools(services: BridgeServices, host: TabInfoHost, extras: PageToolExtras = {}): PageHooks {
@@ -44,7 +55,7 @@ export function registerPageTools(services: BridgeServices, host: TabInfoHost, e
   // Downloads and device emulation (downloads.ts, emulation.ts) hook into page tool calls.
   const downloads = new DownloadManager(services, host, tabId => env.states.get(tabId)?.nextSeq() ?? 0);
   const emulation = new EmulationManager(services, host);
-  env.hooks = [downloads, emulation];
+  env.hooks = [downloads, emulation, new SignInHint()];
   context.subscriptions.push(downloads, emulation);
   if (extras.interception) {
     context.subscriptions.push(
@@ -89,5 +100,18 @@ export function registerPageTools(services: BridgeServices, host: TabInfoHost, e
       ...debugCdpTools(services),
     ]),
   );
-  return { describeOpened: (ctx, tabId, url) => describeOpened(env, ctx, tabId, url) };
+  return {
+    describeOpened: (ctx, tabId, url) => describeOpened(env, ctx, tabId, url),
+    privacy: {
+      mark: tabId => env.states.get(tabId)?.seq ?? 0,
+      withhold: (tabId, mark) => {
+        const state = env.states.get(tabId);
+        return state ? withholdSince(state, mark) : { requests: 0, messages: 0 };
+      },
+      scrub: async tabId => {
+        const state = env.states.get(tabId);
+        return state ? scrubSecretFields(state) : 0;
+      },
+    },
+  };
 }

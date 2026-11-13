@@ -84,6 +84,11 @@ export interface BrowserTabInfo {
    * none. While present, some of the tab's requests get canned responses, errors or delays.
    */
   requestRules?: Array<{ sessionId: string; rules: number }>;
+  /**
+   * Set while an agent session has handed the tab to the user (browser_request_user_input) and waits
+   * for them: what it asked for, and which session asked. The tab is `paused` meanwhile.
+   */
+  request?: { sessionId: string; message: string; since: number };
 }
 
 /** A CDP connection to one tab's page target. Shared by all sessions that use the tab. */
@@ -138,6 +143,12 @@ export interface BrowserService {
   grantAccess?(tabId: string, sessionId: string): void;
   /** Withdraws what the user allowed or denied for a tab (all sessions, or one), so the next use asks again. */
   revokeAccess?(tabId: string, sessionId?: string): void;
+  /**
+   * Ends a pending hand-off of the tab (see `BrowserTabInfo.request`) on behalf of the user: "done"
+   * gives the tab back to the agent, "declined" tells it the user will not do it. Returns false when
+   * nothing was pending.
+   */
+  resolveUserRequest?(tabId: string, outcome: 'done' | 'declined'): boolean;
 }
 
 // ---------------------------------------------------------------- Terminals
