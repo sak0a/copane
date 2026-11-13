@@ -1,0 +1,60 @@
+{
+  "commands": [
+    {
+      "command": "agentBridge.terminal.finishRequest",
+      "title": "Done: Hand Terminal Back to Agent",
+      "category": "Agent Bridge",
+      "icon": "$(check)"
+    },
+    {
+      "command": "agentBridge.terminal.declineRequest",
+      "title": "Won't Do: Decline Agent's Terminal Request",
+      "category": "Agent Bridge",
+      "icon": "$(close)"
+    }
+  ],
+  "menus": {
+    "view/title": [
+      {
+        "command": "agentBridge.terminal.finishRequest",
+        "when": "view == terminal && agentBridge.terminal.waitingForUser",
+        "group": "navigation@0"
+      },
+      {
+        "command": "agentBridge.terminal.declineRequest",
+        "when": "view == terminal && agentBridge.terminal.waitingForUser",
+        "group": "1_agentBridge"
+      }
+    ],
+    "commandPalette": [
+      { "command": "agentBridge.terminal.finishRequest", "when": "agentBridge.terminal.waitingForUser" },
+      { "command": "agentBridge.terminal.declineRequest", "when": "agentBridge.terminal.waitingForUser" }
+    ]
+  },
+  "configuration": {
+    "properties": {
+      "agentBridge.terminal.userTerminals": {
+        "type": "string",
+        "enum": ["ask", "allow", "deny"],
+        "enumDescriptions": [
+          "Ask before an agent session reads or types in a terminal you opened (once per terminal and session).",
+          "Agent sessions may read and type in your terminals without asking.",
+          "Agent sessions never get access to your terminals (they still see that they exist)."
+        ],
+        "default": "ask",
+        "description": "Whether agent sessions may read and type in terminals you opened yourself."
+      },
+      "agentBridge.terminal.onSessionEnd": {
+        "type": "string",
+        "enum": ["keep", "closeIdle", "close"],
+        "enumDescriptions": [
+          "Keep the session's terminals open, so you can still read them; whatever runs in them keeps running.",
+          "Close the session's terminals that are at an idle prompt; keep those still running something (e.g. a dev server).",
+          "Close all of the session's terminals, stopping whatever runs in them."
+        ],
+        "default": "keep",
+        "description": "What happens to an agent session's terminals when the session ends (after the reconnect grace period)."
+      }
+    }
+  }
+}
