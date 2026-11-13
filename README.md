@@ -34,19 +34,28 @@ CLI** in the integrated terminal, and with **Codex** (`codex` CLI and extension)
 
 ## Install
 
-1. Download `copane-<version>.vsix` from the [latest release](https://github.com/sak0a/copane/releases/latest)
-   and install it: Extensions view → `…` → *Install from VSIX…*, or
-   `code --install-extension copane-<version>.vsix`.
-2. When VS Code asks *"let Claude Code and Codex use this VS Code's browser tabs and terminals?"*,
-   choose **Register**. This adds an MCP server named `copane` to your user configuration of the
-   agents that are installed (see [what changes on your machine](#what-changes-on-your-machine)).
-3. Enable the integrated browser for Copane (once): run **Copane: Enable Integrated
-   Browser** from the Command Palette, then **quit VS Code completely and start it again**.
-4. Start a new Claude Code session. Ask it, for example, *"open http://localhost:3000 in the VS
-   Code browser and check the login form"*.
+Install **Copane** from the Visual Studio Marketplace: search for *Copane* in the Extensions view, or
+`code --install-extension saka.copane`. Each release is also on
+[GitHub](https://github.com/sak0a/copane/releases/latest) as a `.vsix` (Extensions view → `…` →
+*Install from VSIX…*). For editors that install from Open VSX, see [Other editors](#other-editors).
 
-Sessions that were already running before step 2 do not see the new server; start them again
-(in Claude Code, `/mcp` shows the `copane` server and its state).
+After installing, the **Get Started with Copane** walkthrough opens once (later: **Copane: Get
+Started** in the Command Palette, or the rocket in the Copane view's title bar). It checks off each
+step from the real state of your setup:
+
+1. **Let agents use the integrated browser** (once): **Enable Integrated Browser** adds Copane to
+   VS Code's `argv.json`; then **quit VS Code completely and start it again**.
+2. **Turn Copane on for Claude Code and Codex**: adds an MCP server named `copane` to the user
+   configuration of the agents that are installed (see
+   [what changes on your machine](#what-changes-on-your-machine)).
+3. **Try it**: start a *new* Claude Code or Codex session and give it the prompt from the walkthrough;
+   it opens a browser tab and runs a command in a terminal, both marked with the session's label.
+4. **See and control sessions** in the Copane view.
+
+Without the walkthrough the same happens through **Copane: Enable Integrated Browser** and
+**Copane: Turn On**, or by answering *Register* when VS Code asks. Sessions that were already
+running before step 2 do not see the new server; start them again (in Claude Code, `/mcp` shows the
+`copane` server and its state).
 
 ### Why the browser needs a restart
 
@@ -176,7 +185,28 @@ Windows are independent: each has its own sessions, tabs and terminals.
 Codex is registered the same way, in `~/.codex/config.toml` (or `$CODEX_HOME/config.toml`). Codex
 starts MCP servers with only a few environment variables, so the entry lists the ones Copane
 needs (`env_vars`), and it raises Codex's 60-second tool timeout to 10 minutes for long browser
-waits and terminal commands.
+waits and terminal commands. Sessions appear as "Codex 1", "Codex 2" in their own colors.
+
+How Codex treats Copane's tools (checked with Codex CLI 0.167):
+
+- **Approvals.** Codex asks you before every call of a tool that is not marked read-only: opening or
+  navigating a tab, clicking and typing, running a terminal command, setting the session title.
+  Reading (snapshots, screenshots, console, network, terminal output, status) is not asked about.
+  Choose *approve for this session* in Codex's prompt to stop being asked, or set
+  `default_tools_approval_mode = "approve"` under `[mcp_servers.copane]` to never be asked. In
+  `codex exec` (no prompts), calls that need approval fail unless that setting is on.
+- **Sandbox.** Codex's sandbox (`--sandbox read-only`, `workspace-write`) applies to the commands
+  Codex runs itself, not to Copane: a command an agent runs with `terminal_run` runs in a VS Code
+  terminal with your permissions, in plain view. The approval prompt is the control that applies.
+- **Instructions.** Codex lists Copane under its first line of instructions and adds the full
+  instructions to each Copane tool it looks up.
+- **Which window.** A Codex started in a VS Code terminal finds that window through
+  `COPANE_INSTANCE`; a Codex started elsewhere finds the window whose folder contains its working
+  directory. Chats of the Codex extension should find theirs as a child process of the window, like
+  Claude Code's (not tested yet).
+- **Session identity.** Codex gives MCP servers no conversation id at startup, so a Copane session
+  lasts as long as the Codex process: it survives window reloads, but `codex resume` starts a new
+  Copane session.
 
 ### Remote windows and WSL
 
@@ -194,13 +224,34 @@ clipboard. Then quit VS Code on your local machine and start it again.
 On native Windows (no WSL), agents start the server with VS Code's own executable
 (`Code.exe` with `ELECTRON_RUN_AS_NODE=1`), which Copane updates when VS Code moves.
 
+## Other editors
+
+Copane needs VS Code's integrated browser and its proposed `browser` API for the browser tools, and
+VS Code 1.140 or newer (`engines.vscode`) to install at all. The terminal tools work without the
+browser. Where an editor lacks the integrated browser, the walkthrough and **Copane: Show Status** say
+so instead of offering a fix. What we found by inspecting each editor's release (November 2026):
+
+| Editor | Based on | Integrated browser and `browser` API | Copane |
+|---|---|---|---|
+| Visual Studio Code | 1.140+ | yes | works fully (Marketplace) |
+| VSCodium 1.143 | VS Code 1.143 | included in the build | should work fully: `argv.json` is `~/.vscode-oss/argv.json` (not verified in a running editor) |
+| Windsurf / Devin Desktop 3.12 | VS Code 1.141 | included in the build | should work fully: `argv.json` is `~/.devin/argv.json`; its extension gallery is its own (not verified in a running editor) |
+| Cursor 3.30 | VS Code 1.128 | no (its agent browser is Cursor's own) | cannot install: older than 1.140 |
+| Positron 2026.11 | VS Code 1.138 | not checked | cannot install yet |
+
+Editors other than VS Code install extensions from [Open VSX](https://open-vsx.org). Until Copane is
+published there, install the `.vsix` from the
+[releases](https://github.com/sak0a/copane/releases/latest) (*Install from VSIX…*). **Copane: Enable
+Integrated Browser** finds each editor's own `argv.json` (its data folder), and **Copane: Turn On**
+works the same in every editor.
+
 ## What changes on your machine
 
 Copane asks before it changes any agent's configuration, and changes only what it describes:
 
 | File | Change | When |
 |---|---|---|
-| `~/.claude.json` (or `$CLAUDE_CONFIG_DIR/.claude.json`) | `mcpServers.vscode`, a user-scope MCP server | After you agree, or with the Register command. Made with Claude Code's own `claude mcp` command when it is available, so it does not race with a running Claude Code. |
+| `~/.claude.json` (or `$CLAUDE_CONFIG_DIR/.claude.json`) | `mcpServers.copane`, a user-scope MCP server | After you agree, or with the Register command. Made with Claude Code's own `claude mcp` command when it is available, so it does not race with a running Claude Code. |
 | `~/.codex/config.toml` (or `$CODEX_HOME/config.toml`) | the `[mcp_servers.copane]` table | Same. The rest of the file, comments included, is left exactly as it was. |
 | VS Code's `argv.json` | adds Copane to `enable-proposed-api` | When you run **Enable Integrated Browser**. Comments and other entries are kept. |
 | `~/.copane/` | the MCP server, a small launcher, one file per open window (socket path and a random token, readable only by you) | Always; this is Copane's own folder. |
@@ -244,6 +295,7 @@ Copane's entries and nothing else, and Copane does not add them back until you r
 
 | Command | |
 |---|---|
+| Copane: Get Started | Opens the getting-started walkthrough, with each step checked off from the real state of the setup. |
 | Copane: Check and Repair Setup | Checks everything end to end (entries present and current, server script and runtime, a real start of the server with an MCP handshake, this window reachable), fixes Copane's own entries and says what was wrong and what it did. The same check runs quietly at every start. |
 | Copane: Turn On (Register with Claude Code and Codex) | Adds the `copane` MCP server to the agents' user configuration and keeps it there. |
 | Copane: Turn Off (Unregister from Claude Code and Codex) | Removes Copane's entries and keeps them off. |

@@ -94,3 +94,24 @@ agent and its MCP server also run; the browser itself stays on the UI side and V
     contributes/*.json     per-module manifest fragments, merged into package.json by the build
     scripts/               dev host and MCP test client
     poc/                   the original feasibility probe (reference only)
+
+## Tool definitions cost context
+
+Every tool definition (name, title, description, input schema, annotations) is sent to the model in
+every conversation; Codex also appends the server instructions to each Copane tool it looks up.
+`test/unit/tool-budget.test.ts` collects the tools the way the modules register them and fails when
+the total, any one tool or the instructions grow past their budget. When it fails, shorten the wording
+first: the first sentence says what the tool is for; a parameter is described only where its name and
+type do not say it; guidance shared by many tools goes once into `core/instructions.ts` (Claude Code
+cuts the server's instructions at 4096 characters). A new module that registers tools must be added to
+that test. `scripts/measure-tokens.mjs` measures the same list, and result sizes, on a dev host.
+
+## Getting started
+
+`contributes/walkthrough.json` is the getting-started walkthrough; `registration/setup.ts` decides the
+setup state (browser, agents, a session seen) from plain data and `registration/walkthrough.ts`
+publishes it as `copane.setup.*` context keys and checks the steps off with VS Code's
+`welcome.markStepComplete` (VS Code ignores an `onContext` completion whose key was already true when
+the walkthrough registered). The Sessions view's welcome content uses the same keys. Walkthrough SVGs
+use theme colors as presentation attributes (`fill="var(--vscode-foreground, #3b3b3b)"`): the
+webview that shows them blocks `<style>`.
