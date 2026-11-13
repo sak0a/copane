@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- **Terminal names stay true after a window reload.** Sessions get their label and color back when
+  they reconnect, in whatever order; a new session no longer takes a returning session's number. A
+  session that comes back under another label gets its terminals renamed when they are active.
+- **Terminals cost far less.** Your own terminals keep only the last 64 kB of output until you let
+  an agent use one (it then sees the screen and recent output); before, each kept a full emulator
+  (about 6 MB for a terminal that printed a lot). Closed terminals are released at once. Very fast
+  output (a huge build log, `yes`) is parsed at most about a third of the time, skipping lines that
+  would scroll out anyway, so the extension host stays responsive.
+- **Remote windows (WSL, SSH, containers): downloads reach the agent.** The browser saves on your
+  computer, Copane copies the file to the agent downloads folder on the remote side and gives the
+  agent that path. **Enable Integrated Browser** changes your local argv.json directly from a remote
+  window. No second extension is needed.
+
 ## 0.2.1
 
 - License changed from MIT to the PolyForm Shield License 1.0.0: use, change and share it freely,

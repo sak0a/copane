@@ -25,7 +25,11 @@ session is using what, and can take over at any moment.
 - **Sessions** (`core/sessions.ts`): each connection presents a `sessionKey`; reconnecting with the same
   key within the grace period resumes the session. A session has a label ("Claude 2"), a badge ("C2"),
   a color and an optional title the agent sets (`session_set_title`). These are what the user sees on
-  tabs, terminals and in the Sessions view.
+  tabs, terminals and in the Sessions view. Sessions are remembered in the window's workspace state:
+  after a reload (or a restart within 10 minutes) the window's sessions are restored as disconnected
+  ones in their grace period (at least 30 s), so each gets its label, color and title back whatever
+  order the agents reconnect in, and no new session takes their number meanwhile. An ended session
+  that returns later gets its color and title back, and its number if it is still free.
 - **Tools** (`core/tools.ts`): modules define tools with `defineTool` (zod input, handler) and register
   them. Handlers get `{ session, signal, log }`, return text or content blocks, and throw `ToolError`
   for expected failures.
@@ -36,6 +40,28 @@ Windows are independent: each has its own extension host, bridge server, session
 terminals. Routing an agent to the right window happens once, in the MCP server, at connect time.
 In a WSL or SSH window the extension runs on the remote side (`extensionKind: workspace`), where the
 agent and its MCP server also run; the browser itself stays on the UI side and VS Code proxies it.
+
+## Remote windows
+
+One extension runs in one place; in a remote window (WSL, SSH, containers) that is the remote side.
+What crosses to the user's machine (the UI side), verified in a real remote window (an attached
+container, `scripts/remote-dev-host.mjs`):
+
+- `vscode.workspace.fs` with **`vscode-local:`** URIs reads and writes any file the user can on the UI
+  side (VS Code's URI transformer maps `vscode-local` to the UI's `file` scheme; `vscode-userdata` does
+  too). `file:` is the remote disk. `workspace.fs.copy(vscode-local → file)` copies UI → remote.
+- CDP `Page.setDownloadBehavior` takes a path **on the UI side**: the browser saves there.
+- Not given: the user's home folder on the UI side. `remote/uiSide.ts` finds it (remembered value,
+  argv.json as VS Code's "Configure Runtime Arguments" opens it, WSL's inherited Windows paths, or the
+  one home under `C:\Users`, `/Users`, `/home` with this VS Code's data folder and an argv.json).
+  Development hosts use `COPANE_UI_HOME` instead and never look for the real one.
+
+So no companion extension on the UI side is needed. `services.remote` (`RemoteService`) gives the
+folders; downloads stage on the UI side and are copied to the remote agent folder
+(`browser/page/downloadStaging.ts`); enabling the browser edits the UI side's argv.json directly
+(`registration/remoteArgv.ts`). When the home cannot be found, downloads fall back to VS Code's Save
+dialog and the agent is told the file is on the user's computer, and enabling falls back to the
+argv.json editor. Not verified for real: Windows paths (`/c:/Users/...`), WSL itself.
 
 ## Browser rules
 
@@ -81,6 +107,18 @@ agent and its MCP server also run; the browser itself stays on the UI side and V
   and resumes when the command finishes or the user says they are done.
 - Terminals the user created are listed but need permission before an agent reads or writes them
   (`copane.terminal.userTerminals`: `ask` / `allow` / `deny`).
+- **Cost**: a headless emulator with a 4000-line scrollback costs up to ~7 MB and parses output at
+  25-130 MB/s. Agent terminals get one at once. The user's own terminals keep only the raw last 64 kB
+  (`terminal/tail.ts`) until an agent is allowed in; the mirror then starts from that tail, so the
+  agent sees the screen and the recent output (older output is reported as cut off), and it is
+  released when no live session uses the terminal any more. Closed terminals are released (a mirror
+  an agent used after 60 s, so a waiting tool can still report). The mirror feeds xterm.js a slice at
+  a time; under a backlog it parses at most about a third of the time and skips lines that would
+  scroll out of the scrollback anyway, keeping shell-integration markers and screen modes.
+- **Names**: an agent terminal is named after its session's label. Labels come back after a reload
+  (see Sessions); when a session returns under another label, its terminals are renamed as soon as
+  they are the active terminal (VS Code can rename only the active terminal, and cannot change a
+  terminal's color after creation).
 
 ## Layout
 
@@ -89,6 +127,7 @@ agent and its MCP server also run; the browser itself stays on the UI side and V
     src/extension/core/    sessions, leases, tool registry, bridge server, service interfaces
     src/extension/browser/ BrowserService, CDP, browser_* tools, tab marking
     src/extension/terminal/ TerminalService, terminal_* tools
+    src/extension/remote/  RemoteService: the user's machine as seen from a remote window
     src/extension/ui/      Sessions view, Agent Tabs panel view, status bar, user commands, browser-API setup
     src/extension/registration/  registering the MCP server with Claude Code and Codex
     contributes/*.json     per-module manifest fragments, merged into package.json by the build

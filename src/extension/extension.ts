@@ -10,9 +10,10 @@ import { LeaseManager } from './core/leases';
 import type { Logger } from './core/log';
 import { VscodePrompts } from './core/prompts';
 import type { BridgeServices } from './core/services';
-import { SessionManager } from './core/sessions';
+import { SessionManager, type RememberedSession } from './core/sessions';
 import { ToolRegistry } from './core/tools';
 import { activateRegistration } from './registration';
+import { activateRemote } from './remote';
 import { activateSessionTools } from './core/sessionTools';
 import { activateTerminals } from './terminal';
 import { activateUi } from './ui';
@@ -28,7 +29,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(channel, vscode.commands.registerCommand('copane.showLog', () => channel.show()));
 
   const config = () => vscode.workspace.getConfiguration('copane');
-  const sessions = new SessionManager({ graceMs: () => Math.max(0, config().get<number>('sessionGraceSeconds', 20)) * 1000 });
+  // Sessions are remembered in the window's workspace state, so after a reload each one gets its label
+  // and color back (its terminals survive the reload and are named after it).
+  const sessions = new SessionManager({
+    graceMs: () => Math.max(0, config().get<number>('sessionGraceSeconds', 20)) * 1000,
+    memory: {
+      load: () => context.workspaceState.get<RememberedSession[]>('copane.sessions.v1', []),
+      save: list => void context.workspaceState.update('copane.sessions.v1', list),
+    },
+  });
   const tools = new ToolRegistry();
   // Idle timeout of tab control: the browser module's setting (contributes/browser.json).
   const tabLeases = new LeaseManager({ idleMs: () => Math.max(5, config().get<number>('browser.leaseIdleSeconds', 120)) * 1000 });
@@ -63,6 +72,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Order matters: the UI and registration modules read the browser and terminal services.
   activateSessionTools(services);
   activateDebugTools(services, prompts);
+  activateRemote(services);
   activateBrowser(services);
   activateTerminals(services);
   activateUi(services);

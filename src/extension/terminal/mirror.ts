@@ -8,6 +8,13 @@
 //   shell-integration sequences in the stream itself (OSC 633 ; C = output starts, D ; <code> = ends).
 // - "executions": only the output of each command (`TerminalShellExecution.read()`), framed by
 //   `beginRegion` / `endRegion`. The prompt and what is typed at it are not visible in this mode.
+//
+// Fast output (a build log, `yes`) must not make the extension host sluggish. Data is queued and handed
+// to xterm.js a slice at a time; while a backlog builds up, parsing takes at most about a third of the
+// time, and when the backlog holds far more lines than the scrollback keeps, the older ones are skipped
+// unparsed (they would have scrolled out anyway). Shell-integration markers and screen-mode switches in
+// skipped text are kept, so command boundaries and full-screen state stay right; output whose beginning
+// was skipped is reported like output whose beginning scrolled out.
 import { Terminal as Xterm, type IBuffer, type IMarker } from '@xterm/headless';
 import { Emitter, type Event } from '../core/events';
 
@@ -15,6 +22,16 @@ export type MirrorFeed = 'stream' | 'executions';
 
 /** Private OSC used to frame regions in "executions" mode, so framing stays in order with the data. */
 const FRAME_OSC = 7771;
+/** Private OSC around the markers kept from skipped output (see `compact`). */
+const SKIP_OSC = 7772;
+/** Characters handed to xterm.js at a time. */
+const SLICE_CHARS = 128 * 1024;
+/** Unparsed backlog at which old lines are skipped. */
+const COMPACT_CHARS = 1024 * 1024;
+/** While a backlog exists, wait this many times as long as a slice took to parse before the next (~33% duty). */
+const BACKLOG_PAUSE_FACTOR = 2;
+/** Escape sequences that change state the rest of the output depends on: shell integration and our own framing, screen and cursor-key modes. */
+const KEPT_SEQUENCES = /\x1b\](?:633|7771);[^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[\?(?:1049|1047|47|1)[hl]/g;
 
 export interface Region {
   readonly id: number;
@@ -27,6 +44,8 @@ export interface Region {
   exitCode: number | undefined;
   /** The command line the shell reported for it (OSC 633;E), when it did. */
   commandLine: string | undefined;
+  /** Part of its beginning is missing: skipped as too fast, or from before the terminal was mirrored. */
+  truncated?: boolean;
 }
 
 /** A read position: new output is everything after it. */
@@ -35,6 +54,8 @@ export interface Mark {
   readonly col: number;
   /** Set when the mark was taken while a full-screen program was showing. */
   readonly alternate: boolean;
+  /** How many times output had been skipped when the mark was taken (see TerminalMirror.skips). */
+  readonly skips?: number;
 }
 
 export interface LinesResult {
@@ -73,7 +94,21 @@ export class TerminalMirror {
   lastWriteAt = 0;
   /** Total characters received, to tell "something changed" cheaply. */
   received = 0;
+  /** How many times output arrived faster than it could be interpreted and old lines were skipped. */
+  skips = 0;
+  /** Lines skipped in total. */
+  skippedLines = 0;
   readonly feed: MirrorFeed;
+  private readonly scrollback: number;
+  private readonly queue: Array<{ data: string; seq: number }> = [];
+  private queuedChars = 0;
+  private seq = 0;
+  private parsedSeq = 0;
+  private parsing = false;
+  private pauseTimer: NodeJS.Timeout | undefined;
+  private readonly waiters: Array<{ seq: number; resolve: () => void }> = [];
+  private inSkipped = false;
+  private disposed = false;
 
   /** A command's output starts (OSC 633;C or `beginRegion`). Fired while parsing, in stream order. */
   readonly onRegionStart: Event<Region> = this.startEmitter.event;
@@ -84,10 +119,11 @@ export class TerminalMirror {
   constructor(options: MirrorOptions) {
     this.feed = options.feed;
     this.now = options.now ?? Date.now;
+    this.scrollback = options.scrollback ?? 4000;
     this.xterm = new Xterm({
       cols: clamp(options.cols ?? 120, 20, 500),
       rows: clamp(options.rows ?? 30, 5, 200),
-      scrollback: options.scrollback ?? 4000,
+      scrollback: this.scrollback,
       allowProposedApi: true,
       convertEol: false,
     });
@@ -97,6 +133,14 @@ export class TerminalMirror {
     });
     this.xterm.parser.registerOscHandler(FRAME_OSC, data => {
       if (this.feed === 'executions') this.onShellIntegration(data);
+      return true;
+    });
+    this.xterm.parser.registerOscHandler(SKIP_OSC, data => {
+      this.inSkipped = data === 'start';
+      if (this.inSkipped) {
+        this.skips++;
+        if (this.openRegion && !this.openRegion.ended) this.openRegion.truncated = true;
+      }
       return true;
     });
   }
@@ -122,17 +166,108 @@ export class TerminalMirror {
     return this.openRegion;
   }
 
+  /** Queues output; resolves once it has been interpreted (or skipped, see `compact`). */
   write(data: string): Promise<void> {
     if (!data) return this.flush();
     this.lastWriteAt = this.now();
     this.received += data.length;
-    const done = new Promise<void>(resolve => this.xterm.write(data, resolve));
-    return done;
+    return this.enqueue(data);
   }
 
   /** Resolves once everything written so far has been parsed. */
   flush(): Promise<void> {
-    return new Promise<void>(resolve => this.xterm.write('', resolve));
+    if (this.disposed) return Promise.resolve();
+    if (this.parsedSeq >= this.seq) return new Promise<void>(resolve => this.xterm.write('', resolve));
+    return this.waitFor(this.seq);
+  }
+
+  /**
+   * Feeds output that was printed before this mirror existed (kept by a TerminalTail), without counting
+   * it as new activity. `truncated`: its beginning is missing, so a command open in it lost its start.
+   */
+  replay(data: string, truncated: boolean): Promise<void> {
+    return this.enqueue(truncated ? `\x1b]${SKIP_OSC};start\x07\x1b]${SKIP_OSC};end\x07${data}` : data);
+  }
+
+  /** Characters received but not yet interpreted. */
+  get backlog(): number {
+    return this.queuedChars;
+  }
+
+  private enqueue(data: string): Promise<void> {
+    const seq = ++this.seq;
+    this.queue.push({ data, seq });
+    this.queuedChars += data.length;
+    if (this.queuedChars > COMPACT_CHARS) this.compact();
+    this.pump();
+    return this.waitFor(seq);
+  }
+
+  private waitFor(seq: number): Promise<void> {
+    if (this.disposed || this.parsedSeq >= seq) return Promise.resolve();
+    return new Promise<void>(resolve => this.waiters.push({ seq, resolve }));
+  }
+
+  private pump(): void {
+    if (this.parsing || this.pauseTimer || this.disposed || this.queue.length === 0) return;
+    let data = '';
+    let upTo = this.parsedSeq;
+    while (this.queue.length > 0 && (data === '' || data.length + this.queue[0]!.data.length <= SLICE_CHARS)) {
+      const next = this.queue.shift()!;
+      data += next.data;
+      upTo = next.seq;
+    }
+    this.queuedChars -= data.length;
+    this.parsing = true;
+    const started = performance.now();
+    this.xterm.write(data, () => {
+      this.parsing = false;
+      this.settle(upTo);
+      if (this.disposed || this.queue.length === 0) return;
+      // A backlog: leave the event loop to everything else for a while before the next slice.
+      const pause = Math.min(250, (performance.now() - started) * BACKLOG_PAUSE_FACTOR);
+      if (pause < 1) return this.pump();
+      this.pauseTimer = setTimeout(() => {
+        this.pauseTimer = undefined;
+        this.pump();
+      }, pause);
+    });
+  }
+
+  private settle(upTo: number): void {
+    this.parsedSeq = Math.max(this.parsedSeq, upTo);
+    for (let i = this.waiters.length - 1; i >= 0; i--) {
+      const w = this.waiters[i]!;
+      if (w.seq <= this.parsedSeq) {
+        this.waiters.splice(i, 1);
+        w.resolve();
+      }
+    }
+  }
+
+  /**
+   * The backlog is too large: keep only as many of its last lines as the screen and scrollback hold,
+   * plus the state-changing sequences of the skipped part, in order, framed so regions know.
+   */
+  private compact(): void {
+    const all = this.queue.map(e => e.data).join('');
+    const keepLines = this.scrollback + this.xterm.rows + 50;
+    let cut = all.length;
+    for (let lines = 0; lines < keepLines; lines++) {
+      const i = all.lastIndexOf('\n', cut - 1);
+      if (i <= 0) return; // Not that many lines: nothing would scroll out, so nothing is skipped.
+      cut = i;
+    }
+    const skipped = all.slice(0, cut + 1);
+    let lines = 0;
+    for (let i = skipped.indexOf('\n'); i >= 0; i = skipped.indexOf('\n', i + 1)) lines++;
+    this.skippedLines += lines;
+    const kept = skipped.match(KEPT_SEQUENCES)?.join('') ?? '';
+    const data = `\x1b]${SKIP_OSC};start\x07${kept}\x1b]${SKIP_OSC};end\x07\r\n${all.slice(cut + 1)}`;
+    const seq = this.queue[this.queue.length - 1]!.seq;
+    this.queue.length = 0;
+    this.queue.push({ data, seq });
+    this.queuedChars = data.length;
   }
 
   resize(cols: number, rows: number): void {
@@ -156,10 +291,31 @@ export class TerminalMirror {
     await this.write(`\x1b]${FRAME_OSC};D${exitCode === undefined ? '' : `;${exitCode}`}\x07`);
   }
 
+  /**
+   * A region for a command whose output began before this mirror existed (or before what it holds):
+   * from the top of the buffer, marked truncated. It becomes the open region, so the command's end closes it.
+   */
+  regionFromStart(): Region {
+    const buffer = this.xterm.buffer.normal;
+    const region: Region = {
+      id: this.nextRegionId++,
+      start: this.xterm.registerMarker(-(buffer.baseY + buffer.cursorY)),
+      startCol: 0,
+      end: undefined,
+      endCol: 0,
+      ended: false,
+      exitCode: undefined,
+      commandLine: undefined,
+      truncated: true,
+    };
+    this.openRegion = region;
+    return region;
+  }
+
   /** Lines of a command's output, as rendered. An open region ends at the cursor. */
   regionLines(region: Region): LinesResult {
     const buffer = this.xterm.buffer.normal;
-    const startLost = !region.start || region.start.line < 0;
+    const startLost = !region.start || region.start.line < 0 || region.truncated === true;
     const startLine = startLost ? 0 : region.start!.line;
     const startCol = startLost ? 0 : region.startCol;
     let endLine: number;
@@ -177,15 +333,15 @@ export class TerminalMirror {
   /** The current position, for reading what comes after it later. */
   mark(options: { exact?: boolean } = {}): Mark {
     const buffer = this.xterm.buffer.normal;
-    if (this.alternate) return { marker: undefined, col: 0, alternate: true };
+    if (this.alternate) return { marker: undefined, col: 0, alternate: true, skips: this.skips };
     // Unless exact, start at the beginning of the cursor line: a progress bar may still redraw it.
     const marker = this.xterm.registerMarker(0);
-    return { marker, col: options.exact ? buffer.cursorX : 0, alternate: false };
+    return { marker, col: options.exact ? buffer.cursorX : 0, alternate: false, skips: this.skips };
   }
 
   /** A mark at the end of a finished region (nothing more will be written into it). */
   markAfter(region: Region): Mark {
-    if (region.end && region.end.line >= 0) return { marker: region.end, col: region.endCol, alternate: false };
+    if (region.end && region.end.line >= 0) return { marker: region.end, col: region.endCol, alternate: false, skips: this.skips };
     return this.mark({ exact: true });
   }
 
@@ -198,7 +354,8 @@ export class TerminalMirror {
       const from = mark ? 0 : Math.max(0, endLine - this.xterm.rows + 1);
       return { lines: tidy(readLines(buffer, from, 0, endLine, undefined)), startLost: lost };
     }
-    return { lines: tidy(readLines(buffer, mark.marker.line, mark.col, endLine, undefined)), startLost: false };
+    const skipped = mark.skips !== undefined && this.skips > mark.skips;
+    return { lines: tidy(readLines(buffer, mark.marker.line, mark.col, endLine, undefined)), startLost: skipped };
   }
 
   /** The visible screen of the active buffer (the full-screen program's screen if one is running). */
@@ -225,6 +382,12 @@ export class TerminalMirror {
   }
 
   dispose(): void {
+    this.disposed = true;
+    if (this.pauseTimer) clearTimeout(this.pauseTimer);
+    this.pauseTimer = undefined;
+    this.queue.length = 0;
+    this.queuedChars = 0;
+    for (const w of this.waiters.splice(0)) w.resolve();
     this.startEmitter.dispose();
     this.endEmitter.dispose();
     this.promptEmitter.dispose();
@@ -245,6 +408,7 @@ export class TerminalMirror {
         ended: false,
         exitCode: undefined,
         commandLine: this.reportedCommandLine,
+        ...(this.inSkipped ? { truncated: true } : {}),
       };
       this.reportedCommandLine = undefined;
       this.openRegion = region;

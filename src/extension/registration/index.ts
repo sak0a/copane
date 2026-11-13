@@ -22,6 +22,7 @@ import { Env } from '../../shared/protocol';
 import { scopedLogger, type Logger } from '../core/log';
 import type { BridgeServices } from '../core/services';
 import { applyTextEdits, argvJsonPath, argvState, enableProposedApiEdits, newArgvJson, type ArgvState } from './argv';
+import { enableInUiArgv, uiArgvState } from './remoteArgv';
 import {
   claudeConfigFile,
   inspectClaude,
@@ -694,6 +695,7 @@ class Registration {
       void this.services.prompts.ask({ message: 'Copane: the integrated browser is already enabled.', choices: [] });
       return { state: 'available' };
     }
+    if (this.remoteArgv()) return this.enableBrowserRemote(options);
     const target = this.argvTarget();
     if (target.blocked) {
       void this.services.prompts.ask({ message: `Copane: not changing argv.json: ${target.blocked}.`, choices: [] });
@@ -708,6 +710,41 @@ class Registration {
       this.log.error('could not enable the integrated browser', err);
       void this.manualBrowserInstructions(message);
       return { state: 'failed', error: message, ...(target.file ? { file: target.file } : {}) };
+    }
+  }
+
+  /** A remote window: argv.json is on the user's machine, reached through services.remote (vscode-local). */
+  private remoteArgv(): boolean {
+    return !!vscode.env.remoteName && !this.env.COPANE_ARGV_JSON && !!this.services.remote;
+  }
+
+  /**
+   * Remote window: edit the user's argv.json directly where it can be found; otherwise through the
+   * editor VS Code opens for it ("Configure Runtime Arguments"), which also tells where it is.
+   */
+  private async enableBrowserRemote(options: { viaEditor?: boolean }): Promise<{ state: string; file?: string; changed?: boolean; error?: string }> {
+    const remote = this.services.remote!;
+    try {
+      const direct = options.viaEditor ? { error: 'asked to go through the editor' } : await enableInUiArgv(remote, this.extensionId);
+      if (!('error' in direct)) {
+        this.log.info(`${direct.changed ? 'added' : 'found'} ${this.extensionId} in enable-proposed-api in ${direct.file} on the user's computer`);
+        void this.offerRestart(direct.changed, direct.uri.toString());
+        return { state: 'enabled', file: direct.file, changed: direct.changed };
+      }
+      if (this.isDev) {
+        // The editor would open the developer's real argv.json.
+        void this.services.prompts.ask({ message: `Copane: not changing argv.json: ${direct.error}.`, choices: [] });
+        return { state: 'blocked', error: direct.error };
+      }
+      this.log.info(`argv.json on the user's computer not found directly (${direct.error}); opening it through VS Code`);
+      const result = await this.enableViaEditor(undefined);
+      void this.offerRestart(result.changed, result.file);
+      return { state: 'enabled', ...result };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.log.error('could not enable the integrated browser', err);
+      void this.manualBrowserInstructions(message);
+      return { state: 'failed', error: message };
     }
   }
 
@@ -742,6 +779,7 @@ class Registration {
       }
     }
     if (!document) throw new Error('the argv.json editor did not open where this extension can see it');
+    if (!testFile) this.services.remote?.learnArgvJson(document.uri);
     const text = document.getText();
     const edits = enableProposedApiEdits(text, this.extensionId);
     if (edits.length === 0) return { file: document.uri.toString(true), changed: false };
@@ -760,7 +798,8 @@ class Registration {
     });
     if (answer === 'Quit VS Code') await vscode.commands.executeCommand('workbench.action.quit');
     if (answer === 'Show argv.json') {
-      if (file.includes('://')) await vscode.commands.executeCommand('workbench.action.configureRuntimeArguments');
+      if (file.startsWith('vscode-local:')) await vscode.window.showTextDocument(vscode.Uri.parse(file));
+      else if (file.includes('://')) await vscode.commands.executeCommand('workbench.action.configureRuntimeArguments');
       else await vscode.window.showTextDocument(vscode.Uri.file(file));
     }
   }
@@ -783,9 +822,10 @@ class Registration {
     if (this.services.browser.available || memento.get<boolean>(BROWSER_NOTICE_KEY)) return;
     await memento.update(BROWSER_NOTICE_KEY, true);
     const target = this.argvTarget();
-    const state = target.file && !target.blocked ? argvState(readTextIfExists(target.file), this.extensionId) : undefined;
+    const remote = this.remoteArgv() ? await uiArgvState(this.services.remote!, this.extensionId) : undefined;
+    const state = remote ? remote.state : target.file && !target.blocked ? argvState(readTextIfExists(target.file), this.extensionId) : undefined;
     if (state?.kind === 'enabled') {
-      void this.offerRestart(false, target.file!);
+      void this.offerRestart(false, remote ? remote.uri.toString() : target.file!);
       return;
     }
     const answer = await this.services.prompts.ask({
@@ -807,6 +847,11 @@ class Registration {
     const argv = this.argvTarget();
     let argvStateValue: ArgvState | undefined;
     if (argv.file && !argv.blocked && !argv.viaEditor) argvStateValue = argvState(readTextIfExists(argv.file), this.extensionId);
+    const remoteArgv = this.remoteArgv() ? await uiArgvState(this.services.remote!, this.extensionId) : undefined;
+    if (remoteArgv) {
+      argv.file = `${remoteArgv.file} (on the user's computer)`;
+      argvStateValue = remoteArgv.state;
+    }
     const config = vscode.workspace.getConfiguration('copane.registration');
     const agents: AgentStatus[] = this.agents().map(agent => {
       const enabled = config.get<boolean>(agent.setting, true);

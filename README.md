@@ -108,8 +108,8 @@ without typing anything) cannot be provided by an extension.
 `~/Downloads/Copane` (setting `copane.browser.downloadsFolder`) under a name that never replaces an
 existing file, and gives the agent the path. By default you are asked once per agent session
 (`copane.browser.agentDownloads`: `ask`, `allow`, `deny`). Your own downloads are unchanged. In
-remote windows (WSL, SSH) downloads are saved on your computer through VS Code's dialog and the
-agent cannot read them.
+remote windows (WSL, SSH, containers) the file ends up on the remote side, where the agent runs (see
+below).
 
 **Device emulation and request mocking.** Agents can show a tab as a phone or tablet, in dark or
 light mode, with another locale or time zone (`browser_emulate`), and can make requests of a tab
@@ -187,9 +187,19 @@ Node.js. The browser itself stays on your local machine and VS Code connects it 
 so `localhost:3000` in a WSL window reaches the server in WSL.
 
 The browser setting, `argv.json`, belongs to your local VS Code. In a remote window, **Copane:
-Enable Integrated Browser** opens it through **Preferences: Configure Runtime Arguments** and adds
-the line there. If that does not work in your setup, it shows the line to add and copies it to the
-clipboard. Then quit VS Code on your local machine and start it again.
+Enable Integrated Browser** changes it on your local machine through VS Code's connection (it finds
+your home folder there; if it cannot tell which one, it opens the file through **Preferences:
+Configure Runtime Arguments** and adds the line there). If neither works, it shows the line to add
+and copies it to the clipboard. Then quit VS Code on your local machine and start it again.
+
+**Downloads in a remote window.** The browser runs on your computer, so it saves an agent's download
+into a private folder there first (`AppData\Local\Temp\copane-downloads` on Windows,
+`~/Library/Caches/Copane` on macOS, `~/.cache/copane` on Linux); Copane then copies the file over
+VS Code's connection into the agent downloads folder **on the remote side** (`~/Downloads/Copane`
+in WSL or on the SSH host), where the agent can read it, and deletes the local copy. A download of
+your own caught in such a moment goes to your local Downloads folder. If Copane cannot find your home
+folder on your computer, downloads in that window go through VS Code's Save dialog as usual and the
+agent is told the file is on your computer.
 
 On native Windows (no WSL), agents start the server with VS Code's own executable
 (`Code.exe` with `ELECTRON_RUN_AS_NODE=1`), which Copane updates when VS Code moves.

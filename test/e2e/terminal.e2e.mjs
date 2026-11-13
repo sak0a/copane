@@ -261,7 +261,14 @@ test("the user's own terminal needs permission", async () => {
     await (await user()).ok('debug_vscode_command', { command: 'workbench.action.terminal.new' });
     const mine = await until(async () => (await list(a)).find(t => !before.has(t.id) && t.owner === 'user'), 'user terminal listed');
     assert.equal(mine.access, 'asks the user first');
+    // Printed before any agent may use it: kept cheaply, and shown once the agent is allowed in.
+    await sleep(1500);
+    await userTypes('echo printed-before-access-$((6*7))\r');
+    await sleep(1000);
     await answerPrompts(['Allow']);
+    await until(async () => /printed-before-access-42/.test(await a.ok('terminal_read', { terminal: mine.id, what: 'screen' })), 'output from before access on the screen');
+    const last = await a.ok('terminal_read', { terminal: mine.id, what: 'command' });
+    assert.match(last, /printed-before-access-42/);
     const ran = await a.ok('terminal_run', { terminal: mine.id, command: 'echo in-user-terminal' });
     assert.match(ran, /in-user-terminal/);
     assert.match((await shownPrompts()).at(-1).message, /wants to read and type in your terminal/);
@@ -320,36 +327,118 @@ test('without shell integration, commands still run and the result says what is 
   }
 });
 
-test('terminals stay with their session across a window reload', async () => {
+test('fast output does not stall the extension host, and the end of it is kept', async () => {
+  const a = await agent({ session: 'term-fast' });
+  const b = await agent({ session: 'term-fast-b' });
+  try {
+    const running = a.ok('terminal_run', { command: 'yes copane-fast-output | head -n 3000000; echo fast-done', timeout_seconds: 120 });
+    // Meanwhile another session's calls are answered promptly.
+    await sleep(1500);
+    let slowest = 0;
+    for (let i = 0; i < 5; i++) {
+      const t0 = Date.now();
+      await b.ok('session_info');
+      slowest = Math.max(slowest, Date.now() - t0);
+      await sleep(300);
+    }
+    assert.ok(slowest < 1500, `session_info took ${slowest} ms while a terminal printed fast`);
+    const out = await running;
+    assert.match(out, /exited with code 0/);
+    assert.match(out, /copane-fast-output\nfast-done/);
+  } finally {
+    await closeAll(a);
+    await a.close();
+    await b.close();
+  }
+});
+
+const labelOf = async a => JSON.parse(await a.ok('session_info')).you;
+
+test('a session that comes back under a new label gets its terminal renamed', async () => {
+  const a = await agent({ session: 'term-rename-a' });
+  const others = [];
+  try {
+    const out = await a.ok('terminal_create', { name: 'build' });
+    const id = termId(out);
+    const before = await labelOf(a);
+    // The user ends the session; other sessions start until one gets its number.
+    await answerPrompts(['End Session']);
+    await (await user()).ok('debug_vscode_command', { command: 'copane.ui.endSession', args: ['term-rename-a'] });
+    for (let i = 0; i < 6; i++) {
+      const other = await agent({ session: `term-rename-other-${i}` });
+      others.push(other);
+      if ((await labelOf(other)).label === before.label) break;
+    }
+    // The first agent goes on: a session under a new label, its terminal still its own (and active).
+    const after = await until(async () => {
+      const r = await a.call('session_info');
+      return r.isError ? undefined : JSON.parse(r.text).you;
+    }, 'session back');
+    assert.notEqual(after.label, before.label);
+    assert.equal(after.color, before.color);
+    await (await user()).ok('debug_vscode_command', { command: 'workbench.action.terminal.focus' });
+    const renamed = await until(async () => (await list(a)).find(t => t.id === id && t.name === `${after.label}: build`), `${id} renamed to "${after.label}: build"`);
+    assert.equal(renamed.owner, 'you');
+  } finally {
+    await answerPrompts([]);
+    await closeAll(a);
+    await a.close();
+    for (const o of others) await o.close();
+  }
+});
+
+test('terminals stay with their session across a window reload, under the same label and color', async () => {
   const a = await agent({ session: 'term-reload' });
+  const c = await agent({ session: 'term-reload-c' });
   const out = await a.ok('terminal_run', { command: 'echo before-reload' });
   const id = termId(out);
+  const outC = await c.ok('terminal_create', { name: 'second' });
+  const idC = termId(outC);
+  const [youA, youC] = [await labelOf(a), await labelOf(c)];
   // VS Code saves its terminal layout lazily; a terminal created a moment before a reload is not revived.
   await sleep(6000);
   await a.call('debug_vscode_command', { command: 'workbench.action.reloadWindow' }).catch(() => {});
   await a.close().catch(() => {});
+  await c.close().catch(() => {});
   userAgent = undefined;
   await sleep(4000);
-  const b = await until(async () => {
-    try {
-      const candidate = await agent({ session: 'term-reload' });
-      const listed = await candidate.call('terminal_list');
-      if (!listed.isError && listed.text.includes(id)) return candidate;
-      await candidate.close();
-    } catch {
-      // The window is still reloading.
-    }
-    return undefined;
-  }, 'window back after reload', { timeoutMs: 60_000, intervalMs: 1000 });
+  // The sessions come back in the other order, and a new one arrives first: labels must not shuffle.
+  const reconnect = session =>
+    until(async () => {
+      try {
+        const candidate = await agent({ session });
+        const listed = await candidate.call('terminal_list');
+        if (!listed.isError && listed.text.includes(id)) return candidate;
+        await candidate.close();
+      } catch {
+        // The window is still reloading.
+      }
+      return undefined;
+    }, 'window back after reload', { timeoutMs: 60_000, intervalMs: 1000 });
+  const newcomer = await reconnect('term-reload-new');
+  const c2 = await reconnect('term-reload-c');
+  const b = await reconnect('term-reload');
   try {
-    const mine = (await list(b)).find(t => t.id === id);
+    const [againA, againC, fresh] = [await labelOf(b), await labelOf(c2), await labelOf(newcomer)];
+    assert.deepEqual([againA.label, againA.color], [youA.label, youA.color]);
+    assert.deepEqual([againC.label, againC.color], [youC.label, youC.color]);
+    assert.ok(![youA.label, youC.label].includes(fresh.label), `the new session got ${fresh.label}, a label of a returning one`);
+    const terminals = await list(b);
+    const mine = terminals.find(t => t.id === id);
     assert.equal(mine?.owner, 'you');
+    assert.ok(mine.name.startsWith(youA.label), `${mine.name} should start with ${youA.label}`);
+    const theirs = terminals.find(t => t.id === idC);
+    assert.equal(theirs?.owner, youC.label);
+    assert.equal(theirs.name, `${youC.label}: second`);
     const again = await b.ok('terminal_run', { command: 'echo after-reload' });
     assert.equal(termId(again), id);
     assert.match(again, /after-reload/);
   } finally {
     await closeAll(b);
+    await closeAll(c2);
     await b.close();
+    await c2.close();
+    await newcomer.close();
   }
 });
 

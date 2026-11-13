@@ -1,16 +1,19 @@
 // Tracks every integrated terminal of the window: agent terminals (created by a session) and the
-// user's own. Each terminal gets a headless mirror (mirror.ts) fed with its output, so commands return
-// the rendered text. Commands run through shell integration when it is active, which gives exit codes
+// user's own. Agent terminals get a headless mirror (mirror.ts) fed with their output, so commands
+// return the rendered text. The user's own terminals only keep a small raw tail (tail.ts) until an agent
+// is allowed to use one; its mirror then starts from that tail, and is released again when no session
+// uses the terminal any more. Commands run through shell integration when it is active, which gives exit codes
 // and exact command boundaries; without it there is an honest, degraded fallback.
 import * as vscode from 'vscode';
 import { ToolError } from '../core/errors';
 import { Emitter } from '../core/events';
 import type { BridgeServices, TerminalInfo, TerminalService, TerminalState } from '../core/services';
 import type { AgentSession } from '../core/sessions';
-import { decideAccess, matchPersisted, type AccessDecision, parsePolicy, parseSessionEndPolicy, type PersistedTerminal } from './access';
+import { decideAccess, labelPrefix, matchPersisted, renamedFor, type AccessDecision, parsePolicy, parseSessionEndPolicy, type PersistedTerminal } from './access';
 import { assessActivity, looksLikeShellPrompt, type Activity } from './activity';
 import { TerminalMirror, type LinesResult, type Mark, type MirrorFeed, type Region } from './mirror';
 import { shortCommand } from './render';
+import { TerminalTail } from './tail';
 
 export interface Execution {
   readonly commandLine: string;
@@ -58,6 +61,8 @@ export class Tracked {
   id = '';
   origin: 'agent' | 'user' = 'user';
   ownerKey: string | undefined;
+  /** Agent terminals: the owner's label the name was made from, to tell when it no longer matches. */
+  label: string | undefined;
   starting = false;
   current: Execution | undefined;
   last: Execution | undefined;
@@ -85,12 +90,57 @@ export class Tracked {
   pendingRun: { resolve(execution: Execution): void } | undefined;
   readonly identified: Promise<void>;
   markIdentified!: () => void;
+  /** Terminal size, when known (proposed API terminalDimensions). */
+  size: { columns: number; rows: number } | undefined;
+  /** Raw recent output, for a terminal without a mirror yet (and kept for the user's terminals). */
+  tail: TerminalTail | undefined = new TerminalTail();
+  private mirrorInstance: TerminalMirror | undefined;
 
   constructor(
     readonly terminal: vscode.Terminal,
-    readonly mirror: TerminalMirror,
+    private readonly createMirror: (t: Tracked) => TerminalMirror,
   ) {
     this.identified = new Promise(resolve => (this.markIdentified = resolve));
+  }
+
+  /** The headless emulator of this terminal, created on first use (starting from the kept tail). */
+  get mirror(): TerminalMirror {
+    if (!this.mirrorInstance) this.mirrorInstance = this.createMirror(this);
+    return this.mirrorInstance;
+  }
+
+  get mirrored(): boolean {
+    return this.mirrorInstance !== undefined;
+  }
+
+  /** Output from the terminal. */
+  feed(data: string): void {
+    this.tail?.append(data);
+    if (this.mirrorInstance) void this.mirrorInstance.write(data);
+  }
+
+  resize(columns: number, rows: number): void {
+    this.size = { columns, rows };
+    this.mirrorInstance?.resize(columns, rows);
+  }
+
+  /** Drops the mirror (and every position that pointed into it); the tail stays. */
+  releaseMirror(): void {
+    const mirror = this.mirrorInstance;
+    if (!mirror) return;
+    this.mirrorInstance = undefined;
+    for (const e of [this.current, this.last, ...this.awaitingRegion]) if (e) e.region = undefined;
+    this.unclaimedRegions.length = 0;
+    this.awaitingRegion.length = 0;
+    this.marks.clear();
+    mirror.dispose();
+  }
+
+  /** Releases everything held for output (on close). */
+  disposeOutput(): void {
+    this.tail = undefined;
+    this.mirrorInstance?.dispose();
+    this.mirrorInstance = undefined;
   }
 
   get name(): string {
@@ -120,6 +170,8 @@ const SHELL_INTEGRATION_WAIT_MS = 12_000;
 
 export class TerminalManager implements TerminalService, vscode.Disposable {
   private readonly byTerminal = new Map<vscode.Terminal, Tracked>();
+  /** Closed terminals whose records were dropped: late events for them must not track them again. */
+  private readonly forgotten = new WeakSet<vscode.Terminal>();
   private readonly changeEmitter = new Emitter<void>();
   private readonly disposables: vscode.Disposable[] = [];
   /** Per session: the terminal it uses when a tool gets no `terminal`. */
@@ -129,6 +181,7 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
   private readonly activatedAt = Date.now();
   private lastUserEditAt = 0;
   private changeQueued = false;
+  private renaming = false;
   readonly feed: MirrorFeed;
   readonly dimensionsAvailable: boolean;
   readonly ready: Promise<void>;
@@ -142,7 +195,7 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
     // Proposed APIs, used when the user enabled proposed API for this extension (as the browser needs).
     let feed: MirrorFeed = 'executions';
     try {
-      this.disposables.push(vscode.window.onDidWriteTerminalData(e => void this.track(e.terminal).mirror.write(e.data)));
+      this.disposables.push(vscode.window.onDidWriteTerminalData(e => this.live(e.terminal)?.feed(e.data)));
       feed = 'stream';
     } catch {
       // Not enabled: command output comes from shell-integration executions only.
@@ -150,7 +203,7 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
     this.feed = feed;
     let dimensions = false;
     try {
-      this.disposables.push(vscode.window.onDidChangeTerminalDimensions(e => this.byTerminal.get(e.terminal)?.mirror.resize(e.dimensions.columns, e.dimensions.rows)));
+      this.disposables.push(vscode.window.onDidChangeTerminalDimensions(e => this.byTerminal.get(e.terminal)?.resize(e.dimensions.columns, e.dimensions.rows)));
       dimensions = true;
     } catch {
       // Not enabled: mirrors use a default size; plain output is unaffected, full-screen programs may look off.
@@ -158,10 +211,11 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
     this.dimensionsAvailable = dimensions;
 
     this.disposables.push(
-      vscode.window.onDidOpenTerminal(t => void this.track(t)),
+      vscode.window.onDidOpenTerminal(t => void this.live(t)),
       vscode.window.onDidCloseTerminal(t => this.onClosed(t)),
       vscode.window.onDidChangeTerminalShellIntegration(e => {
-        const tracked = this.track(e.terminal);
+        const tracked = this.live(e.terminal);
+        if (!tracked) return;
         if (tracked.starting) tracked.starting = false;
         this.changed();
       }),
@@ -173,8 +227,12 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
       }),
       services.sessions.onDidChange(change => {
         if (change.type === 'removed') this.onSessionEnded(change.session);
-        else this.changed();
+        else {
+          this.changed();
+          this.renameStale();
+        }
       }),
+      vscode.window.onDidChangeActiveTerminal(() => this.renameStale()),
     );
     for (const t of vscode.window.terminals) this.track(t);
     this.ready = Promise.all([...this.byTerminal.values()].map(t => t.identified)).then(() => undefined);
@@ -554,36 +612,30 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
 
   // ------------------------------------------------------------------ events
 
+  /** The record of an open terminal (tracked on first sight), or undefined for one already closed and forgotten. */
+  private live(terminal: vscode.Terminal): Tracked | undefined {
+    return this.byTerminal.get(terminal) ?? (this.forgotten.has(terminal) || terminal.exitStatus !== undefined ? undefined : this.track(terminal));
+  }
+
   /** Returns the tracking record of a terminal, creating it on first sight. */
   track(terminal: vscode.Terminal, created?: { session: AgentSession; cwd: string | undefined }): Tracked {
     const existing = this.byTerminal.get(terminal);
     if (existing) return existing;
-    let size: { columns: number; rows: number } | undefined;
+    const t = new Tracked(terminal, x => this.createMirror(x));
     if (this.dimensionsAvailable) {
       try {
-        size = terminal.dimensions;
+        t.size = terminal.dimensions;
       } catch {
-        size = undefined;
+        t.size = undefined;
       }
     }
-    const mirror = new TerminalMirror({ feed: this.feed, cols: size?.columns, rows: size?.rows });
-    const t = new Tracked(terminal, mirror);
     this.byTerminal.set(terminal, t);
-    mirror.onRegionStart(region => {
-      if (this.feed !== 'stream') return;
-      const i = t.awaitingRegion.findIndex(e => sameCommand(e.commandLine, region.commandLine));
-      if (i >= 0) {
-        // Executions before the match will not get a region any more.
-        t.awaitingRegion.splice(0, i + 1)[i]!.region = region;
-      } else {
-        t.unclaimedRegions.push(region);
-        if (t.unclaimedRegions.length > 10) t.unclaimedRegions.shift();
-      }
-    });
     if (created) {
       t.id = `term-${this.nextId++}`;
       t.origin = 'agent';
       t.ownerKey = created.session.id;
+      t.label = created.session.label;
+      void t.mirror;
       t.createdCwd = created.cwd ?? created.session.cwd;
       t.starting = !terminal.shellIntegration && shellIntegrationEnabled() && canHaveShellIntegration(terminal);
       if (t.starting) setTimeout(() => {
@@ -599,6 +651,60 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
     return t;
   }
 
+  /**
+   * The mirror of a terminal, created when an agent first needs it. A terminal that has printed before
+   * (the user's own, or one found at startup) starts from its kept tail: the agent sees the screen and
+   * the recent output, as the user does; anything older is reported as cut off.
+   */
+  private createMirror(t: Tracked): TerminalMirror {
+    const mirror = new TerminalMirror({ feed: this.feed, cols: t.size?.columns, rows: t.size?.rows });
+    mirror.onRegionStart(region => {
+      if (this.feed !== 'stream') return;
+      const i = t.awaitingRegion.findIndex(e => sameCommand(e.commandLine, region.commandLine));
+      if (i >= 0) {
+        // Executions before the match will not get a region any more.
+        t.awaitingRegion.splice(0, i + 1)[i]!.region = region;
+      } else {
+        t.unclaimedRegions.push(region);
+        if (t.unclaimedRegions.length > 10) t.unclaimedRegions.shift();
+      }
+    });
+    const tail = t.tail;
+    if (tail && tail.received > 0) {
+      void mirror.replay(tail.text(), tail.truncated).then(async () => {
+        // The running command started before what the tail holds: its output so far is what is there.
+        const current = t.current;
+        if (!current || current.region || current.fallback || mirror !== (t.mirrored ? t.mirror : undefined)) return;
+        if (this.feed === 'stream') {
+          current.region = mirror.regionFromStart();
+          const i = t.awaitingRegion.indexOf(current);
+          if (i >= 0) t.awaitingRegion.splice(i, 1);
+        } else {
+          const region = await mirror.beginRegion();
+          if (region) {
+            region.truncated = true;
+            current.region = region;
+          }
+        }
+      }).catch(err => this.services.log.warn(`replaying the output of ${t.id || 'a terminal'} failed: ${err instanceof Error ? err.message : String(err)}`));
+      mirror.lastWriteAt = tail.lastWriteAt;
+      mirror.received = tail.received;
+    }
+    // Agent terminals do not need the tail once mirrored; the user's keep it, in case the mirror is released.
+    if (t.origin === 'agent') t.tail = undefined;
+    return mirror;
+  }
+
+  /** Whether any live session still uses a user terminal (so its mirror is worth keeping). */
+  private inUse(t: Tracked): boolean {
+    if (t.handoff || t.current?.fallback) return true;
+    const alive = (id: string | undefined) => !!id && !!this.services.sessions.get(id);
+    if (alive(t.current?.agentSession)) return true;
+    for (const id of t.granted) if (alive(id)) return true;
+    for (const id of t.marks.keys()) if (alive(id)) return true;
+    return false;
+  }
+
   /** Decides whether a terminal we did not just create is an agent terminal from before a reload. */
   private async identify(t: Tracked): Promise<void> {
     const pid = await Promise.race([Promise.resolve(t.terminal.processId).catch(() => undefined), sleep(3000).then(() => undefined)]);
@@ -609,6 +715,8 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
       t.id = record.id;
       t.origin = 'agent';
       t.ownerKey = record.ownerKey;
+      t.label = record.label ?? labelPrefix(record.name);
+      if (!t.closed) void t.mirror;
     } else {
       t.id = `term-${this.nextId++}`;
       t.origin = 'user';
@@ -617,10 +725,12 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
     if (t.closed) return;
     this.persist();
     this.changed();
+    this.renameStale();
   }
 
   private onExecutionStart(e: vscode.TerminalShellExecutionStartEvent): void {
-    const t = this.track(e.terminal);
+    const t = this.live(e.terminal);
+    if (!t) return;
     t.starting = false;
     const execution = newExecution(e.execution.commandLine.value, undefined);
     executionOf.set(e.execution, execution);
@@ -635,13 +745,18 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
       // read() must be called right away, or early output is lost.
       const stream = e.execution.read();
       execution.pumped = (async () => {
-        execution.region = await t.mirror.beginRegion();
+        // A terminal without a mirror keeps the output in its tail; a mirror made meanwhile frames the rest.
+        if (t.mirrored) execution.region = await t.mirror.beginRegion();
+        else if (t.tail && !t.tail.atLineStart) t.tail.append('\r\n');
         try {
-          for await (const data of stream) await t.mirror.write(data);
+          for await (const data of stream) {
+            if (t.mirrored) await t.mirror.write(data);
+            t.tail?.append(data);
+          }
         } catch {
           // The stream ends abruptly when the terminal closes.
         }
-        await t.mirror.endRegion(execution.exitCode);
+        if (t.mirrored && execution.region) await t.mirror.endRegion(execution.exitCode);
       })();
     }
     if (t.pendingRun) {
@@ -660,11 +775,11 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
     // Let the output catch up with the end event: the data stream can lag behind it.
     if (this.feed === 'stream') {
       const deadline = Date.now() + 2500;
-      while (!(execution.region?.ended ?? false) && !t.closed && Date.now() < deadline) await sleep(25);
+      while (t.mirrored && !(execution.region?.ended ?? false) && !t.closed && Date.now() < deadline) await sleep(25);
     } else if (execution.pumped) {
       await Promise.race([execution.pumped, sleep(1500)]);
     }
-    await t.mirror.flush();
+    if (t.mirrored) await t.mirror.flush();
     if (execution.exitCode === undefined && execution.region?.ended) execution.exitCode = execution.region.exitCode;
     this.finish(t, execution, execution.exitCode);
   }
@@ -691,11 +806,16 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
       if (current.fallback && !current.fallback.frozen) current.fallback.frozen = this.outputOf(t, current).lines;
       this.finish(t, current, undefined);
     }
-    // Keep the record (and mirror) a little, so a tool that is waiting can still report the output.
-    setTimeout(() => {
+    // Keep the record (and mirror) a little, so a tool that is waiting can still report the output; a
+    // terminal no agent used has nothing worth keeping.
+    t.tail = undefined;
+    const forget = () => {
       this.byTerminal.delete(terminal);
-      t.mirror.dispose();
-    }, 60_000).unref?.();
+      this.forgotten.add(terminal);
+      t.disposeOutput();
+    };
+    if (t.mirrored) setTimeout(forget, 60_000).unref?.();
+    else forget();
     for (const [session, id] of this.currentOf) if (id === t.id) this.currentOf.delete(session);
     this.persist();
     this.changed();
@@ -706,6 +826,7 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
     for (const t of this.all()) {
       t.granted.delete(session.id);
       t.marks.delete(session.id);
+      if (t.origin === 'user' && t.mirrored && !this.inUse(t)) t.releaseMirror();
       if (t.origin !== 'agent' || t.ownerKey !== session.id) continue;
       if (policy === 'close' || (policy === 'closeIdle' && (t.state === 'idle' || t.state === 'starting'))) t.terminal.dispose();
     }
@@ -713,10 +834,38 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
     this.changed();
   }
 
+  /**
+   * An agent terminal is named after its session ("Claude 2: dev server"). Sessions get their label back
+   * when they reconnect after a reload (core/sessions.ts), but one that returns after its number was
+   * given to another session gets a new label, and its terminals would show the wrong owner. VS Code can
+   * rename only the active terminal (and cannot recolor one at all), so a stale name is fixed when the
+   * terminal is active: right away if it is, otherwise as soon as the user switches to it.
+   */
+  private renameStale(): void {
+    const t = this.forTerminal(vscode.window.activeTerminal);
+    if (!t || t.closed || t.origin !== 'agent' || !t.ownerKey || this.renaming) return;
+    const owner = this.services.sessions.get(t.ownerKey);
+    const name = owner ? renamedFor(t.name, t.label, owner.label) : undefined;
+    if (!owner || !name) return;
+    this.renaming = true;
+    void Promise.resolve(vscode.commands.executeCommand('workbench.action.terminal.renameWithArg', { name }))
+      .then(async () => {
+        for (let i = 0; i < 20 && t.terminal.name !== name; i++) await sleep(50);
+        if (t.terminal.name === name) {
+          t.label = owner.label;
+          this.services.log.info(`renamed ${t.id} to "${name}" (its session is now ${owner.label})`);
+          this.persist();
+          this.changed();
+        }
+      })
+      .catch(err => this.services.log.warn(`could not rename ${t.id}: ${err instanceof Error ? err.message : String(err)}`))
+      .finally(() => (this.renaming = false));
+  }
+
   private persist(): void {
     const current: PersistedTerminal[] = this.all()
       .filter(t => t.origin === 'agent')
-      .map(t => ({ id: t.id, pid: t.pid, name: t.name, ownerKey: t.ownerKey, createdAt: t.createdAt }));
+      .map(t => ({ id: t.id, pid: t.pid, name: t.name, ownerKey: t.ownerKey, createdAt: t.createdAt, ...(t.label ? { label: t.label } : {}) }));
     // Terminals revived after a reload can appear a little after activation; keep their records a while.
     if (Date.now() - this.activatedAt < 60_000) {
       const ids = new Set(current.map(r => r.id));
@@ -739,7 +888,7 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
 
   dispose(): void {
     for (const d of this.disposables) d.dispose();
-    for (const t of this.byTerminal.values()) t.mirror.dispose();
+    for (const t of this.byTerminal.values()) t.disposeOutput();
     this.byTerminal.clear();
     this.changeEmitter.dispose();
   }

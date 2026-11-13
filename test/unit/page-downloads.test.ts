@@ -75,7 +75,7 @@ describe('describeDownload', () => {
 
   it('is honest about files the agent cannot reach', () => {
     const remote = describeDownload({ ...base, phase: 'remote', remoteName: 'ssh-remote', captured: false, endedAt: 5, total: 10 });
-    expect(remote).toMatch(/remote window \(ssh-remote\).*not reachable from where you run \(finished/);
+    expect(remote).toMatch(/remote window \(ssh-remote; you run in [^)]*\).*not reachable from where you run \(finished/);
     expect(describeDownload({ ...base, phase: 'user-dialog', captured: false })).toMatch(/VS Code asked the user where to save it.*wait: true/);
     expect(isFinished({ ...base, phase: 'user-dialog' })).toBe(false);
     expect(isFinished({ ...base, phase: 'user-dialog', endedAt: 1 })).toBe(true);
