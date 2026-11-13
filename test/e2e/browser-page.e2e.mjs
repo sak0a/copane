@@ -435,6 +435,8 @@ test('evaluate: expressions, statements, functions, element argument, errors, bi
   assert.equal(await evaluate('const x = 5; x * 2'), '10');
   assert.equal(await evaluate("function f() { return 'declared'; }"), 'declared');
   assert.equal(await evaluate('async () => { await new Promise(r => setTimeout(r, 50)); return 7; }'), '7');
+  assert.equal(await evaluate('new Promise(r => setTimeout(() => r(8), 50))'), '8', 'a promise the expression evaluates to is awaited');
+  assert.match((await a.call('browser_evaluate', { function: 'Promise.reject(new Error("nope"))' })).text, /rejected.*nope/s);
   const obj = JSON.parse(await evaluate('({ a: 1, list: [1, 2], el: document.querySelector("h1"), u: undefined })'));
   assert.deepEqual(obj, { a: 1, list: [1, 2], el: '<h1 id="title"> Home', u: '(undefined)' });
   const nodes = JSON.parse(await evaluate("document.querySelectorAll('#list button')"));

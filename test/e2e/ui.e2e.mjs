@@ -108,7 +108,7 @@ test('pausing the tab as the user shows it, counts it and blocks the agent; resu
   }, 'the paused row and the badge in the workbench');
   assert.match(w.status.aria, /1 tab paused/);
   // Owned by the page tools; skipped if that tool is renamed.
-  const refused = await alpha.call('browser_evaluate', { tab: tabId, expression: 'document.title' });
+  const refused = await alpha.call('browser_evaluate', { tab: tabId, function: 'document.title' });
   if (!/Unknown tool/.test(refused.text)) assert.ok(refused.isError && /paused/.test(refused.text), `the agent was not blocked: ${refused.text}`);
 
   await command('agentBridge.ui.resumeTab', tabId);

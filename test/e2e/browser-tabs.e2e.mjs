@@ -66,7 +66,7 @@ function editorTabs() {
   return JSON.parse(out);
 }
 
-const evaluate = (a, tab, expression) => a.call('browser_evaluate', { tab, expression });
+const evaluate = (a, tab, expression) => a.call('browser_evaluate', { tab, function: expression });
 
 // ---------------------------------------------------------------------------------------------------
 

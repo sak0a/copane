@@ -62,6 +62,12 @@ export function scriptTools(env: PageEnv): ToolDefinition<any>[] {
                 remote = called.result;
               }
             }
+            // REPL mode does not await a promise the code evaluates to (`fetch(...).then(...)`), so do it here.
+            if (remote?.subtype === 'promise' && remote.objectId) {
+              const awaited = await call.send('Runtime.awaitPromise', { promiseObjectId: remote.objectId, generatePreview: false });
+              if (awaited.exceptionDetails) throw new ToolError('failed', `The promise was rejected: ${exceptionText(awaited.exceptionDetails)}`);
+              remote = awaited.result;
+            }
             output = await serialize(call, remote);
           } catch (err) {
             if (!(err instanceof DialogInterrupt)) throw err;
