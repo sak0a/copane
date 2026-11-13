@@ -17,7 +17,7 @@ const maxCharsArg = z
   .min(500)
   .max(MAX_MAX_CHARS)
   .optional()
-  .describe(`Default ${DEFAULT_MAX_CHARS}; longer output keeps its end.`);
+  .describe(`Default ${DEFAULT_MAX_CHARS}.`);
 
 export function terminalTools(services: BridgeServices, manager: TerminalManager): ToolDefinition<any>[] {
   // ---------------------------------------------------------------- helpers

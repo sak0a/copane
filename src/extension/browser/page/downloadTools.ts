@@ -14,10 +14,10 @@ export function downloadTools(env: PageEnv, manager: DownloadManager): ToolDefin
       name: 'browser_downloads',
       title: 'Downloads',
       description:
-        "Lists the tab's recent downloads with their state and the path of each saved file (read it with your own file tools), or waits for one to finish. Action results already report downloads they start; use wait when a download starts late (e.g. an export that is generated first) or is still running.",
+        "Lists the tab's recent downloads with state and saved file path (read it with your file tools), or waits for one. Action results already report downloads they start; wait is for one that starts late (a generated export) or is still running.",
       input: {
-        wait: z.boolean().optional().describe('Wait until the newest download finishes; if none is running, wait for the next one to start and finish.'),
-        timeoutSeconds: z.number().min(1).max(300).optional().describe('For wait. Default 30.'),
+        wait: z.boolean().optional().describe('Until the newest download finishes, or the next one if none is running.'),
+        timeoutSeconds: z.number().min(1).max(300).optional().describe('Default 30.'),
         tab: tabArg,
       },
       annotations: { readOnlyHint: true },
