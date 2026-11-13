@@ -64,9 +64,9 @@ Tools appear in Claude Code as `mcp__copane__<name>`.
 | Session and window | `session_info`, `session_set_title`, `window_status`, `window_select` |
 | Browser tabs | `browser_list_tabs`, `browser_open`, `browser_select_tab`, `browser_show_tab`, `browser_release_tab`, `browser_close_tab` |
 | Navigation | `browser_navigate`, `browser_history` (back, forward, reload) |
-| Reading a page | `browser_snapshot` (accessibility tree with element refs), `browser_screenshot`, `browser_wait_for` |
-| Acting on a page | `browser_click`, `browser_type`, `browser_fill_form`, `browser_press_key`, `browser_hover`, `browser_select_option`, `browser_scroll`, `browser_drag`, `browser_upload_file`, `browser_handle_dialog`, `browser_evaluate` |
-| Debugging a page | `browser_console_messages`, `browser_network_requests`, `browser_network_request` |
+| Reading a page | `browser_snapshot` (accessibility tree with element refs; `mode: "text"` for reading, `find` to locate), `browser_screenshot`, `browser_wait_for` |
+| Acting on a page | `browser_click`, `browser_type`, `browser_fill_form` (also selects options), `browser_press_key`, `browser_hover`, `browser_scroll`, `browser_drag`, `browser_upload_file`, `browser_handle_dialog`, `browser_evaluate` |
+| Debugging a page | `browser_console_messages`, `browser_network_requests` (with `id`: one request's headers and bodies) |
 | Terminals | `terminal_run`, `terminal_read`, `terminal_wait`, `terminal_send`, `terminal_interrupt`, `terminal_request_user_input` (hand a login or prompt to the user), `terminal_create`, `terminal_list`, `terminal_close` |
 
 The session indicator in a page can be dragged to any corner; it stays there for that tab and new

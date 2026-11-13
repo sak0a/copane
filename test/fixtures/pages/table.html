@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Table fixture</title>
+<style>body{font:14px sans-serif;margin:16px} td,th{border:1px solid #ccc;padding:2px 6px}</style></head>
+<body>
+<header><nav aria-label="Main"><a href="/">Home</a> | <a href="/table.html">Inventory</a> | <a href="/form.html">Sign up</a></nav></header>
+<main>
+<h1>Inventory</h1>
+<p>Stock levels per product and warehouse, updated nightly.</p>
+<table id="inventory">
+  <caption>Products</caption>
+  <thead><tr><th>Product</th><th>SKU</th><th>Price</th><th>Stock</th><th>Warehouse</th><th>Action</th></tr></thead>
+  <tbody></tbody>
+</table>
+</main>
+<script>
+  const cities = ['Berlin', 'Paris', 'Lisbon', 'Oslo', 'Vienna', 'Madrid', 'Rome'];
+  const body = document.querySelector('#inventory tbody');
+  for (let i = 1; i <= 60; i++) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td><a href="/product/${i}">Widget ${i}</a></td><td>W-${String(i).padStart(4, '0')}</td><td>${(i * 3.25).toFixed(2)} €</td><td>${(i * 37) % 101}</td><td>${cities[i % cities.length]}</td><td><button>Order</button></td>`;
+    body.append(tr);
+  }
+</script>
+</body></html>

@@ -24,22 +24,19 @@ export const LOCAL_TOOLS: WireTool[] = [
     name: 'window_status',
     title: 'VS Code window status',
     description:
-      'Shows which VS Code window this session is connected to and why, or why it is not connected, and lists the open VS Code windows. ' +
-      'Call it when the browser_* or terminal_* tools are missing or report that they are not connected.',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      'Shows which VS Code window this session is connected to (or why none) and lists the open windows. Call it when browser_* or terminal_* tools are missing or not connected.',
+    inputSchema: { type: 'object', properties: {} },
     annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   },
   {
     name: 'window_select',
     title: 'Use another VS Code window',
     description:
-      'Connects this session to a different open VS Code window, for when several windows are open and the one you work in was not found automatically. ' +
-      'Pass the window id from window_status (or its workspace name). Your browser tabs and terminals in the previous window stay there.',
+      'Connects this session to another open VS Code window, when the one you work in was not found automatically. Your tabs and terminals in the previous window stay there.',
     inputSchema: {
       type: 'object',
-      properties: { window: { type: 'string', description: 'Window id from window_status, or the workspace name.' } },
+      properties: { window: { type: 'string', description: 'Id from window_status, or the workspace name.' } },
       required: ['window'],
-      additionalProperties: false,
     },
     annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: false },
   },

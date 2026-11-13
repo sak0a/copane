@@ -12,7 +12,7 @@ export function activateBrowser(services: BridgeServices): void {
   const certificates = new CertificateGate(services);
   browser.certificateRefusal = url => certificates.refusalFor(url);
   services.context.subscriptions.push(browser, certificates);
-  registerTabTools(services, browser);
+  const page = registerPageTools(services);
+  registerTabTools(services, browser, page);
   registerBrowserCommands(services, browser);
-  registerPageTools(services);
 }

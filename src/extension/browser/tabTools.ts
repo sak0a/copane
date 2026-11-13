@@ -3,6 +3,7 @@ import { ToolError } from '../core/errors';
 import type { BridgeServices, BrowserTabInfo } from '../core/services';
 import { sessionDisplayName, type AgentSession } from '../core/sessions';
 import { defineTool } from '../core/tools';
+import type { PageHooks } from './page';
 import type { BrowserServiceImpl } from './service';
 
 /** One line per tab, written for the agent. */
@@ -18,10 +19,10 @@ export function formatTab(tab: BrowserTabInfo, services: BridgeServices, viewer:
   return `${tab.id}  ${tab.url}  "${tab.title}"  (${notes.join(', ')})`;
 }
 
-const tabArg = z.string().optional().describe('Tab id, e.g. "tab-3" (see browser_list_tabs). Defaults to your current tab.');
+const tabArg = z.string().optional();
 
 /** Tools that manage tabs (as opposed to acting on a page). */
-export function registerTabTools(services: BridgeServices, browser: BrowserServiceImpl): void {
+export function registerTabTools(services: BridgeServices, browser: BrowserServiceImpl, page?: PageHooks): void {
   const { context } = services;
   const requireBrowser = async () => {
     browser.assertAvailable();
@@ -38,8 +39,7 @@ export function registerTabTools(services: BridgeServices, browser: BrowserServi
       defineTool({
         name: 'browser_list_tabs',
         title: 'List browser tabs',
-        description:
-          "Lists the integrated-browser tabs of this VS Code window: yours, the user's and other agent sessions', with who opened each, who controls it, and which one is your current tab. Tabs the user opened need their permission before you use them (asked on first use); tabs another session controls you can only read.",
+        description: "Lists this window's browser tabs with who opened and who controls each.",
         input: {},
         annotations: { readOnlyHint: true },
         handler: async (_args, ctx) => {
@@ -54,25 +54,33 @@ export function registerTabTools(services: BridgeServices, browser: BrowserServi
       defineTool({
         name: 'browser_open',
         title: 'Open browser tab',
-        description:
-          "Opens a URL in a new tab of VS Code's integrated browser, next to the user's editors, without taking keyboard focus. The tab is yours (no permission needed), becomes your current tab, and shows the user that you control it.",
+        description: 'Opens a URL in a new browser tab, which becomes your current tab, and returns once the page has loaded.',
         input: {
-          url: z.string().describe('URL to open, e.g. "http://localhost:3000". A bare host like "localhost:3000" gets http://.'),
-          background: z.boolean().optional().describe('Open without bringing the tab to the front. Default false.'),
+          url: z.string().describe('"localhost:3000" works without a scheme.'),
+          background: z.boolean().optional().describe('Do not bring the tab to the front.'),
         },
         annotations: { openWorldHint: true },
         handler: async (args, ctx) => {
           await requireBrowser();
-          const tab = await browser.openTab(ctx.session, normalizeUrl(args.url), { background: args.background });
+          const url = normalizeUrl(args.url);
+          const tab = await browser.openTab(ctx.session, url, { background: args.background });
+          // Return once the page has loaded, so the next call (usually a snapshot) reads it, not the empty tab.
+          if (page) {
+            try {
+              return `${await page.describeOpened(ctx, tab.id, url)}\nIt is now your current tab.`;
+            } catch (err) {
+              if (ctx.signal.aborted) throw err;
+              ctx.log.warn(`could not wait for ${tab.id} to load: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          }
           return `Opened ${formatTab(tab, services, ctx.session)}\nIt is now your current tab.`;
         },
       }),
       defineTool({
         name: 'browser_select_tab',
         title: 'Switch to a browser tab',
-        description:
-          "Makes a tab your current one, so later browser tools act on it without `tab`. For a tab the user opened, this is where VS Code asks the user for permission; if they decline, do not ask again. Does not bring the tab to the front (see browser_show_tab) and does not take control from another session.",
-        input: { tab: z.string().describe('Tab id, e.g. "tab-3" (see browser_list_tabs).') },
+        description: 'Makes a tab your current one (for a tab the user opened, asks them first). Does not bring it to the front.',
+        input: { tab: z.string().describe('e.g. "tab-3".') },
         annotations: { idempotentHint: true },
         handler: async (args, ctx) => {
           await requireBrowser();
@@ -85,8 +93,7 @@ export function registerTabTools(services: BridgeServices, browser: BrowserServi
       defineTool({
         name: 'browser_show_tab',
         title: 'Show browser tab to the user',
-        description:
-          'Brings a browser tab to the front in the editor area so the user can see it (keyboard focus stays where it is). Use it when you want the user to look at something; do not call it before every action, since it changes what the user sees.',
+        description: 'Brings a browser tab to the front so the user sees it (focus stays). Only when you want the user to look at it.',
         input: { tab: tabArg },
         handler: async (args, ctx) => {
           await requireBrowser();
@@ -98,11 +105,10 @@ export function registerTabTools(services: BridgeServices, browser: BrowserServi
       defineTool({
         name: 'browser_release_tab',
         title: 'Release browser tab',
-        description:
-          'Ends your control of a tab when you are done acting in it: the indicator disappears for the user, and other sessions may act in it. You can still read it, and acting in it again takes control again. Release tabs you no longer drive, especially ones the user opened.',
+        description: 'Ends your control of a tab you are done driving, so the user and other sessions can act in it. You can still read it.',
         input: {
           tab: tabArg,
-          all: z.boolean().optional().describe('Release every tab you control.'),
+          all: z.boolean().optional().describe('Every tab you control.'),
         },
         annotations: { idempotentHint: true },
         handler: async (args, ctx) => {
@@ -121,8 +127,7 @@ export function registerTabTools(services: BridgeServices, browser: BrowserServi
       defineTool({
         name: 'browser_close_tab',
         title: 'Close browser tab',
-        description:
-          "Closes a browser tab. You may close your own tabs and tabs of sessions that have ended. A tab the user opened needs their permission and must not be controlled by another session; another live session's tab cannot be closed.",
+        description: "Closes a browser tab: yours, an ended session's, or (with their permission) the user's.",
         input: { tab: tabArg },
         annotations: { destructiveHint: true },
         handler: async (args, ctx) => {

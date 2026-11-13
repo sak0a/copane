@@ -54,6 +54,31 @@ test('navigate: loads the page and reports URL, title and status', async () => {
   assert.match(await a.ok('browser_navigate', { url: url('/status/404') }), /HTTP 404 \(error page\)/);
 });
 
+test('open: returns once the page has loaded, so the first snapshot is never empty', async () => {
+  const text = await a.ok('browser_open', { url: url('/slow.html?ms=1500'), background: true });
+  opened.push(/Opened (tab-\d+)/.exec(text)[1]);
+  assert.match(text, /^Opened tab-\d+: http:\/\/127\.0\.0\.1:\d+\/slow\.html\?ms=1500 — "Slow page fixture" \(HTTP 200, loaded in [\d.]+ s\)\.\nIt is now your current tab\.$/);
+  assert.match(await a.ok('browser_snapshot'), /heading "Slow page" \[level=1\]/);
+  // A page that never finishes loading: back within the bound, usable.
+  const hanging = await a.ok('browser_open', { url: url('/slow.html?ms=hang'), background: true });
+  opened.push(/Opened (tab-\d+)/.exec(hanging)[1]);
+  assert.match(hanging, /"Slow page fixture" \(HTTP 200, the document is ready but still loading resources; it is usable\)/);
+  assert.match(await a.ok('browser_snapshot'), /heading "Slow page"/);
+});
+
+test('navigate: what the page being left logs and requests is not reported for the new page', async () => {
+  await open('/leave.html');
+  const nav = await a.ok('browser_navigate', { url: url('/slow?ms=800') });
+  assert.match(nav, /Navigated tab-\d+ to http:\/\/127\.0\.0\.1:\d+\/slow\?ms=800/);
+  assert.doesNotMatch(nav, /page being left|503/);
+  // It is still in the console log, for debugging, logged before the new page loaded.
+  assert.match(await a.ok('browser_console_messages', { level: 'error' }), /error from the page being left[^]*--- page loaded: http:\/\/127\.0\.0\.1:\d+\/slow\?ms=800 ---$/);
+  await a.ok('browser_navigate', { url: url('/leave.html') });
+  const click = await a.ok('browser_click', { selector: '#next' });
+  assert.match(click, /Navigated to http:\/\/127\.0\.0\.1:\d+\/slow\?ms=800/);
+  assert.doesNotMatch(click, /page being left|503/);
+});
+
 test('navigate: unreachable server fails with a hint', async () => {
   await open('about:blank');
   const port = (await startFixtureServer().then(async s => (await s.close(), s.port)));
@@ -93,7 +118,7 @@ test('snapshot: same-origin iframes, cross-origin marker, shadow DOM, bridge UI 
   await sleep(300);
   const snap = await a.ok('browser_snapshot');
   assert.match(snap, /- Page Title: Frames fixture/);
-  assert.match(snap, /- iframe "Same origin frame" \[ref=e\d+\]:\n {2}- paragraph \[ref=e\d+\]: Inside frame\n {2}- button "Frame button"/);
+  assert.match(snap, /- iframe "Same origin frame" \[ref=e\d+\]:\n {2}- paragraph: Inside frame\n {2}- button "Frame button"/);
   assert.match(snap, /- iframe "Other origin frame" \[ref=e\d+\]: \[cross-origin frame/);
   assert.match(snap, /button "Nested shadow button"/);
   assert.match(snap, /button "Closed shadow button"/);
@@ -112,7 +137,7 @@ test('snapshot: large pages are cut with a summary, and ref/selector narrow it',
   await open('/long.html');
   const snap = await a.ok('browser_snapshot', { maxChars: 5000 });
   assert.ok(snap.length < 5600, `snapshot too long: ${snap.length}`);
-  assert.match(snap, /\[Snapshot cut: showing the first \d+ of \d+ characters/);
+  assert.match(snap, /\[Snapshot cut: showing characters 0-\d+ of \d+/);
   assert.match(snap, /contentinfo \[ref=e\d+\]/);
   const section = refOf(snap, 'region "Section 10"');
   const part = await a.ok('browser_snapshot', { ref: section });
@@ -122,6 +147,30 @@ test('snapshot: large pages are cut with a summary, and ref/selector narrow it',
   assert.match(await a.ok('browser_snapshot', { selector: 'footer' }), /button "Bottom button"/);
   const full = await a.ok('browser_snapshot', { maxChars: 60000 });
   assert.ok(full.length <= 61000, `max snapshot too long: ${full.length}`);
+  // Reading on from where the cut was.
+  const offset = Number(/with offset (\d+)/.exec(snap)?.[1]);
+  const next = await a.ok('browser_snapshot', { maxChars: 5000, offset });
+  assert.match(next, /\[Snapshot cut: showing characters \d+-\d+ of \d+/);
+  const lastShown = snap.slice(0, snap.indexOf('[Snapshot cut')).trim().split('\n').pop();
+  assert.ok(!next.includes(lastShown), 'the continuation repeats the end of the first part');
+});
+
+test('snapshot: text mode, find, link targets', async () => {
+  await open('/table.html');
+  const text = await a.ok('browser_snapshot', { mode: 'text' });
+  assert.match(text, /- Text of the main content in tab-\d+ \(menus, sidebars and controls left out/);
+  assert.match(text, /^# Inventory$/m);
+  assert.match(text, /^\| Widget 37 \| W-0037 \| 120\.25 € \| 56 \| Lisbon \|$/m);
+  assert.doesNotMatch(text, /\[ref=|Sign up|Order/);
+  const found = await a.ok('browser_snapshot', { find: 'widget 37' });
+  assert.match(found, /- 1 match for "widget 37" in tab-\d+:/);
+  assert.match(found, /# in main, under heading "Inventory":\n- row: link "Widget 37" \[ref=e\d+\] \| W-0037 \| 120\.25 € \| 56 \| Lisbon \| button "Order" \[ref=e\d+\]/);
+  assert.match(await a.ok('browser_snapshot', { find: 'no such thing' }), /Nothing in tab-\d+ matches "no such thing"/);
+  const snap = await a.ok('browser_snapshot');
+  assert.match(snap, /- link "Home" \[ref=e\d+\]\n/);
+  assert.match(snap, /\[Link targets are left out; pass urls: true to see them\.\]/);
+  assert.match(await a.ok('browser_snapshot', { urls: true }), /link "Widget 2" \[ref=e\d+\] \[url=\/product\/2\]/);
+  await fails('browser_snapshot', { mode: 'text', find: 'x' }, /either find or mode "text"/);
 });
 
 test('refs fail clearly when the page changed underneath', async () => {
@@ -191,7 +240,20 @@ test('click: waits until the element is actionable, and says why not', async () 
   await fails('browser_click', { selector: '#covered' }, /is covered by <div id="overlay">/);
 });
 
-test('type, fill_form, select_option and press_key', async () => {
+test('click: an element scrolled into view while VS Code\'s panel shrinks the browser view', async () => {
+  // CDP's hit test disagreed with the page in this layout and reported the button as covered.
+  await a.ok('debug_vscode_command', { command: 'workbench.action.focusPanel' });
+  try {
+    const text = await a.ok('browser_open', { url: url('/form.html') });
+    opened.push(/Opened (tab-\d+)/.exec(text)[1]);
+    await evaluate("document.getElementById('submit').disabled = false; document.body.style.paddingTop = '600px'");
+    assert.match(await a.ok('browser_click', { selector: '#submit' }), /Clicked button "Create account"/);
+  } finally {
+    await a.ok('debug_vscode_command', { command: 'workbench.action.closePanel' });
+  }
+});
+
+test('type, fill_form (also for selects) and press_key', async () => {
   await open('/form.html');
   const value = async sel => JSON.parse(await evaluate(`JSON.stringify(document.querySelector(${JSON.stringify(sel)}).value)`));
   const snap = await a.ok('browser_snapshot');
@@ -219,10 +281,10 @@ test('type, fill_form, select_option and press_key', async () => {
   assert.equal(await value('#bday'), '1990-12-10');
   assert.equal(await evaluate("document.getElementById('terms').checked"), 'true');
   await fails('browser_fill_form', { fields: [{ selector: '#email', value: 'x@y.z' }, { selector: '#terms', value: 'yes' }] }, /Field 2 failed: .*pass true or false\.\nFilled before it: textbox "Email"/);
-  await fails('browser_select_option', { selector: '#country', values: ['Spain'] }, /no option "Spain". Options: Choose…/);
-  await fails('browser_select_option', { selector: '#country', values: ['us'] }, /is disabled/);
-  await fails('browser_select_option', { selector: '#name', values: ['x'] }, /not a <select>/);
-  assert.match(await a.ok('browser_select_option', { selector: '#country', values: ['de'] }), /Selected "Germany"/);
+  await fails('browser_fill_form', { fields: [{ selector: '#country', value: 'Spain' }] }, /no option "Spain". Options: Choose…/);
+  await fails('browser_fill_form', { fields: [{ selector: '#country', value: 'us' }] }, /is disabled/);
+  await fails('browser_type', { selector: '#country', text: 'x' }, /not a text field.*browser_fill_form/);
+  assert.match(await a.ok('browser_fill_form', { fields: [{ selector: '#country', value: 'de' }] }), /combobox "Country" .*→ "Germany"/);
   // Keys: chords reach the page with the right modifiers; Tab moves focus.
   await a.ok('browser_press_key', { key: 'Control+Shift+K', selector: '#bio' });
   await a.ok('browser_press_key', { key: 'ArrowDown', count: 2 });
@@ -243,7 +305,9 @@ test('type, fill_form, select_option and press_key', async () => {
 test('hover shows hover content', async () => {
   await open('/spa.html');
   assert.doesNotMatch(await a.ok('browser_snapshot'), /Helpful tooltip/);
-  assert.match(await a.ok('browser_hover', { selector: '#hoverme' }), /Hovering over/);
+  const hovered = await a.ok('browser_hover', { selector: '#hoverme' });
+  assert.match(hovered, /Hovering over/);
+  assert.match(hovered, /Changed on the page:\n(.*\n)*.*tooltip "Helpful tooltip"/);
   assert.match(await a.ok('browser_snapshot'), /tooltip "Helpful tooltip"/);
 });
 
@@ -313,18 +377,18 @@ test('screenshot: viewport, element, full page, png, and the bridge UI hidden', 
   assert.ok(!shot.isError, shot.text);
   assert.equal(shot.images.length, 1);
   assert.equal(shot.images[0].mimeType, 'image/jpeg');
-  assert.match(shot.text, /Screenshot of the viewport in tab-\d+ \((\d+)×(\d+) px; viewport \d+×\d+ CSS px\)/);
+  assert.match(shot.text, /^Screenshot of the viewport in tab-\d+, \d+×\d+ px\. (Its pixels are CSS px: usable as x\/y for browser_click|For browser_click x\/y, divide its coordinates by [\d.]+)\.$/);
   // The page records the indicator's visibility changes: hidden for the capture, then restored.
   assert.deepEqual(JSON.parse(await evaluate('JSON.stringify(indicatorLog)')), ['hidden', 'visible']);
   const el = await a.call('browser_screenshot', { selector: '#covered', format: 'png' });
   assert.equal(el.images[0].mimeType, 'image/png');
-  const [, w, h] = /\((\d+)×(\d+) px/.exec(el.text).map(Number);
+  const [, w, h] = /(\d+)×(\d+) px/.exec(el.text).map(Number);
   const box = JSON.parse(await evaluate("JSON.stringify(document.getElementById('covered').getBoundingClientRect())"));
   assert.ok(Math.abs(w - box.width) <= 2 && Math.abs(h - box.height) <= 2, `element shot ${w}×${h}, element ${box.width}×${box.height}`);
   await a.ok('browser_navigate', { url: url('/long.html') });
   const full = await a.call('browser_screenshot', { fullPage: true });
   assert.match(full.text, /The page is \d+ px tall; only the top \d+ px were captured/);
-  const [, fw, fh] = /\((\d+)×(\d+) px/.exec(full.text).map(Number);
+  const [, fw, fh] = /(\d+)×(\d+) px/.exec(full.text).map(Number);
   assert.ok(Math.max(fw, fh) <= 1568 && fw * fh <= 1_150_000 + 2000, `full page ${fw}×${fh}`);
   assert.ok(Buffer.from(full.images[0].data, 'base64').length < 1_500_000);
 });
@@ -377,13 +441,32 @@ test('network: listing, filters, onlyNew and request details with headers and bo
   const post = await a.ok('browser_network_requests', { method: 'POST', filter: '/echo' });
   const id = /(r\d+) {2}POST 200 fetch/.exec(post)?.[1];
   assert.ok(id, post);
-  const details = await a.ok('browser_network_request', { id });
+  const details = await a.ok('browser_network_requests', { id });
   assert.match(details, /Request headers:\n(.*\n)*? {2}x-agent: yes/i);
   assert.match(details, /Request body:\n {2}\{\n {4}"hello": "world"\n {2}\}/);
   assert.match(details, /Response body \(\d+ B\):\n {2}\{\n {4}"method": "POST"/);
   await a.ok('browser_network_requests', { onlyNew: true });
   assert.match(await a.ok('browser_network_requests', { onlyNew: true }), /No matching requests/);
-  await fails('browser_network_request', { id: 'r99999' }, /No request "r99999"/);
+  await fails('browser_network_requests', { id: 'r99999' }, /No request "r99999"/);
+});
+
+test('actions report what changed on the page, within a small budget', async () => {
+  await open('/form.html');
+  const snap = await a.ok('browser_snapshot');
+  const typed = await a.ok('browser_type', { ref: refOf(snap, 'textbox "Name"'), text: 'Ada' });
+  // The submit button got enabled; the field typed into is already reported in the first line.
+  assert.match(typed, /Changed on the page:\n- form \[ref=e\d+\]:\n {2}- button "Create account" \[ref=e\d+\]$/);
+  const clicked = await a.ok('browser_click', { ref: refOf(snap, 'button "Create account"') });
+  assert.match(clicked, /Changed on the page:\n- status "Result": "?Saved: \{/);
+  assert.doesNotMatch(clicked, /Gone from the page/);
+  // Nothing changed: nothing reported.
+  assert.doesNotMatch(await a.ok('browser_hover', { selector: 'h1' }), /Changed on the page/);
+  // A large change is cut at the budget.
+  await evaluate("document.querySelector('h1').onclick = () => { for (let i = 0; i < 200; i++) { const p = document.createElement('p'); p.textContent = 'Added line ' + i; document.body.append(p); } }");
+  const big = await a.ok('browser_click', { selector: 'h1' });
+  assert.match(big, /- paragraph: Added line 0\n/);
+  assert.match(big, /… and \d+ more changed lines \(browser_snapshot shows the whole page\)\./);
+  assert.ok(big.length < 1400, `change report too long: ${big.length}`);
 });
 
 // ---------------------------------------------------------------- dialogs
@@ -508,13 +591,15 @@ test('tools are listed with descriptions and input schemas', async () => {
   const names = tools.map(t => t.name);
   for (const name of [
     'browser_navigate', 'browser_history', 'browser_snapshot', 'browser_screenshot', 'browser_click', 'browser_type', 'browser_fill_form',
-    'browser_press_key', 'browser_hover', 'browser_select_option', 'browser_scroll', 'browser_drag', 'browser_upload_file', 'browser_wait_for',
-    'browser_console_messages', 'browser_network_requests', 'browser_network_request', 'browser_handle_dialog', 'browser_evaluate',
+    'browser_press_key', 'browser_hover', 'browser_scroll', 'browser_drag', 'browser_upload_file', 'browser_wait_for',
+    'browser_console_messages', 'browser_network_requests', 'browser_handle_dialog', 'browser_evaluate',
   ]) {
     assert.ok(names.includes(name), `missing tool ${name}`);
     const t = tools.find(x => x.name === name);
     assert.ok(t.description.length > 60, `${name} needs a description`);
   }
+  // Merged into browser_fill_form and browser_network_requests.
+  assert.ok(!names.includes('browser_select_option') && !names.includes('browser_network_request'));
 });
 
 test('cleanup: close the tabs this test opened', async () => {

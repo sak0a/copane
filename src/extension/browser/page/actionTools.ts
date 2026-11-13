@@ -1,4 +1,4 @@
-// Tools that act on the page with real input: click, type, fill_form, press_key, hover, select_option,
+// Tools that act on the page with real input: click, type, fill_form (also selects), press_key, hover,
 // scroll, drag, upload_file. Each waits for its element to be actionable, acts, then reports in a line
 // or two what happened as a result (navigation, dialog, console errors, failed requests, new tabs).
 import { existsSync, statSync } from 'node:fs';
@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { ToolError } from '../../core/errors';
 import { defineTool, type ToolDefinition } from '../../core/tools';
 import { withPage, type PageCall, type PageEnv } from './call';
+import { describeChanges, pageBefore } from './changes';
 import { markAction, report, settle } from './effects';
 import { click, mouseMove, prepareInput, pressChord, typeText, wheel } from './input';
 import { chordLabel, parseChord, type Modifier } from './keys';
@@ -37,6 +38,7 @@ function requireTarget(target: Target | undefined, what = 'an element'): Target 
  */
 async function act(call: PageCall, target: Target | undefined, summary: string | (() => string), fn: () => Promise<string | void>, options: { expectNavigation?: boolean } = {}): Promise<string> {
   await prepareInput(call);
+  const before = await pageBefore(call);
   const mark = markAction(call);
   let extra: string | void = undefined;
   try {
@@ -55,7 +57,8 @@ async function act(call: PageCall, target: Target | undefined, summary: string |
     }
   }
   const head = typeof summary === 'function' ? summary() : summary;
-  return report(`${head}${extra ? ` ${extra}` : ''}${now}`, effects);
+  const changes = await describeChanges(call, before, target?.kind === 'element' ? [target.backendNodeId] : []);
+  return report(`${head}${extra ? ` ${extra}` : ''}${now}`, [...effects, ...changes]);
 }
 
 async function focusedDescription(call: PageCall): Promise<string | undefined> {
@@ -80,7 +83,7 @@ async function fillField(call: PageCall, target: ElementTarget, info: ElementInf
     return;
   }
   if (info.kind !== 'text' && info.kind !== 'contenteditable') {
-    const suggestion = info.kind === 'select' ? 'use browser_select_option' : info.kind === 'checkbox' || info.kind === 'radio' ? 'use browser_click' : info.kind === 'file' ? 'use browser_upload_file' : 'click it, or target the text field itself';
+    const suggestion = info.kind === 'select' ? 'use browser_fill_form' : info.kind === 'checkbox' || info.kind === 'radio' ? 'use browser_click' : info.kind === 'file' ? 'use browser_upload_file' : 'click it, or target the text field itself';
     throw new ToolError('invalid_input', `${target.label} is not a text field (it is ${info.kind === 'other' ? `a <${info.tag}>` : `a ${info.kind}`}); ${suggestion}.`);
   }
   const focused = await call.callOn<boolean>(target.objectId, FOCUS_FOR_TYPING, [options.clear]);
@@ -112,12 +115,11 @@ export function actionTools(env: PageEnv): ToolDefinition<any>[] {
     defineTool({
       name: 'browser_click',
       title: 'Click',
-      description:
-        'Clicks an element with a real mouse event, after waiting (up to 5 s) until it is visible, enabled, scrolled into view and not covered. Supports double and right click and modifier keys. Returns what the click led to: navigation, dialog, console errors, failed requests, new tabs. Target by ref (from browser_snapshot), CSS selector, or viewport x/y.',
+      description: 'Clicks an element (ref, selector or viewport x/y) with a real mouse event, once it is visible, enabled and not covered (waits up to 5 s).',
       input: {
         ...pointArgs,
-        button: z.enum(['left', 'right', 'middle']).optional().describe('Default left.'),
-        doubleClick: z.boolean().optional().describe('Double-click instead of a single click.'),
+        button: z.enum(['left', 'right', 'middle']).optional(),
+        doubleClick: z.boolean().optional(),
         modifiers: modifiersArg,
         tab: tabArg,
       },
@@ -137,14 +139,13 @@ export function actionTools(env: PageEnv): ToolDefinition<any>[] {
     defineTool({
       name: 'browser_type',
       title: 'Type text',
-      description:
-        'Types text into a text field, textarea or contenteditable element: focuses it, replaces its content (unless clear is false) and types with real input events. Without ref/selector it types into the element that has focus. submit presses Enter afterwards. Returns what happened, including when the page changed what was typed.',
+      description: 'Types text into a text field or editable element (default: the focused one), replacing its content, with real input events.',
       input: {
         ...elementArgs,
-        text: z.string().describe('Text to type.'),
-        clear: z.boolean().optional().describe('Replace the current content (default true). false appends at the end.'),
-        slowly: z.boolean().optional().describe('Type one key at a time (fires keydown/keyup per character, e.g. for search-as-you-type or key handlers). Default false: insert the text in one go.'),
-        submit: z.boolean().optional().describe('Press Enter after typing.'),
+        text: z.string(),
+        clear: z.boolean().optional().describe('false: append instead of replacing.'),
+        slowly: z.boolean().optional().describe('One key event per character, for key handlers and search-as-you-type.'),
+        submit: z.boolean().optional().describe('Press Enter afterwards.'),
         tab: tabArg,
       },
       handler: (args, ctx) =>
@@ -179,30 +180,31 @@ export function actionTools(env: PageEnv): ToolDefinition<any>[] {
     defineTool({
       name: 'browser_fill_form',
       title: 'Fill form fields',
-      description:
-        'Fills several form fields in one call: text fields get text (replacing their content), checkboxes and radios true/false, selects the option label(s) or value(s). Stops at the first field that fails and says which fields were filled.',
+      description: 'Fills form fields and selects options: text for text fields, true/false for checkboxes and radios, option labels or values for a <select>.',
       input: {
         fields: z
           .array(
             z.object({
-              ref: z.string().optional().describe('Element ref from browser_snapshot.'),
-              selector: z.string().optional().describe('CSS selector, instead of ref.'),
-              value: z.union([z.string(), z.boolean(), z.array(z.string())]).describe('Text, true/false for a checkbox or radio, or option(s) for a select.'),
+              ref: z.string().optional(),
+              selector: z.string().optional(),
+              value: z.union([z.string(), z.boolean(), z.array(z.string())]).describe('An array selects several options of a multiple select.'),
             }),
           )
           .min(1)
-          .max(50)
-          .describe('Fields in the order to fill them.'),
+          .max(50),
         tab: tabArg,
       },
       handler: (args, ctx) =>
         withPage(env, ctx, args.tab, { access: 'control' }, async call => {
           const done: string[] = [];
+          const filled: number[] = [];
           await prepareInput(call);
+          const before = await pageBefore(call);
           const mark = markAction(call);
           for (const [i, field] of args.fields.entries()) {
             try {
               const target = requireTarget(await resolveTarget(call, field)) as ElementTarget;
+              filled.push(target.backendNodeId);
               const info = await inspect(call, target);
               if (info.kind === 'checkbox' || info.kind === 'radio') {
                 if (typeof field.value !== 'boolean') throw new ToolError('invalid_input', `${target.label} is a ${info.kind}: pass true or false.`);
@@ -214,6 +216,7 @@ export function actionTools(env: PageEnv): ToolDefinition<any>[] {
                 done.push(`${target.label} → ${field.value ? 'checked' : 'unchecked'}`);
               } else if (info.kind === 'select') {
                 const values = Array.isArray(field.value) ? field.value : [String(field.value)];
+                await actionPoint(call, target, { verb: 'select in', enabled: true });
                 const selected = await selectOptions(call, target, values);
                 done.push(`${target.label} → ${selected.map(s => `"${s}"`).join(', ')}`);
               } else {
@@ -232,18 +235,18 @@ export function actionTools(env: PageEnv): ToolDefinition<any>[] {
             }
           }
           const effects = await settle(call, mark);
-          return report(`Filled ${done.length} field${done.length === 1 ? '' : 's'}:\n${done.map(d => `- ${d}`).join('\n')}`, effects);
+          const changes = await describeChanges(call, before, filled);
+          return report(`Filled ${done.length} field${done.length === 1 ? '' : 's'}:\n${done.map(d => `- ${d}`).join('\n')}`, [...effects, ...changes]);
         }),
     }),
     defineTool({
       name: 'browser_press_key',
       title: 'Press key',
-      description:
-        'Presses a key or key combination with real key events, e.g. "Enter", "Escape", "Tab", "ArrowDown", "Control+a", "Shift+Tab", "ControlOrMeta+k". Goes to the focused element, or focuses ref/selector first. Reports where focus went and what the key press led to.',
+      description: 'Presses a key or combination such as "Enter", "Escape", "ArrowDown" or "ControlOrMeta+a" in the focused element, or in ref/selector.',
       input: {
-        key: z.string().min(1).describe('Key name (Enter, Tab, Escape, Backspace, Delete, ArrowUp/Down/Left/Right, Home, End, PageUp, PageDown, F1-F12, Space, or a character), optionally with modifiers joined by "+".'),
+        key: z.string().min(1).describe('Key names (Tab, PageDown, F2, a character, ...) joined by "+".'),
         ...elementArgs,
-        count: z.number().int().min(1).max(100).optional().describe('Press it this many times. Default 1.'),
+        count: z.number().int().min(1).max(100).optional(),
         tab: tabArg,
       },
       handler: (args, ctx) =>
@@ -271,7 +274,7 @@ export function actionTools(env: PageEnv): ToolDefinition<any>[] {
     defineTool({
       name: 'browser_hover',
       title: 'Hover',
-      description: 'Moves the mouse over an element (ref, selector or x/y), e.g. to open a hover menu or show a tooltip. Take a snapshot or screenshot afterwards to see what appeared.',
+      description: 'Moves the mouse over an element or point, e.g. to open a hover menu or tooltip.',
       input: { ...pointArgs, tab: tabArg },
       handler: (args, ctx) =>
         withPage(env, ctx, args.tab, { access: 'control' }, async call => {
@@ -281,34 +284,14 @@ export function actionTools(env: PageEnv): ToolDefinition<any>[] {
         }),
     }),
     defineTool({
-      name: 'browser_select_option',
-      title: 'Select option',
-      description: 'Selects option(s) in a <select> by visible label or value, firing input and change like a user would. For custom dropdowns (not a <select>), click them open and click the option instead.',
-      input: {
-        ...elementArgs,
-        values: z.array(z.string()).min(1).describe('Option labels or values. More than one only for a multiple select.'),
-        tab: tabArg,
-      },
-      handler: (args, ctx) =>
-        withPage(env, ctx, args.tab, { access: 'control' }, async call => {
-          const target = requireTarget(await resolveTarget(call, args)) as ElementTarget;
-          await actionPoint(call, target, { verb: 'select in', enabled: true });
-          let selected: string[] = [];
-          return act(call, target, () => `Selected ${selected.map(v => `"${v}"`).join(', ')} in ${target.label}.`, async () => {
-            selected = await selectOptions(call, target, args.values);
-          });
-        }),
-    }),
-    defineTool({
       name: 'browser_scroll',
       title: 'Scroll',
-      description:
-        'Scrolls the page or a scrollable element. With only ref/selector: scrolls that element into view. With direction: scrolls with the mouse wheel over the element (or the page) by amount pixels. With to: jumps to the top or bottom. Reports the new position and how much is left.',
+      description: 'Scrolls the page or the element at ref/selector by direction or to an edge; with only ref/selector, scrolls it into view.',
       input: {
         ...elementArgs,
-        direction: z.enum(['up', 'down', 'left', 'right']).optional().describe('Scroll with the mouse wheel in this direction.'),
-        amount: z.number().min(1).max(100_000).optional().describe('Pixels to scroll with direction. Default: most of a screen.'),
-        to: z.enum(['top', 'bottom', 'left', 'right']).optional().describe('Jump to an edge of the page, or of the scrollable element under ref/selector.'),
+        direction: z.enum(['up', 'down', 'left', 'right']).optional(),
+        amount: z.number().min(1).max(100_000).optional().describe('Pixels; default most of a screen.'),
+        to: z.enum(['top', 'bottom', 'left', 'right']).optional(),
         tab: tabArg,
       },
       handler: (args, ctx) =>
@@ -355,17 +338,16 @@ export function actionTools(env: PageEnv): ToolDefinition<any>[] {
     defineTool({
       name: 'browser_drag',
       title: 'Drag and drop',
-      description:
-        'Drags from one element (or point) to another with real mouse events: press, move in steps, release. Works for HTML5 drag and drop (draggable elements) and for pointer-based dragging (sliders, sortable lists, canvas).',
+      description: 'Drags an element or point (from: ref, selector or x/y) onto another (to) with real mouse events.',
       input: {
-        fromRef: z.string().optional().describe('Ref of the element to drag.'),
-        fromSelector: z.string().optional().describe('CSS selector of the element to drag.'),
-        fromX: z.number().optional().describe('Viewport x to start the drag at.'),
-        fromY: z.number().optional().describe('Viewport y to start the drag at.'),
-        toRef: z.string().optional().describe('Ref of the element to drop on.'),
-        toSelector: z.string().optional().describe('CSS selector of the element to drop on.'),
-        toX: z.number().optional().describe('Viewport x to drop at.'),
-        toY: z.number().optional().describe('Viewport y to drop at.'),
+        fromRef: z.string().optional(),
+        fromSelector: z.string().optional(),
+        fromX: z.number().optional(),
+        fromY: z.number().optional(),
+        toRef: z.string().optional(),
+        toSelector: z.string().optional(),
+        toX: z.number().optional(),
+        toY: z.number().optional(),
         tab: tabArg,
       },
       handler: (args, ctx) =>
@@ -381,11 +363,10 @@ export function actionTools(env: PageEnv): ToolDefinition<any>[] {
     defineTool({
       name: 'browser_upload_file',
       title: 'Upload file',
-      description:
-        'Puts local files into a file input, as if the user picked them in the file chooser. Target the <input type="file"> (it may be hidden), its label, or the button that opens the chooser. Paths are absolute or relative to your working directory.',
+      description: 'Uploads local files through a file input, its label, or the button that opens the file chooser.',
       input: {
         ...elementArgs,
-        paths: z.array(z.string().min(1)).min(1).describe('Files to upload.'),
+        paths: z.array(z.string().min(1)).min(1).describe('Absolute, or relative to your working directory.'),
         tab: tabArg,
       },
       handler: (args, ctx) =>

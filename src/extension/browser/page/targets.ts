@@ -6,7 +6,7 @@ import { ObjectArg, type PageCall } from './call';
 import { DialogInterrupt } from './pageState';
 import { clip } from './ringBuffer';
 import { normalizeRef } from './refs';
-import { CONTAINS, DESCRIBE, INSPECT_ELEMENT, QUERY_SELECTOR, SCROLL_INTO_VIEW } from './scripts';
+import { CONTAINS, DESCRIBE, INSPECT_ELEMENT, PAGE_HIT_TEST, QUERY_SELECTOR, SCROLL_INTO_VIEW } from './scripts';
 
 export interface TargetArgs {
   ref?: string;
@@ -282,6 +282,13 @@ async function hitTest(call: PageCall, target: ElementTarget, point: { x: number
     if (err instanceof DialogInterrupt || err instanceof ToolError) throw err;
     // Different frames: the target is a frame and the point lands inside it, or a frame covers it.
     if (info.isFrame) return true;
+  }
+  // CDP's hit test can disagree with the page when the browser view is resized (seen with VS Code's
+  // panel open: it reports the element's container); the page's own hit test decides then.
+  try {
+    if (await call.callOn<boolean>(target.objectId, PAGE_HIT_TEST, [point.x, point.y])) return true;
+  } catch (err) {
+    if (err instanceof DialogInterrupt || err instanceof ToolError) throw err;
   }
   try {
     return await call.callOn<string>(hitObject, DESCRIBE);
