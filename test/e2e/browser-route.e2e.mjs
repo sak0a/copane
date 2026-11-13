@@ -30,7 +30,7 @@ test('a mocked response is what the page gets, and is marked as mocked in the ne
     assert.match(click, new RegExp(`Request failed: GET http://127\\.0\\.0\\.1:\\d+/api/cart → HTTP 500 \\(r\\d+, mocked by ${id} \\(Claude \\d+\\)\\)`));
     const list = await a.ok('browser_network_requests', { filter: 'api/cart' });
     assert.match(list, new RegExp(`GET 500 fetch  http://\\S+/api/cart  \\(.*mocked by ${id}`));
-    const detail = await a.ok('browser_network_request', { id: list.match(/\br\d+\b/)[0] });
+    const detail = await a.ok('browser_network_requests', { id: list.match(/\br\d+\b/)[0] });
     assert.match(detail, new RegExp(`Not a real network response: mocked by ${id}`));
     assert.match(detail, /"error": "boom"/);
     assert.match(await a.ok('browser_route', { action: 'list' }), new RegExp(`${id}  any \\*/api/cart\\*  → 500, application/json, 16 B  \\(1 hit\\)`));

@@ -63,7 +63,7 @@ test('a login the user types loads the page; nothing the agent can read contains
     const texts = [nav, JSON.stringify(await shown(a))];
     const list = await a.ok('browser_network_requests', { includeStatic: true });
     texts.push(list);
-    for (const id of new Set(list.match(/\br\d+\b/g))) texts.push(await a.ok('browser_network_request', { id }));
+    for (const id of new Set(list.match(/\br\d+\b/g))) texts.push(await a.ok('browser_network_requests', { id }));
     texts.push(await a.ok('browser_console_messages', { level: 'debug' }));
     for (const t of texts) assert.ok(!t.includes(SECRET) && !t.includes(SECRET_B64), `the login leaked into: ${t.slice(0, 300)}`);
 

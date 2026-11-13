@@ -213,7 +213,7 @@ test('evaluate runs in the frame of the element; element screenshots inside fram
   assert.ok(!shot.isError, shot.text);
   assert.equal(shot.images.length, 1);
   const size = await read('#login >>> #signin', 'el => { const r = el.getBoundingClientRect(); return Math.round(r.width) + "×" + Math.round(r.height); }');
-  assert.match(shot.text, new RegExp(`Screenshot of button "Sign in" \\[ref=e\\d+\\] in tab-\\d+ \\(${size} px`));
+  assert.match(shot.text, new RegExp(`Screenshot of button "Sign in" \\[ref=e\\d+\\] in tab-\\d+, ${size} px`));
 });
 
 // ---------------------------------------------------------------- logs

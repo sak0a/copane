@@ -14,6 +14,21 @@ let sessions = 0;
 const session = name => agent({ session: `emulation-${name}-${Date.now()}-${++sessions}` });
 
 const report = async a => JSON.parse(await a.ok('browser_evaluate', { function: '() => JSON.stringify(report())' }));
+/**
+ * The page's report once its size has settled. A tab starts at VS Code's placeholder size (1024×768)
+ * and gets the editor's real size a moment after it is shown; reading the "normal" size too early
+ * made later comparisons fail.
+ */
+async function settledReport(a) {
+  let last = await report(a);
+  for (let same = 0, i = 0; same < 3 && i < 40; i++) {
+    await sleep(150);
+    const next = await report(a);
+    same = next.width === last.width && next.height === last.height ? same + 1 : 0;
+    last = next;
+  }
+  return last;
+}
 /** Clicks the centre of grid cell (row, col) by viewport coordinates and returns the cell the page saw. */
 async function clickCell(a, row, col) {
   const r = await report(a);
@@ -33,7 +48,7 @@ test('a phone preset with dark scheme, locale and time zone is what the page see
   const a = await session('preset');
   try {
     await a.ok('browser_open', { url: server.url('/') });
-    const before = await report(a);
+    const before = await settledReport(a);
     const scheme = before.dark ? 'light' : 'dark';
     const result = await a.ok('browser_emulate', { preset: 'iphone-15-pro', colorScheme: scheme, reducedMotion: true, locale: 'ja-JP', timezone: 'America/New_York' });
     assert.match(result, new RegExp(`now emulates iPhone 15 Pro \\(393×852 CSS px at 3×, mobile with touch\\), ${scheme} colour scheme, reduced motion, locale ja-JP, time zone America/New_York\\. The viewport is 393×852 CSS px\\.`));
@@ -109,7 +124,7 @@ test('emulation ends when the session releases the tab, and the agent is told', 
   const a = await session('release');
   try {
     await a.ok('browser_open', { url: server.url('/') });
-    const width = (await report(a)).width;
+    const width = (await settledReport(a)).width;
     await a.ok('browser_emulate', { preset: 'iphone-se', colorScheme: 'dark' });
     await a.ok('browser_release_tab', {});
     await until(async () => (await report(a)).width === width, 'the normal width again');
