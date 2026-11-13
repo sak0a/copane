@@ -55,6 +55,30 @@ export interface BrowserTabInfo {
   viewId?: string;
   /** For a tab a page opened (popup, `target=_blank`) while a session controlled it: the tab it came from. */
   openerTab?: string;
+  /**
+   * Device or media emulation an agent session turned on in this tab (phone size, dark scheme, locale...).
+   * It ends when that session stops controlling the tab; the user can end it with the command
+   * `copane.browser.resetEmulation` (argument: the tab id).
+   */
+  emulation?: {
+    sessionId: string;
+    /** Short, for a badge or a list row: "iPhone 15 Pro · dark". */
+    label: string;
+    /** One sentence for a tooltip: "iPhone 15 Pro (393×852 CSS px at 3×, mobile with touch), dark colour scheme". */
+    description: string;
+  };
+  /** Downloads agent sessions started in this tab during this window's lifetime (newest first, at most 5). */
+  downloads?: Array<{
+    /** "dl-3" */
+    id: string;
+    name: string;
+    sessionId: string | undefined;
+    state: 'downloading' | 'waiting-for-user' | 'saved' | 'not-saved' | 'failed' | 'elsewhere';
+    /** Percent, while downloading and the size is known. */
+    progress?: number;
+    /** Where the file was saved (state "saved"). */
+    path?: string;
+  }>;
 }
 
 /** A CDP connection to one tab's page target. Shared by all sessions that use the tab. */

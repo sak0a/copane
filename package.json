@@ -76,6 +76,13 @@
         "category": "Copane"
       },
       {
+        "command": "copane.browser.resetEmulation",
+        "title": "End Agent's Device Emulation in Browser Tab",
+        "shortTitle": "End Emulation",
+        "category": "Copane",
+        "icon": "$(device-mobile)"
+      },
+      {
         "command": "copane.repair",
         "title": "Check and Repair Setup",
         "category": "Copane",
@@ -259,6 +266,27 @@
           "scope": "machine",
           "markdownDescription": "Hosts whose certificate errors are accepted without asking in tabs an agent session is driving, for local and company servers with self-signed or internally issued certificates. Exact host names (`localhost`, `build.corp.example`) or `*.corp.example` for a domain and all its subdomains. Choosing **Always Trust** in the prompt adds a host here."
         },
+        "copane.browser.agentDownloads": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "allow",
+            "deny"
+          ],
+          "enumDescriptions": [
+            "Ask once per agent session before keeping a file it downloaded.",
+            "Keep files agents download without asking; the status bar shows each one.",
+            "Never keep files agents download (they are deleted, and the agent is told why)."
+          ],
+          "default": "ask",
+          "markdownDescription": "Whether files that agent sessions download in browser tabs are saved to `#copane.browser.downloadsFolder#`. Your own downloads are not affected: VS Code keeps asking you where to save them."
+        },
+        "copane.browser.downloadsFolder": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Where files that agent sessions download are saved. Empty: a `Copane` folder in your Downloads folder. `~/...` is relative to your home folder, a relative path to the first workspace folder. A file never replaces an existing one: it gets a name like `report (1).csv`. In a remote window (WSL, SSH) this is not used: the browser runs on your computer and VS Code asks you where to save."
+        },
         "copane.registration.mode": {
           "type": "string",
           "enum": [
@@ -330,6 +358,11 @@
           "command": "copane.browser.resumeTab",
           "when": "activeEditor == workbench.editor.browser && copane.browser.activeTabPaused",
           "group": "navigation@-10"
+        },
+        {
+          "command": "copane.browser.resetEmulation",
+          "when": "activeEditor == workbench.editor.browser && copane.browser.activeTabEmulated",
+          "group": "navigation@-9"
         },
         {
           "command": "copane.copyStatus",

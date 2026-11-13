@@ -6,7 +6,7 @@ import { isAbsolute, resolve as resolvePath } from 'node:path';
 import { z } from 'zod';
 import { ToolError } from '../../core/errors';
 import { defineTool, type ToolDefinition } from '../../core/tools';
-import { withPage, type PageCall, type PageEnv } from './call';
+import { pageUsesTouch, withPage, type PageCall, type PageEnv } from './call';
 import { describeChanges, pageBefore } from './changes';
 import { markAction, report, settle } from './effects';
 import { click, mouseMove, prepareInput, pressChord, typeText, wheel } from './input';
@@ -456,6 +456,7 @@ async function selectOptions(call: PageCall, target: ElementTarget, values: stri
 }
 
 async function drag(call: PageCall, start: { x: number; y: number }, end: { x: number; y: number }): Promise<void> {
+  if (await pageUsesTouch(call)) throw new ToolError('failed', `${call.tab.id} emulates a touch device, where dragging with the mouse does not work. Turn off mobile emulation (browser_emulate with mobile: false) to drag.`);
   let intercepted: { data: unknown } | undefined;
   const sub = call.page.on('Input.dragIntercepted', p => (intercepted = p));
   await prepareInput(call);
