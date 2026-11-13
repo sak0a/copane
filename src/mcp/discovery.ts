@@ -13,6 +13,12 @@ export interface DiscoveryInput {
   explicit?: string;
   /** The window this server was connected to before it went away (closed or reloaded). */
   previous?: { id: string; workspaceFolders: string[] };
+  /**
+   * Resolves symbolic links (`fs.realpathSync`). The working directory of a process is already
+   * resolved (`/private/tmp/x` on macOS, and agents such as Codex resolve it too), while VS Code
+   * reports workspace folders as opened (`/tmp/x`): both forms are compared.
+   */
+  realpath?: (p: string) => string;
 }
 
 export interface DiscoveryResult {
@@ -39,6 +45,13 @@ export interface DiscoveryResult {
  */
 export function selectInstance(input: DiscoveryInput): DiscoveryResult | undefined {
   const { instances, env, cwd, ancestors, explicit, previous } = input;
+  const real = (p: string) => {
+    try {
+      return input.realpath ? input.realpath(p) : p;
+    } catch {
+      return p; // A folder that is gone.
+    }
+  };
   if (instances.length === 0) return undefined;
 
   if (explicit) {
@@ -70,7 +83,7 @@ export function selectInstance(input: DiscoveryInput): DiscoveryResult | undefin
   const depths = new Map<InstanceInfo, number>();
   for (const instance of instances) {
     for (const folder of instance.workspaceFolders) {
-      if (isInside(cwd, folder)) depths.set(instance, Math.max(depths.get(instance) ?? 0, path.resolve(folder).length));
+      if (isInside(cwd, folder) || isInside(real(cwd), real(folder))) depths.set(instance, Math.max(depths.get(instance) ?? 0, path.resolve(real(folder)).length));
     }
   }
   if (depths.size > 0) {

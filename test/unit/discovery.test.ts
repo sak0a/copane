@@ -110,3 +110,27 @@ describe('isInside', () => {
     expect(isInside('/work', '/work/a')).toBe(false);
   });
 });
+
+describe('selectInstance with symbolic links', () => {
+  const inst = (id: string, folders: string[], lastFocusedAt = 0) =>
+    ({ id, pid: Number(id), socketPath: '', token: '', workspaceName: id, workspaceFolders: folders, remoteName: null, extensionVersion: '0', startedAt: 0, lastFocusedAt }) as never;
+
+  it('matches a resolved working directory to a workspace folder opened through a link', () => {
+    // macOS: /tmp is a link to /private/tmp; process.cwd() and Codex report the resolved path.
+    const realpath = (p: string) => p.replace(/^\/tmp(?=\/|$)/, '/private/tmp');
+    const a = inst('1', ['/tmp/ws']);
+    const b = inst('2', ['/work/other']);
+    const r = selectInstance({ instances: [a, b], env: {}, cwd: '/private/tmp/ws/src', ancestors: [], realpath });
+    expect(r).toMatchObject({ matchedBy: 'cwd' });
+    expect(r?.instance).toBe(a);
+  });
+
+  it('keeps working when a folder cannot be resolved', () => {
+    const realpath = () => {
+      throw new Error('ENOENT');
+    };
+    const a = inst('1', ['/work/a']);
+    const b = inst('2', ['/work/b']);
+    expect(selectInstance({ instances: [a, b], env: {}, cwd: '/work/b/x', ancestors: [], realpath })?.instance).toBe(b);
+  });
+});
