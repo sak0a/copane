@@ -126,15 +126,11 @@ export interface TerminalInfo {
   /** The command line currently running, if any. */
   currentCommand: string | undefined;
   lastExitCode: number | undefined;
-  /**
-   * Optional (added for the UI). Sessions the user allowed to use this terminal, for terminals the
-   * user created (origin "user"). The UI lists such a terminal under each of these sessions.
-   */
+  /** Sessions the user allowed to use this terminal although they do not own it. The UI lists it under each of them. */
   allowedSessions?: string[];
-  /**
-   * Optional (added for the UI). While `state` is "waiting-for-user": what the agent asked the user
-   * to do, in its own words (e.g. "Log in to npm"). Shown in the Sessions view and the status bar.
-   */
+  /** Set while state is "waiting-for-user": what the agent asked the user to do, and which session asked. */
+  request?: { sessionId: string; message: string; since: number };
+  /** Same as `request.message`: what the agent asked the user to do, in its own words (e.g. "Log in to npm"). */
   userInputRequest?: string;
 }
 
@@ -148,4 +144,10 @@ export interface TerminalService {
   /** Sends Ctrl+C. */
   interrupt(terminalId: string): void;
   close(terminalId: string): void;
+  /**
+   * Ends a pending hand-off (state "waiting-for-user") on behalf of the user: "done" tells the agent
+   * the user finished, "declined" that they will not do it. Returns false when nothing was pending.
+   * Optional so other implementations (test fakes) stay valid; the terminal module implements it.
+   */
+  resolveUserRequest?(terminalId: string, outcome: 'done' | 'declined'): boolean;
 }
