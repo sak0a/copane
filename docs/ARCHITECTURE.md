@@ -56,6 +56,11 @@ agent and its MCP server also run; the browser itself stays on the UI side and V
   session color, never in screenshots the agent takes) and on the editor tab where VS Code allows it.
 - Tools take an optional `tab`; without it they act on the session's current tab (the one it last
   opened or used), never on "whatever is focused".
+- **Request interception**: CDP `Fetch` of a tab has one owner, `browser/interception.ts`. Anything
+  that holds, answers or changes requests (login prompts in `credentials.ts`, request mocking in
+  `routes.ts`) is a `FetchClient` registered there; never call `Fetch.*` directly. `Fetch` is enabled
+  only while some client needs it on that tab, and every paused request is answered. It covers the
+  tab's page target only, not out-of-process iframes or workers.
 
 ## Terminal rules
 

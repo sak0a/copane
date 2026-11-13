@@ -37,6 +37,8 @@ export interface NetworkEntry {
   postData: string | undefined;
   /** The response body is gone (the request was replaced by a newer page, or redirected). */
   bodyUnavailable: boolean;
+  /** Set when the bridge answered or changed the request itself, e.g. "mocked by m1 (Claude 1)" (browser_route). */
+  intercepted?: string;
 }
 
 const MAX_URL = 2000;
@@ -47,12 +49,21 @@ export const STATIC_TYPES = new Set(['Image', 'Font', 'Stylesheet', 'Media', 'Sc
 /** Long-lived requests that never "finish" and must not keep the network busy. */
 const LONG_LIVED = new Set(['EventSource', 'WebSocket']);
 
+/** Headers that carry credentials (a login typed by the user): only their scheme is kept. */
+const SECRET_HEADERS = /^(proxy-)?authorization$/i;
+
+export function redactHeader(name: string, value: string): string {
+  if (!SECRET_HEADERS.test(name)) return value;
+  const scheme = /^\s*([A-Za-z][\w-]*)\s+\S/.exec(value)?.[1];
+  return `${scheme ? `${scheme} ` : ''}(credentials hidden)`;
+}
+
 function capHeaders(headers: Record<string, unknown> | undefined): Record<string, string> | undefined {
   if (!headers) return undefined;
   const out: Record<string, string> = {};
   let used = 0;
   for (const [k, v] of Object.entries(headers)) {
-    const value = clip(String(v), 1000);
+    const value = clip(redactHeader(k, String(v)), 1000);
     used += k.length + value.length;
     if (used > MAX_HEADERS_CHARS) {
       out['…'] = 'more headers were cut';
@@ -66,6 +77,8 @@ function capHeaders(headers: Record<string, unknown> | undefined): Record<string
 export class NetworkLog {
   readonly entries: RingBuffer<NetworkEntry>;
   private readonly live = new Map<string, NetworkEntry>();
+  /** Annotations that arrived before their request's entry. */
+  private readonly earlyNotes = new Map<string, string>();
   private nextId = 1;
 
   constructor(
@@ -125,6 +138,11 @@ export class NetworkLog {
       postData: p.request.postData !== undefined ? clip(p.request.postData, MAX_POST_DATA) : undefined,
       bodyUnavailable: false,
     };
+    const early = this.earlyNotes.get(p.requestId);
+    if (early) {
+      entry.intercepted = early;
+      this.earlyNotes.delete(p.requestId);
+    }
     this.live.set(p.requestId, entry);
     this.entries.push(entry);
     return entry;
@@ -171,6 +189,17 @@ export class NetworkLog {
   onServedFromCache(p: { requestId: string }): void {
     const entry = this.live.get(p.requestId);
     if (entry) entry.fromCache = true;
+  }
+
+  /** Marks the request (CDP `Network` id) as answered or changed by the bridge. */
+  annotate(requestId: string, note: string): void {
+    const entry = this.live.get(requestId);
+    if (entry) {
+      entry.intercepted = note;
+      return;
+    }
+    this.earlyNotes.set(requestId, note);
+    if (this.earlyNotes.size > 200) this.earlyNotes.delete(this.earlyNotes.keys().next().value!);
   }
 
   /** The entry for a CDP request id (the latest, after redirects). */
@@ -275,6 +304,6 @@ export function formatNetworkEntry(e: NetworkEntry, now: number): string {
     : e.failed ? ''
     : e.respondedAt !== undefined ? `headers after ${formatMs(e.respondedAt - e.startedAt)}, body not finished`
     : `${formatMs(now - e.startedAt)} so far`;
-  const details = [timing, e.size !== undefined && !e.failed ? formatBytes(e.size) : '', e.fromCache ? 'cache' : ''].filter(Boolean).join(', ');
+  const details = [timing, e.size !== undefined && !e.failed ? formatBytes(e.size) : '', e.fromCache ? 'cache' : '', e.intercepted ?? ''].filter(Boolean).join(', ');
   return `${e.id}  ${e.method} ${state} ${e.type.toLowerCase()}  ${clip(e.url, 300)}${details ? `  (${details})` : ''}`;
 }

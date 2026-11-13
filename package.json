@@ -76,6 +76,17 @@
         "category": "Copane"
       },
       {
+        "command": "copane.browser.forgetLogins",
+        "title": "Forget Saved Browser Logins",
+        "category": "Copane"
+      },
+      {
+        "command": "copane.browser.removeRequestRules",
+        "title": "Remove Agent Request Mocks from Browser Tab",
+        "shortTitle": "Remove Request Mocks",
+        "category": "Copane"
+      },
+      {
         "command": "copane.repair",
         "title": "Check and Repair Setup",
         "category": "Copane",
@@ -258,6 +269,11 @@
           "default": [],
           "scope": "machine",
           "markdownDescription": "Hosts whose certificate errors are accepted without asking in tabs an agent session is driving, for local and company servers with self-signed or internally issued certificates. Exact host names (`localhost`, `build.corp.example`) or `*.corp.example` for a domain and all its subdomains. Choosing **Always Trust** in the prompt adds a host here."
+        },
+        "copane.browser.loginPrompts": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "When a site or proxy asks for a login (HTTP authentication: Basic, Digest, NTLM) in a browser tab an agent session is driving, ask you for it in VS Code instead of letting the page fail. The agent never sees what you type. Logins are remembered until the window closes, or saved in VS Code's secret storage if you choose **Log In and Remember**; **Copane: Forget Saved Browser Logins** removes them. While a session drives a tab, every request of that tab passes through the bridge."
         },
         "copane.registration.mode": {
           "type": "string",

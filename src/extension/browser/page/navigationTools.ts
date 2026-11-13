@@ -84,6 +84,12 @@ async function navigationResult(call: PageCall, mark: ActionMark, started: numbe
   return [`${verb} ${clip(state.url, 500)}${title ? ` — "${clip(title, 200)}"` : ''} (${status}${progress}).`, ...extra.notes, ...effects].join('\n');
 }
 
+/** What the rest of the bridge noted for the tab during this call (e.g. a login prompt), or "". Each note is returned once. */
+function notesSince(call: PageCall, mark: ActionMark): string {
+  const notes = call.state.notesFor(call.ctx.session.id, mark.seq);
+  return notes.length ? ` ${notes.join(' ')}` : '';
+}
+
 export function navigationTools(env: PageEnv): ToolDefinition<any>[] {
   return [
     defineTool({
@@ -108,6 +114,9 @@ export function navigationTools(env: PageEnv): ToolDefinition<any>[] {
           try {
             result = await call.send('Page.navigate', { url, transitionType: 'typed' }, { timeoutMs: (args.timeout ?? 20) * 1000 });
           } catch (err) {
+            // A paused request (a login prompt the user has not answered) holds Page.navigate too.
+            const notes = err instanceof ToolError && err.code === 'timeout' ? notesSince(call, mark) : '';
+            if (notes) throw new ToolError('timeout', `${url} has not loaded yet.${notes}`);
             if (!(err instanceof DialogInterrupt)) throw err;
             // A beforeunload dialog holds Page.navigate until it is answered.
             const waited = await waitForNavigation(call, mark, { waitUntil, timeoutMs: (args.timeout ?? 20) * 1000 });
@@ -126,7 +135,7 @@ export function navigationTools(env: PageEnv): ToolDefinition<any>[] {
                 : /CERT/.test(result.errorText)
                   ? " The site's certificate is not trusted, and proceeding past certificate errors was not approved or is turned off in the extension's settings. Do not retry; tell the user."
                   : '';
-            throw new ToolError('failed', `Could not load ${url}: ${result.errorText}.${hint} The tab now shows the browser's error page.`);
+            throw new ToolError('failed', `Could not load ${url}: ${result.errorText}.${notesSince(call, mark) || hint} The tab now shows the browser's error page.`);
           }
           if (!result.loaderId) {
             // Same-document navigation (only the #fragment changed).
@@ -139,7 +148,7 @@ export function navigationTools(env: PageEnv): ToolDefinition<any>[] {
             return [`The navigation to ${url} was aborted (it may have been a download, or the page navigated elsewhere).`, ...effects].join('\n');
           }
           if (waited.timedOut && call.state.loaderId !== result.loaderId) {
-            throw new ToolError('timeout', `${url} did not respond within ${args.timeout ?? 20} s. The tab may still be waiting for it; check later with browser_snapshot, or try again.`);
+            throw new ToolError('timeout', `${url} did not respond within ${args.timeout ?? 20} s.${notesSince(call, mark) || ' The tab may still be waiting for it; check later with browser_snapshot, or try again.'}`);
           }
           return navigationResult(call, mark, started, `Navigated ${call.tab.id} to`, waited, waitUntil);
         }),

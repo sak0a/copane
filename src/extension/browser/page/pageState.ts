@@ -47,6 +47,16 @@ export class DialogInterrupt extends Error {
   }
 }
 
+export interface PageNote {
+  seq: number;
+  text: string;
+  /** A later note with the same topic replaces this one. */
+  topic?: string;
+  /** Only for this session (shown with its next action result, even if added between its calls). */
+  to?: string;
+  shownTo: Set<string>;
+}
+
 export type WaitResult<T> = { ok: true; value: T } | { ok: false; reason: 'timeout' | 'dialog' };
 
 const CONSOLE_CAPACITY = 1000;
@@ -60,6 +70,8 @@ export class PageState {
   readonly navigations = new RingBuffer<NavigationEntry>(200);
   readonly dialogs = new RingBuffer<DialogInfo>(50);
   readonly popups = new RingBuffer<PopupEntry>(50);
+  /** Things other parts of the browser module tell agents in action results (e.g. a login prompt). See `notesFor`. */
+  readonly notes = new RingBuffer<PageNote>(50);
   /** When recording started for this tab. */
   readonly recordingSince = Date.now();
 
@@ -360,6 +372,23 @@ export class PageState {
     const now = Date.now();
     if (this.network.inflight(now, 10_000).length > 0) return 0;
     return now - this.lastNetworkActivity;
+  }
+
+  /** Adds a note for agents (see `notesFor`). */
+  addNote(text: string, options: { topic?: string; to?: string } = {}): void {
+    this.notes.push({ seq: this.nextSeq(), text, topic: options.topic, to: options.to, shownTo: new Set() });
+    this.changeEmitter.fire();
+  }
+
+  /**
+   * Notes for a session's action that started at `seq`, each shown to a session once: notes addressed
+   * to the session (whenever they were added), and unaddressed ones added during the action. Of
+   * several notes on one topic only the newest is kept.
+   */
+  notesFor(sessionId: string, seq: number): string[] {
+    const notes = this.notes.all().filter(n => !n.shownTo.has(sessionId) && (n.to === undefined ? n.seq > seq : n.to === sessionId));
+    for (const n of notes) n.shownTo.add(sessionId);
+    return notes.filter((n, i) => !n.topic || !notes.slice(i + 1).some(m => m.topic === n.topic)).map(n => n.text);
   }
 
   /** Turns focus emulation off again (the agent no longer controls the tab). */

@@ -146,6 +146,7 @@ export function logTools(env: PageEnv): ToolDefinition<any>[] {
           const max = args.maxBodyChars ?? 4000;
           const lines: string[] = [formatNetworkEntry(e, Date.now()), `Started ${new Date(e.startedAt).toTimeString().slice(0, 8)}${e.end !== undefined ? `, took ${formatMs((e.end - e.start) * 1000)}` : ''}${e.mimeType ? `, ${e.mimeType}` : ''}${e.size !== undefined ? `, ${formatBytes(e.size)} transferred` : ''}.`];
           if (e.redirectedTo) lines.push(`Redirected to ${clip(e.redirectedTo, 500)}.`);
+          if (e.intercepted) lines.push(`Not a real network response: ${e.intercepted} (browser_route).`);
           if (e.statusText) lines.push(`Status text: ${e.statusText}`);
           const headerBlock = (title: string, h: Record<string, string> | undefined) => {
             if (!h || Object.keys(h).length === 0) return [`${title}: (none recorded)`];

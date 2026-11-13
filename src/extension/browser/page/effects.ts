@@ -82,6 +82,8 @@ export async function describeEffects(call: PageCall, mark: ActionMark): Promise
     }
   }
 
+  lines.push(...state.notesFor(call.ctx.session.id, mark.seq));
+
   const consoleEntries = state.console.entries.after(mark.seq);
   // "Failed to load resource" duplicates the failed request reported below.
   const errors = consoleEntries.filter(e => e.level === 'error' && !(e.source === 'browser' && e.text.startsWith('Failed to load resource')));
@@ -91,7 +93,7 @@ export async function describeEffects(call: PageCall, mark: ActionMark): Promise
   if (extra.length) lines.push(`Console also has ${extra.join(' and ')} (browser_console_messages shows them).`);
 
   const failures = state.network.entries.after(mark.seq).filter(e => isFailure(e) && !(e.loaderId && e.requestId === e.loaderId && e.status !== undefined));
-  for (const f of failures.slice(0, 3)) lines.push(`Request failed: ${f.method} ${clip(f.url, 200)} → ${f.failed ?? `HTTP ${f.status}`} (${f.id}).`);
+  for (const f of failures.slice(0, 3)) lines.push(`Request failed: ${f.method} ${clip(f.url, 200)} → ${f.failed ?? `HTTP ${f.status}`} (${f.id}${f.intercepted ? `, ${f.intercepted}` : ''}).`);
   if (failures.length > 3) lines.push(`${failures.length - 3} more requests failed (browser_network_requests with status "failed").`);
 
   for (const p of state.popups.after(mark.seq)) {

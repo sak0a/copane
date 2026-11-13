@@ -55,6 +55,11 @@ export interface BrowserTabInfo {
   viewId?: string;
   /** For a tab a page opened (popup, `target=_blank`) while a session controlled it: the tab it came from. */
   openerTab?: string;
+  /**
+   * Request-mocking rules (browser_route) active in this tab, per session that set them; absent when
+   * none. While present, some of the tab's requests get canned responses, errors or delays.
+   */
+  requestRules?: Array<{ sessionId: string; rules: number }>;
 }
 
 /** A CDP connection to one tab's page target. Shared by all sessions that use the tab. */

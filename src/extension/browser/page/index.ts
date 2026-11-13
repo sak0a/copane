@@ -5,6 +5,7 @@
 //
 // State kept here, never on the shared CdpPage: one PageState per tab (recorders, frames, dialog), and
 // per-session ref tables and read cursors.
+import type { Event } from '../../core/events';
 import type { BridgeServices } from '../../core/services';
 import { actionTools } from './actionTools';
 import type { PageEnv } from './call';
@@ -17,9 +18,25 @@ import { scriptTools } from './scriptTools';
 import { snapshotTools } from './snapshotTools';
 import { waitTools } from './waitTools';
 
-export function registerPageTools(services: BridgeServices): void {
+/** Sources of per-tab information from the rest of the browser module (request interception). */
+export interface PageToolExtras {
+  interception?: {
+    /** A sentence for the agent driving the tab, shown with its next action result. */
+    readonly onDidNote: Event<{ tabId: string; text: string; topic?: string; to?: string }>;
+    /** A request was answered by the bridge (mocked, delayed, ...): marked in the network log. */
+    readonly onDidIntercept: Event<{ tabId: string; networkId: string; note: string }>;
+  };
+}
+
+export function registerPageTools(services: BridgeServices, extras: PageToolExtras = {}): void {
   const { browser, context } = services;
   const env: PageEnv = { services, states: new PageStates(services.log), refs: new RefStore(), cursors: new Map() };
+  if (extras.interception) {
+    context.subscriptions.push(
+      extras.interception.onDidNote(({ tabId, text, topic, to }) => env.states.get(tabId)?.addNote(text, { topic, to })),
+      extras.interception.onDidIntercept(({ tabId, networkId, note }) => env.states.get(tabId)?.network.annotate(networkId, note)),
+    );
+  }
 
   // Recording starts as soon as a tab's CDP connection exists.
   context.subscriptions.push(
