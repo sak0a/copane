@@ -349,6 +349,21 @@
           "group": "1_agentBridge"
         },
         {
+          "command": "agentBridge.registerAgents",
+          "when": "view == agentBridge.sessions",
+          "group": "8_setup@1"
+        },
+        {
+          "command": "agentBridge.unregisterAgents",
+          "when": "view == agentBridge.sessions",
+          "group": "8_setup@2"
+        },
+        {
+          "command": "agentBridge.repair",
+          "when": "view == agentBridge.sessions",
+          "group": "9_diagnostics@0"
+        },
+        {
           "command": "agentBridge.showStatus",
           "when": "view == agentBridge.sessions",
           "group": "9_diagnostics@1"
