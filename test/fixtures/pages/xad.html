@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Ad</title><style>body { font: 12px sans-serif; margin: 4px; }</style></head>
+<body>
+<p><b id="name"></b> Great offers every day, limited time only, terms apply.</p>
+<a id="buy" href="#">Buy now</a> <a href="#">Learn more</a> <a href="#">Why this ad?</a>
+<script>
+  const n = new URLSearchParams(location.search).get('n');
+  document.getElementById('name').textContent = 'Ad ' + n;
+  document.getElementById('buy').textContent = 'Buy now ' + n;
+</script>
+</body></html>

@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Navigating frame</title>
+<style>body { font: 13px sans-serif; margin: 8px; }</style></head>
+<body>
+<p>Navigating frame start</p>
+<a id="to-other" href="#">Go to third site</a>
+<a id="to-top" href="#">Go to top site</a>
+<button onclick="setTimeout(() => location.reload(), 300)">Reload soon</button>
+<script>
+  const q = new URLSearchParams(location.search);
+  document.getElementById('to-other').href = q.get('c') + '/xinner.html';
+  document.getElementById('to-top').href = q.get('a') + '/xinner.html';
+</script>
+</body></html>

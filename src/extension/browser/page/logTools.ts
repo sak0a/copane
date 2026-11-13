@@ -146,7 +146,7 @@ async function requestDetails(call: PageCall, rawId: string, max: number): Promi
   let post = e.postData;
   if (e.hasPostData && post === undefined && !state.dialog) {
     try {
-      post = (await call.send('Network.getRequestPostData', { requestId: e.requestId }, { timeoutMs: 5000 })).postData;
+      post = (await call.at(call.state.frames.targetOf(e.frameId)).send('Network.getRequestPostData', { requestId: e.requestId }, { timeoutMs: 5000 })).postData;
     } catch {
       post = undefined;
     }
@@ -158,7 +158,7 @@ async function requestDetails(call: PageCall, rawId: string, max: number): Promi
   else if (state.dialog) lines.push('Response body: (cannot be read while a dialog blocks the page)');
   else {
     try {
-      const r = await call.send('Network.getResponseBody', { requestId: e.requestId }, { timeoutMs: 10_000 });
+      const r = await call.at(call.state.frames.targetOf(e.frameId)).send('Network.getResponseBody', { requestId: e.requestId }, { timeoutMs: 10_000 });
       if (r.base64Encoded) {
         const bytes = Buffer.from(r.body, 'base64');
         const textual = /^(text\/|application\/(json|javascript|xml|x-www-form-urlencoded|.*\+json|.*\+xml))/.test(e.mimeType ?? '');

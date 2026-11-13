@@ -3,34 +3,6 @@
 // bridge's isolated world, so the page's scripts cannot see them or interfere with them; helpers bound
 // to an element run with `this` = the element.
 
-/** Shared snippet: querySelectorAll that also searches open shadow roots and same-origin iframes. */
-const DEEP_QUERY = `
-  const deepQueryAll = (selector) => {
-    const out = [];
-    const visit = (root) => {
-      out.push(...root.querySelectorAll(selector));
-      for (const el of root.querySelectorAll('*')) {
-        if (el.shadowRoot) visit(el.shadowRoot);
-        if (el.tagName === 'IFRAME' || el.tagName === 'FRAME') {
-          let doc = null;
-          try { doc = el.contentDocument; } catch {}
-          if (doc) visit(doc);
-        }
-      }
-    };
-    visit(document);
-    return out;
-  };
-  const isVisible = (el) => {
-    if (!el.isConnected) return false;
-    const rect = el.getBoundingClientRect();
-    if (rect.width === 0 && rect.height === 0) return false;
-    const style = el.ownerDocument.defaultView.getComputedStyle(el);
-    if (style.visibility !== 'visible') return false;
-    return el.checkVisibility ? el.checkVisibility({ visibilityProperty: true }) : true;
-  };
-`;
-
 /** Shared snippet: the visible text of the whole page, including shadow roots and same-origin frames. */
 const PAGE_TEXT = `
   const pageText = () => {
@@ -50,39 +22,7 @@ const PAGE_TEXT = `
     visit(document);
     return parts.join('\\n');
   };
-  const norm = (s) => String(s).replace(/\\s+/g, ' ').trim().toLowerCase();
 `;
-
-/** Isolated world. `(selector)` → [firstElement, count] or { error }. */
-export const QUERY_SELECTOR = `function (selector) {
-  ${DEEP_QUERY}
-  let all;
-  try { all = deepQueryAll(selector); } catch (e) { return { error: String(e && e.message || e) }; }
-  const visible = all.find(isVisible);
-  return [visible || all[0] || null, all.length];
-}`;
-
-/** Isolated world. `(conditions)` → which wait conditions currently hold. */
-export const CHECK_CONDITIONS = `function (c) {
-  ${DEEP_QUERY}
-  ${PAGE_TEXT}
-  const out = {};
-  if (c.text !== undefined || c.textGone !== undefined) {
-    const text = norm(pageText());
-    if (c.text !== undefined) out.text = text.includes(norm(c.text));
-    if (c.textGone !== undefined) out.textGone = !text.includes(norm(c.textGone));
-  }
-  if (c.selector !== undefined) {
-    let all;
-    try { all = deepQueryAll(c.selector); } catch (e) { return { error: String(e && e.message || e) }; }
-    const visible = all.filter(isVisible).length;
-    const state = c.state || 'visible';
-    out.selector = state === 'visible' ? visible > 0 : state === 'hidden' ? visible === 0 : state === 'attached' ? all.length > 0 : all.length === 0;
-    out.selectorCount = all.length;
-    out.selectorVisible = visible;
-  }
-  return out;
-}`;
 
 /** Isolated world. `(maxChars)` → the start of the page's visible text, for error messages. */
 export const PAGE_TEXT_EXCERPT = `function (maxChars) {

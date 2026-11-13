@@ -3,11 +3,12 @@ import { z } from 'zod';
 import { ToolError } from '../../core/errors';
 import { defineTool, type ToolDefinition } from '../../core/tools';
 import { dialogMessage, withPage, type PageEnv } from './call';
+import { checkAcrossFrames } from './frameQuery';
 import { urlMatcher } from './networkLog';
 import { DialogInterrupt } from './pageState';
 import { clip, formatMs } from './ringBuffer';
 import { tabArg } from './schema';
-import { CHECK_CONDITIONS, PAGE_TEXT_EXCERPT } from './scripts';
+import { PAGE_TEXT_EXCERPT } from './scripts';
 
 interface Checks {
   text?: boolean;
@@ -23,7 +24,7 @@ export function waitTools(env: PageEnv): ToolDefinition<any>[] {
     defineTool({
       name: 'browser_wait_for',
       title: 'Wait for page',
-      description: 'Waits until all given conditions hold (text visible or gone, selector state, URL, load state), or for a time.',
+      description: 'Waits until all given conditions hold (text visible or gone, selector state, URL, load state), or for a time. Text and selectors are looked for in iframes too.',
       input: {
         text: z.string().optional().describe('Visible text, case-insensitive.'),
         textGone: z.string().optional(),
@@ -79,7 +80,8 @@ export function waitTools(env: PageEnv): ToolDefinition<any>[] {
             if (state.dialog) throw new ToolError('failed', `Stopped waiting: ${dialogMessage(call.tab.id, state.dialog)}`);
             if (needsDom && state.lifecycleOf().has('DOMContentLoaded')) {
               try {
-                last = await call.evaluate<Checks>(CHECK_CONDITIONS, [{ text: args.text, textGone: args.textGone, selector: args.selector, state: args.state }], { timeoutMs: 5000 });
+                // The page and its cross-origin frames (frameQuery.ts).
+                last = await checkAcrossFrames(call, { text: args.text, textGone: args.textGone, selector: args.selector, state: args.state });
               } catch (err) {
                 if (err instanceof DialogInterrupt) continue;
                 if (err instanceof ToolError) throw err;

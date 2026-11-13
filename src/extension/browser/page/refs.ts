@@ -11,25 +11,36 @@ export interface RefEntry {
   loaderId: string | undefined;
   role: string;
   name: string;
+  /** Set for a node in a cross-origin frame: the frame target (frames.ts) whose session owns `backendNodeId`. */
+  frame?: string;
+  /** That frame's loader id at the time: a different one means the frame navigated since. */
+  frameLoaderId?: string;
 }
+
+/** What a snapshot knows about a node it hands out a ref for. */
+export type RefNode = { backendNodeId: number; frameId: string; role: string; name: string; frame?: string; frameLoaderId?: string };
+
+/** Backend node ids are per target: a node is identified by its frame target and its id. */
+const nodeKey = (node: { backendNodeId: number; frame?: string }) => (node.frame ? `${node.frame}#${node.backendNodeId}` : node.backendNodeId);
 
 export class RefTable {
   private readonly byRef = new Map<string, RefEntry>();
-  private readonly byNode = new Map<number, RefEntry>();
+  private readonly byNode = new Map<number | string, RefEntry>();
   private counter = 0;
 
   /** The ref for a node, reusing the existing one while the node stays in the same document. */
-  assign(node: { backendNodeId: number; frameId: string; role: string; name: string }, loaderId: string | undefined): string {
-    const existing = this.byNode.get(node.backendNodeId);
-    if (existing && existing.loaderId === loaderId) {
+  assign(node: RefNode, loaderId: string | undefined): string {
+    const existing = this.byNode.get(nodeKey(node));
+    if (existing && existing.loaderId === loaderId && existing.frameLoaderId === node.frameLoaderId) {
       existing.role = node.role;
       existing.name = node.name;
       existing.frameId = node.frameId;
       return existing.ref;
     }
     const entry: RefEntry = { ref: `e${++this.counter}`, backendNodeId: node.backendNodeId, frameId: node.frameId, loaderId, role: node.role, name: node.name };
+    if (node.frame) Object.assign(entry, { frame: node.frame, frameLoaderId: node.frameLoaderId });
     this.byRef.set(entry.ref, entry);
-    this.byNode.set(node.backendNodeId, entry);
+    this.byNode.set(nodeKey(node), entry);
     this.trim();
     return entry.ref;
   }
@@ -56,7 +67,7 @@ export class RefTable {
     if (this.byRef.size <= 20_000) return;
     for (const [ref, entry] of this.byRef) {
       this.byRef.delete(ref);
-      if (this.byNode.get(entry.backendNodeId) === entry) this.byNode.delete(entry.backendNodeId);
+      if (this.byNode.get(nodeKey(entry)) === entry) this.byNode.delete(nodeKey(entry));
       if (this.byRef.size <= 15_000) break;
     }
   }

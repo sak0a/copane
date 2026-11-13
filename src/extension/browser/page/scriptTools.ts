@@ -40,10 +40,13 @@ export function scriptTools(env: PageEnv): ToolDefinition<any>[] {
           const mark = markAction(call);
           let output: string | undefined;
           let interrupted = false;
+          let scope = call;
           try {
             let remote: any;
             if (target) {
-              const r = await call.send('Runtime.callFunctionOn', { functionDeclaration: wrapUserFunction(args.function), objectId: target.objectId, arguments: [{ objectId: target.objectId }], awaitPromise: true, userGesture: true, objectGroup: call.group });
+              // In the element's own frame (a cross-origin frame's target when it lives in one).
+              scope = target.call;
+              const r = await scope.send('Runtime.callFunctionOn', { functionDeclaration: wrapUserFunction(args.function), objectId: target.objectId, arguments: [{ objectId: target.objectId }], awaitPromise: true, userGesture: true, objectGroup: call.group });
               if (r.exceptionDetails) throw new ToolError('failed', `The script threw: ${exceptionText(r.exceptionDetails)}`);
               remote = r.result;
             } else {
@@ -64,11 +67,11 @@ export function scriptTools(env: PageEnv): ToolDefinition<any>[] {
             }
             // REPL mode does not await a promise the code evaluates to (`fetch(...).then(...)`), so do it here.
             if (remote?.subtype === 'promise' && remote.objectId) {
-              const awaited = await call.send('Runtime.awaitPromise', { promiseObjectId: remote.objectId, generatePreview: false });
+              const awaited = await scope.send('Runtime.awaitPromise', { promiseObjectId: remote.objectId, generatePreview: false });
               if (awaited.exceptionDetails) throw new ToolError('failed', `The promise was rejected: ${exceptionText(awaited.exceptionDetails)}`);
               remote = awaited.result;
             }
-            output = await serialize(call, remote);
+            output = await serialize(scope, remote);
           } catch (err) {
             if (!(err instanceof DialogInterrupt)) throw err;
             interrupted = true;

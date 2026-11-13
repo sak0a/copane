@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Middle frame</title>
+<!-- Holds a frame from a third site (its own target) and one from its own site (rendered in this frame's target). -->
+<style>body { font: 13px sans-serif; margin: 8px; } iframe { margin-left: 30px; }</style></head>
+<body>
+<p>Middle frame text</p>
+<button onclick="this.textContent = 'Middle clicked'">Middle button</button>
+<iframe id="inner" title="Inner frame" width="400" height="180"></iframe>
+<iframe id="same-site" title="Same-site child" src="/frame.html" width="300" height="90"></iframe>
+<script>document.getElementById('inner').src = new URLSearchParams(location.search).get('c') + '/xinner.html';</script>
+</body></html>

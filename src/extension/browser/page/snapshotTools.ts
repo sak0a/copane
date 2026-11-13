@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ToolError } from '../../core/errors';
 import { defineTool, image, text, type ToolDefinition } from '../../core/tools';
 import { withPage, type PageCall, type PageEnv } from './call';
+import { addCrossOriginFrames } from './frameSnapshot';
 import { DialogInterrupt } from './pageState';
 import { clip } from './ringBuffer';
 import { elementArgs, tabArg } from './schema';
@@ -16,14 +17,14 @@ const DEFAULT_FIND_CHARS = 6000;
 const MAX_SNAPSHOT_CHARS = 60_000;
 const MAX_FRAMES = 25;
 
-interface DomFacts {
+export interface DomFacts {
   pointer: Set<number>;
   hidden: Set<number>;
   frameOwners: Map<number, string>;
 }
 
 /** Reads cursor styles, the bridge's own UI elements and iframe → frame ids from one DOM snapshot. */
-async function domFacts(call: PageCall): Promise<DomFacts | undefined> {
+export async function domFacts(call: PageCall): Promise<DomFacts | undefined> {
   let ds: any;
   try {
     ds = await call.send('DOMSnapshot.captureSnapshot', { computedStyles: ['cursor'], includeDOMRects: false });
@@ -66,10 +67,12 @@ export interface PageCapture {
   title: string;
   url: string;
   loaderId: string | undefined;
+  /** The ref-table node for a node of the tree: its real element and, for a cross-origin frame, the frame it lives in. */
+  refNode(node: RefNode): RefNode;
 }
 
 /** Reads the page's accessibility tree (main frame and same-process frames) into a Tree. */
-export async function capturePage(call: PageCall, root?: number): Promise<PageCapture> {
+export async function capturePage(call: PageCall, root?: ElementTarget): Promise<PageCapture> {
   const { state } = call;
   const loaderId = state.loaderId;
   const facts = (await domFacts(call)) ?? { pointer: new Set<number>(), hidden: new Set<number>(), frameOwners: new Map<number, string>() };
@@ -90,7 +93,7 @@ export async function capturePage(call: PageCall, root?: number): Promise<PageCa
       }
     }
   }
-  const pending = [...new Set(facts.frameOwners.values())].filter(id => id !== mainFrameId).slice(0, MAX_FRAMES);
+  const pending = [...new Set(facts.frameOwners.values())].filter(id => id !== mainFrameId && !state.frames.get(id)).slice(0, MAX_FRAMES);
   await Promise.all(
     pending.map(async frameId => {
       try {
@@ -101,9 +104,21 @@ export async function capturePage(call: PageCall, root?: number): Promise<PageCa
       }
     }),
   );
-  const tree = buildTree({ frames, mainFrameId, frameOwners: facts.frameOwners, pointer: facts.pointer, hidden: facts.hidden, root, pageUrl: state.url });
+
+  // Cross-origin frames (frameSnapshot.ts): their trees join the input with node ids made unique.
+  const remote = await addCrossOriginFrames(call, { frames, facts, root, collectFacts: domFacts, viewport: await viewport(call) });
+  const tree = buildTree({
+    frames,
+    mainFrameId,
+    frameOwners: facts.frameOwners,
+    pointer: facts.pointer,
+    hidden: facts.hidden,
+    root: root ? remote.idOf(root) : undefined,
+    pageUrl: state.url,
+    frameNote: frameId => remote.note(frameId),
+  });
   const title = String(main.nodes.find(n => n.role?.value === 'RootWebArea')?.name?.value ?? '');
-  return { tree, title, url: state.url, loaderId };
+  return { tree, title, url: state.url, loaderId, refNode: node => remote.refNode(node) };
 }
 
 /** Remembers a whole-page capture as what this session last saw of the page (see changes.ts). */
@@ -130,7 +145,7 @@ export function readResult(call: PageCall, capture: PageCapture, root: ElementTa
   }
   const scope = root ? `- Part of the page: ${root.label}\n` : '';
   const maxChars = args.maxChars ?? (args.find !== undefined ? DEFAULT_FIND_CHARS : DEFAULT_SNAPSHOT_CHARS);
-  const refFor = (node: RefNode) => call.refs.assign(node, capture.loaderId);
+  const refFor = (node: RefNode) => call.refs.assign(capture.refNode(node), capture.loaderId);
   const options = { refFor, maxChars, urls: args.urls, pageUrl: url, offset: args.offset };
 
   if (args.find !== undefined) {
@@ -162,7 +177,7 @@ export function snapshotTools(env: PageEnv): ToolDefinition<any>[] {
       name: 'browser_snapshot',
       title: 'Read page',
       description:
-        'Reads the page: an accessibility snapshot with a ref (e.g. [ref=e12]) on each element you can act on, for the action tools. mode "text" returns just the readable text, find just the matching elements.',
+        'Reads the page: an accessibility snapshot with a ref (e.g. [ref=e12]) on each element you can act on, for the action tools. mode "text" returns just the readable text, find just the matching elements. Covers shadow DOM and iframes, cross-origin ones too.',
       input: {
         mode: z.enum(['snapshot', 'text']).optional().describe('text: main content as markdown, no refs; cheapest for reading.'),
         find: z.string().min(1).optional().describe('Only elements whose text contains this, with where they are.'),
@@ -178,7 +193,7 @@ export function snapshotTools(env: PageEnv): ToolDefinition<any>[] {
           if (args.find !== undefined && args.mode === 'text') throw new ToolError('invalid_input', 'Pass either find or mode "text", not both.');
           if (args.find !== undefined && !args.find.trim()) throw new ToolError('invalid_input', 'find needs some text to look for.');
           const root = (await resolveTarget(call, args, { waitMs: 0 })) as ElementTarget | undefined;
-          const capture = await capturePage(call, root?.backendNodeId);
+          const capture = await capturePage(call, root);
           if (!root) rememberPage(call, capture);
           return readResult(call, capture, root, args);
         }),
@@ -209,7 +224,7 @@ export function snapshotTools(env: PageEnv): ToolDefinition<any>[] {
           let what: string;
           let cut = '';
           if (target) {
-            const box = await elementBox(call, target.backendNodeId);
+            const box = await elementBox(target.call, target.backendNodeId);
             if (!box || box.width < 1 || box.height < 1) throw new ToolError('failed', `${target.label} has no visible box to capture (it is hidden or empty).`);
             region = { x: box.x + vp.pageX, y: box.y + vp.pageY, width: box.width, height: box.height };
             what = target.label;

@@ -6,8 +6,8 @@ import { z } from 'zod';
 export const tabArg = z.string().optional();
 
 export const refArg = z.string().optional().describe('From browser_snapshot, e.g. "e12".');
-export const selectorArg = z.string().optional().describe('CSS selector instead of ref; pierces shadow DOM and same-origin iframes.');
-export const xArg = z.number().optional().describe('Viewport CSS px, instead of ref/selector (canvas, cross-origin iframes).');
+export const selectorArg = z.string().optional().describe('CSS selector instead of ref; searches shadow DOM and iframes too ("iframe-selector >>> selector" for one iframe).');
+export const xArg = z.number().optional().describe('Viewport CSS px, instead of ref/selector (e.g. a canvas).');
 export const yArg = z.number().optional();
 
 export const elementArgs = { ref: refArg, selector: selectorArg };

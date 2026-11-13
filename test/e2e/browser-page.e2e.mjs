@@ -112,14 +112,15 @@ test('history: back, forward, reload, and same-document SPA routes', async () =>
 
 // ---------------------------------------------------------------- snapshot and refs
 
-test('snapshot: same-origin iframes, cross-origin marker, shadow DOM, bridge UI left out', async () => {
+test('snapshot: same-origin and cross-origin iframes, shadow DOM, bridge UI left out', async () => {
   await open(`/frames.html?other=${encodeURIComponent(other.url)}`);
   await a.ok('browser_wait_for', { loadState: 'load' });
   await sleep(300);
   const snap = await a.ok('browser_snapshot');
   assert.match(snap, /- Page Title: Frames fixture/);
   assert.match(snap, /- iframe "Same origin frame" \[ref=e\d+\]:\n {2}- paragraph: Inside frame\n {2}- button "Frame button"/);
-  assert.match(snap, /- iframe "Other origin frame" \[ref=e\d+\]: \[cross-origin frame/);
+  // Cross-origin frames are read in place too (browser-frames.e2e.mjs covers them in depth).
+  assert.match(snap, /- iframe "Other origin frame" \[ref=e\d+\]:\n {2}- paragraph: Inside frame/);
   assert.match(snap, /button "Nested shadow button"/);
   assert.match(snap, /button "Closed shadow button"/);
   // Acting inside a same-origin frame and a closed shadow root by ref.

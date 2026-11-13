@@ -38,11 +38,13 @@ export async function describeChanges(call: PageCall, before: PageBefore | undef
   if (!before || call.page.closed || state.dialog || state.loaderId !== before.loaderId) return [];
   let after: PageBefore;
   let nodes;
+  let refNode: (n: Parameters<typeof call.refs.assign>[0]) => Parameters<typeof call.refs.assign>[0] = n => n;
   try {
     const capture = await capturePage(call);
     if (capture.loaderId !== before.loaderId) return [];
     after = rememberPage(call, capture);
     nodes = capture.tree.nodes;
+    refNode = n => capture.refNode(n);
   } catch (err) {
     if (err instanceof ToolError && err.code === 'cancelled') throw err;
     return [];
@@ -60,7 +62,7 @@ export async function describeChanges(call: PageCall, before: PageBefore | undef
       shown.push(line);
       used += line.length + 1;
     }
-    const refFor = (n: Parameters<typeof call.refs.assign>[0]) => call.refs.assign(n, after.loaderId);
+    const refFor = (n: Parameters<typeof call.refs.assign>[0]) => call.refs.assign(refNode(n), after.loaderId);
     // Refs are filled in before clipping, so a cut never splits one.
     const filled = shown.map(l => fillRefs(l, nodes, refFor)).map(l => (l.length > CHANGE_BUDGET ? `${l.slice(0, CHANGE_BUDGET)}…` : l));
     out.push('Changed on the page:', ...filled);

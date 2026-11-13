@@ -5,6 +5,7 @@ import { ToolError } from '../../core/errors';
 import type { BridgeServices, BrowserTabInfo, CdpPage, TabAccess } from '../../core/services';
 import type { ToolContext } from '../../core/tools';
 import type { ToolContent } from '../../../shared/protocol';
+import type { FrameTarget } from './frames';
 import { DialogInterrupt, type DialogInfo, type PageState, type PageStates } from './pageState';
 import { clip } from './ringBuffer';
 import type { RefStore, RefTable } from './refs';
@@ -60,7 +61,8 @@ export const DIALOG_GRACE_MS = 50;
 const CONTEXT_GONE = /Cannot find context|context was destroyed|Execution context was destroyed|Inspected target navigated|No frame with given id|Frame with the given id was not found/i;
 
 export class PageCall {
-  readonly group = `copane-${++groupCounter}`;
+  readonly group: string;
+  private readonly scoped = new Map<string, PageCall>();
 
   constructor(
     readonly env: PageEnv,
@@ -68,7 +70,34 @@ export class PageCall {
     readonly tab: BrowserTabInfo,
     readonly page: CdpPage,
     readonly state: PageState,
-  ) {}
+    /** Set for a call scoped to a cross-origin frame (see `at`): commands go to that frame's target. */
+    readonly frame?: FrameTarget,
+    private readonly parent?: PageCall,
+  ) {
+    this.group = parent?.group ?? `copane-${++groupCounter}`;
+  }
+
+  /** The call on the page target (this one, unless it is scoped to a frame). */
+  get top(): PageCall {
+    return this.parent ?? this;
+  }
+
+  /** The CDP session this call talks to: the frame target's for a frame-scoped call, else the page's. */
+  get cdp(): CdpPage {
+    return this.frame?.session ?? this.page;
+  }
+
+  /**
+   * The same call, talking to a cross-origin frame's target (undefined = the page target). Shares
+   * cancellation, dialog handling and the object group; input events still go through the page.
+   */
+  at(frame: FrameTarget | undefined): PageCall {
+    const top = this.top;
+    if (!frame) return top;
+    let call = top.scoped.get(frame.id);
+    if (!call || call.frame !== frame) top.scoped.set(frame.id, (call = new PageCall(this.env, this.ctx, this.tab, this.page, this.state, frame, top)));
+    return call;
+  }
 
   get signal(): AbortSignal {
     return this.ctx.signal;
@@ -116,7 +145,7 @@ export class PageCall {
             }, DIALOG_GRACE_MS);
           });
       this.signal.addEventListener('abort', onAbort);
-      this.page.send<T>(method, params, { timeoutMs: options.timeoutMs ?? 30_000 }).then(
+      this.cdp.send<T>(method, params, { timeoutMs: options.timeoutMs ?? 30_000 }).then(
         value => done(() => resolve(value)),
         err => done(() => reject(err instanceof ToolError || !(err instanceof Error) ? err : Object.assign(new Error(`${method}: ${err.message}`), { cdpMessage: err.message }))),
       );
@@ -136,7 +165,7 @@ export class PageCall {
 
   private async evaluateRaw(fn: string, args: unknown[], options: { frameId?: string; timeoutMs?: number; returnByValue: boolean }): Promise<any> {
     for (let attempt = 0; ; attempt++) {
-      const contextId = await this.state.isolatedWorld(options.frameId);
+      const contextId = this.frame ? await this.state.frames.isolatedWorld(this.frame, options.frameId) : await this.state.isolatedWorld(options.frameId);
       try {
         const r = await this.send(
           'Runtime.callFunctionOn',
@@ -147,7 +176,8 @@ export class PageCall {
         return r.result;
       } catch (err) {
         if (attempt === 0 && err instanceof Error && CONTEXT_GONE.test(err.message)) {
-          this.state.forgetWorld(contextId);
+          if (this.frame) this.state.frames.forgetWorld(this.frame, contextId);
+          else this.state.forgetWorld(contextId);
           await this.sleep(100);
           continue;
         }
@@ -204,9 +234,11 @@ export class PageCall {
   }
 
   dispose(): void {
-    if (this.page.closed) return;
+    for (const call of this.scoped.values()) call.dispose();
+    this.scoped.clear();
+    if (this.cdp.closed) return;
     if (this.state.dialog) return;
-    this.page.send('Runtime.releaseObjectGroup', { objectGroup: this.group }, { timeoutMs: 5000 }).then(undefined, () => {});
+    this.cdp.send('Runtime.releaseObjectGroup', { objectGroup: this.group }, { timeoutMs: 5000 }).then(undefined, () => {});
   }
 }
 
