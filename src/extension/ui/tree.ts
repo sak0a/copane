@@ -51,7 +51,15 @@ export class SessionsTree implements vscode.TreeDataProvider<NodeHandle>, vscode
   /** Selects and reveals the row of a node, e.g. after the user picked it from the status bar. */
   async reveal(nodeId: string, options: { focus?: boolean } = {}): Promise<void> {
     if (!this.state.model.nodes.has(nodeId)) return;
-    await this.view.reveal(this.handle(nodeId), { select: true, focus: options.focus ?? false, expand: true });
+    const handle = this.handle(nodeId);
+    const reveal = () => this.view.reveal(handle, { select: true, focus: options.focus ?? false, expand: true });
+    await reveal();
+    // A view that is just opening, or refreshing its rows, can drop the selection again.
+    for (let i = 0; i < 4 && !this.view.selection.includes(handle); i++) {
+      await new Promise(resolve => setTimeout(resolve, 150));
+      if (!this.state.model.nodes.has(nodeId)) return;
+      if (!this.view.selection.includes(handle)) await reveal();
+    }
   }
 
   private apply(update: UiUpdate): void {

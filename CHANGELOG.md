@@ -68,6 +68,7 @@ Fixed:
 - A tab an agent was controlling could no longer load anything after a window reload. Such a tab
   is now replaced after the reload by a new one at the same address, in the same login profile,
   under the same tab id.
+- **Show Agent Session** sometimes opened the Sessions view without selecting the session's row.
 - A tab an agent opened right before a window reload came back as "opened by the user".
 - In bash (the default shell on Linux, and Git Bash), commands that chain several commands
   (`a && b`, `a; b`, `a | b`) or use an alias (`ls` is `ls --color=auto` on Ubuntu) returned
