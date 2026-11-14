@@ -108,6 +108,16 @@ argv.json editor. Not verified for real: Windows paths (`/c:/Users/...`), WSL it
   `targetResolved`). A Playwright locator is chosen when an action resolves its element
   (`page/locators.ts`, checked to match only that element); `browser_export_test` prints the steps as a
   test (`page/testCode.ts`). Values typed into secret fields are never stored, only an env var name.
+- **Throttling** (`page/throttle*.ts`, part of `browser_emulate`): CDP `Network.emulateNetworkConditions`
+  and `Emulation.setCPUThrottlingRate`, sent to the page target and to every cross-origin frame target
+  (separate processes the page's settings do not reach). Both outlive the CDP session that set them (CPU
+  throttling stays on the renderer process), so a tab is remembered in workspace state before it is
+  throttled, and the next run of the extension attaches to it and undoes it. Responses the bridge
+  answers itself (`browser_route` mocks) never reach the network and are not throttled.
+- **HAR export** (`page/har*.ts`, `browser_network_requests` with `har`): the tab's network log as HAR 1.2,
+  written like `browser_export_test` writes tests (`page/agentFile.ts`). Cookie values and secret-looking
+  headers, query parameters and body fields are masked unless the agent asks; `withheld` entries stay
+  withheld; response bodies only on request.
 - **Audits**: `browser_audit` runs axe-core (shipped unmodified as `dist/axe.min.js`, read when first
   used) in the bridge's isolated world of each document, and reads the performance timeline there
   too. A tab in the background is painted rarely, which delays paint-bound numbers (interactions).

@@ -36,6 +36,8 @@ export const SUITES = {
   'browser-frames': {},
   'browser-route': {},
   'browser-emulation': {},
+  'browser-throttle': {},
+  'browser-har': {},
   'browser-downloads': {},
   'browser-certs': {},
   'browser-auth': { hostArgs: ['--test-proxy'] },

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ToolError } from '../../core/errors';
 import { defineTool, type ToolDefinition } from '../../core/tools';
 import { withPage, type PageCall, type PageEnv } from './call';
+import { exportHar } from './harExport';
 import { formatConsoleEntry, levelAtLeast, shortLocation, type ConsoleEntry, type ConsoleLevel } from './consoleLog';
 import { filterNetwork, formatNetworkEntry, urlMatcher, type NetworkEntry } from './networkLog';
 import { clip, formatBytes, formatMs } from './ringBuffer';
@@ -98,6 +99,8 @@ export function logTools(env: PageEnv): ToolDefinition<any>[] {
         onlyNew: z.boolean().optional().describe('Only what you have not read yet.'),
         limit: z.number().int().min(1).max(500).optional().describe('Newest N, default 100.'),
         maxBodyChars: z.number().int().min(100).max(20_000).optional().describe('With id: cut bodies here, default 4000.'),
+        har: z.string().optional().describe('Write the matching requests (static included) to this HAR file, e.g. "network.har"; cookies and tokens are masked.'),
+        harInclude: z.array(z.enum(['bodies', 'secrets'])).optional().describe('With har: response bodies; secrets unmasked (you can then read them).'),
         tab: tabArg,
       },
       annotations: { readOnlyHint: true },
@@ -107,6 +110,16 @@ export function logTools(env: PageEnv): ToolDefinition<any>[] {
           const { state } = call;
           const cursor = cursorFor(env, call);
           const since = args.onlyNew ? cursor.network : 0;
+          if (args.har !== undefined) {
+            let entries: NetworkEntry[];
+            try {
+              entries = filterNetwork(state.network.entries.after(since), { url: args.filter, method: args.method, status: args.status, types: args.types, includeStatic: args.includeStatic ?? true }).matched;
+            } catch (err) {
+              throw new ToolError('invalid_input', err instanceof Error ? err.message : String(err));
+            }
+            return exportHar(call, entries, args.har, args.harInclude ?? []);
+          }
+          if (args.harInclude) throw new ToolError('invalid_input', 'harInclude applies only with har (the path of the HAR file to write).');
           let result: { matched: NetworkEntry[]; hiddenStatic: number };
           try {
             result = filterNetwork(state.network.entries.after(since), { url: args.filter, method: args.method, status: args.status, types: args.types, includeStatic: args.includeStatic });
