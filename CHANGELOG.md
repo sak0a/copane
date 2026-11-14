@@ -1,7 +1,18 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
+Agents can hand a tab to you, keep separate logins per environment, audit pages for accessibility
+and performance, and record and throttle network traffic.
+
+- **HAR export**: `browser_network_requests` with `har` writes a tab's requests, iframes from
+  other sites included, as a HAR 1.2 file for Chrome DevTools, Firefox or any HAR viewer. Cookie
+  values, tokens and other secret-looking values are masked by default; response bodies are
+  included on request.
+- **Slow network, offline, slow CPU**: `browser_emulate` with `network` (offline, 3g, slow-4g,
+  fast-4g or your own numbers) and `cpu` (a slowdown factor). It reaches iframes from other sites,
+  shows on the tab in the views, and ends when the agent releases the tab or you end the
+  emulation. `browser_audit` says when its performance numbers were measured under throttling.
 - **Hand a browser tab to you** (`browser_request_user_input`): for single sign-on, MFA, captchas,
   consent screens and decisions only you can make. The tab comes to the front with the agent's
   request, the agent cannot read or use it meanwhile, and it gets the tab back when you click

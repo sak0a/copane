@@ -92,8 +92,8 @@ Tools appear in Claude Code as `mcp__copane__<name>`.
 | Navigation | `browser_navigate`, `browser_history` (back, forward, reload) |
 | Reading a page | `browser_snapshot` (accessibility tree with element refs; `mode: "text"` for reading, `find` to locate), `browser_screenshot`, `browser_wait_for` |
 | Acting on a page | `browser_click`, `browser_type`, `browser_fill_form` (also selects options), `browser_press_key`, `browser_hover`, `browser_scroll`, `browser_drag`, `browser_upload_file`, `browser_handle_dialog`, `browser_evaluate` |
-| Debugging a page | `browser_console_messages`, `browser_network_requests` (with `id`: one request's headers and bodies), `browser_route` (mock, fail or delay requests) |
-| Devices and files | `browser_emulate` (phone and tablet sizes, dark mode, locale, time zone), `browser_downloads` |
+| Debugging a page | `browser_console_messages`, `browser_network_requests` (with `id`: one request's headers and bodies; with `har`: a HAR file), `browser_route` (mock, fail or delay requests) |
+| Devices and files | `browser_emulate` (phone and tablet sizes, dark mode, locale, time zone, slow or offline network, slow CPU), `browser_downloads` |
 | Testing and audits | `browser_audit` (accessibility with WCAG criteria, performance), `browser_export_test` (the agent's actions as a Playwright test) |
 | Terminals | `terminal_run`, `terminal_read`, `terminal_wait`, `terminal_send`, `terminal_interrupt`, `terminal_request_user_input` (hand a login or prompt to the user), `terminal_create`, `terminal_list`, `terminal_close` |
 
@@ -137,6 +137,15 @@ WCAG asks for (roughly a third to a half): a clean report is not a conformance s
 performance mode reports load timing, Web Vitals, the slowest and largest requests, long tasks and
 render-blocking resources. `browser_export_test` turns what the agent did in a tab into a
 Playwright test you can keep.
+
+**Network recording and throttling.** `browser_network_requests` with `har: "network.har"` writes
+the tab's requests, including those of iframes from other sites, as a HAR 1.2 file you can open in
+Chrome DevTools, Firefox or any HAR viewer. Cookie values, tokens and other secret-looking values
+are masked unless the agent asks for them, and response bodies are included only on request.
+`browser_emulate` with `network` (`offline`, `3g`, `slow-4g`, `fast-4g` or your own numbers) and
+`cpu` (for example `4` for four times slower) shows how a page behaves on a slow connection or
+device. Throttling shows on the tab in the Sessions and Agent Tabs views and ends when the agent
+releases the tab or you end the emulation.
 
 **Downloads.** When an agent's click or navigation downloads a file, Copane saves it to
 `~/Downloads/Copane` (setting `copane.browser.downloadsFolder`) under a name that never replaces an
