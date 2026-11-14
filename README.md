@@ -88,12 +88,13 @@ Tools appear in Claude Code as `mcp__copane__<name>`.
 | Area | Tools |
 |---|---|
 | Session and window | `session_info`, `session_set_title`, `window_status`, `window_select` |
-| Browser tabs | `browser_list_tabs`, `browser_open`, `browser_select_tab`, `browser_show_tab`, `browser_release_tab`, `browser_close_tab` |
+| Browser tabs | `browser_list_tabs`, `browser_open`, `browser_select_tab`, `browser_show_tab`, `browser_release_tab`, `browser_close_tab`, `browser_request_user_input` (hand a tab to the user for a sign-in, captcha or decision), `browser_profiles` (separate login stores) |
 | Navigation | `browser_navigate`, `browser_history` (back, forward, reload) |
 | Reading a page | `browser_snapshot` (accessibility tree with element refs; `mode: "text"` for reading, `find` to locate), `browser_screenshot`, `browser_wait_for` |
 | Acting on a page | `browser_click`, `browser_type`, `browser_fill_form` (also selects options), `browser_press_key`, `browser_hover`, `browser_scroll`, `browser_drag`, `browser_upload_file`, `browser_handle_dialog`, `browser_evaluate` |
 | Debugging a page | `browser_console_messages`, `browser_network_requests` (with `id`: one request's headers and bodies), `browser_route` (mock, fail or delay requests) |
 | Devices and files | `browser_emulate` (phone and tablet sizes, dark mode, locale, time zone), `browser_downloads` |
+| Testing and audits | `browser_audit` (accessibility with WCAG criteria, performance), `browser_export_test` (the agent's actions as a Playwright test) |
 | Terminals | `terminal_run`, `terminal_read`, `terminal_wait`, `terminal_send`, `terminal_interrupt`, `terminal_request_user_input` (hand a login or prompt to the user), `terminal_create`, `terminal_list`, `terminal_close` |
 
 The session indicator in a page can be dragged to any corner; it stays there for that tab and new
@@ -113,6 +114,29 @@ is asked once more, then the agent is told to stop. *Log In and Remember* saves 
 Code's secret storage; **Copane: Forget Saved Browser Logins** removes saved logins. Turn this off
 with `copane.browser.loginPrompts`. Not possible: Windows single sign-on (Kerberos or Negotiate
 without typing anything) cannot be provided by an extension.
+
+**Handing a tab to you.** When a page needs you (single sign-on, MFA, a captcha, a consent screen,
+a choice only you can make), the agent calls `browser_request_user_input` instead of asking for
+your password. The tab comes to the front with what the agent asks for, the agent can neither read
+nor use it meanwhile, and you finish with **Done** or **Won't Do** in the tab's title bar, the page
+indicator or the Sessions view. The agent can also name a condition (an address, a text on the
+page) that ends the hand-off by itself once you are signed in.
+
+**Login profiles.** Tabs normally share one login store: an agent is signed in wherever you are. A
+login profile is a separate store (cookies, local storage, cache), so one window can be signed in
+to the same site as different accounts, for example `dev`, `test` and `prod`. Agents name one with
+`browser_open`'s `profile`; you choose with **Copane: Open Browser Tab in Login Profile…** and
+**Set Login Profile for Agent Session…**, or make every agent session start in a private profile
+with `copane.browser.agentLoginStore: private`. Profiles live in memory until VS Code quits and
+are never written to disk. Details: [docs/browser-profiles.md](docs/browser-profiles.md).
+
+**Accessibility and performance.** `browser_audit` runs axe-core on the page and lists what fails,
+each with its WCAG criterion and level (for example `[WCAG 1.4.3 AA]`), the element's ref and how
+to fix it, so an agent can fix the code and check again. Automated checks find only part of what
+WCAG asks for (roughly a third to a half): a clean report is not a conformance statement. Its
+performance mode reports load timing, Web Vitals, the slowest and largest requests, long tasks and
+render-blocking resources. `browser_export_test` turns what the agent did in a tab into a
+Playwright test you can keep.
 
 **Downloads.** When an agent's click or navigation downloads a file, Copane saves it to
 `~/Downloads/Copane` (setting `copane.browser.downloadsFolder`) under a name that never replaces an
@@ -314,6 +338,10 @@ Copane's entries and nothing else, and Copane does not add them back until you r
 | Copane: Show Status | Everything about this window, the browser, the agents, the server's start test, recent registration changes and the connected sessions, in one report. |
 | Copane: Copy Status Report | Puts that report on the clipboard (also the copy button above the report). |
 | Copane: Show Log | The extension's log. |
+| Copane: Answer Agent Question | Answers a question an agent's action is waiting on (the same as clicking its status bar item). |
+| Copane: Open Browser Tab in Login Profile… | Opens a tab in a separate login store. |
+| Copane: Set Login Profile for Agent Session… | Chooses the login store a session's new tabs use. |
+| Copane: Forget Saved Browser Logins | Removes logins saved with *Log In and Remember*. |
 
 ## Settings
 
@@ -322,6 +350,11 @@ Copane's entries and nothing else, and Copane does not add them back until you r
 | `copane.registration.mode` | `ask` | `ask`: ask once before registering. `automatic`: register without asking. `manual`: only the commands change agent configuration. |
 | `copane.registration.claudeCode` | `true` | Register with Claude Code. |
 | `copane.registration.codex` | `true` | Register with Codex (when it is installed). |
+| `copane.browser.userTabs` | `ask` | Whether agents may use tabs you opened: ask, always allow or never. |
+| `copane.browser.agentLoginStore` | `shared` | `shared`: agents' tabs use your login store. `private`: every agent session starts in a login profile of its own. |
+| `copane.browser.loginPrompts` | `true` | Ask you for site and proxy logins in tabs an agent drives. |
+| `copane.browser.agentDownloads` | `ask` | Whether agents' actions may download files: `ask`, `allow`, `deny`. |
+| `copane.browser.certificateErrors` | `ask` | What to do for agents on a site with an untrusted certificate: `ask` or `block`. |
 | `copane.sessionGraceSeconds` | `20` | How long a disconnected session keeps its tabs and terminals, so it can reconnect after a reload. |
 
 ## Troubleshooting

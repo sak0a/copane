@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Hand a browser tab to you** (`browser_request_user_input`): for single sign-on, MFA, captchas,
+  consent screens and decisions only you can make. The tab comes to the front with the agent's
+  request, the agent cannot read or use it meanwhile, and it gets the tab back when you click
+  **Done** or **Won't Do**, or when a condition it named holds (an address, a text on the page).
+- **Login profiles** (`browser_profiles`, `browser_open` with `profile`): separate login stores, so
+  one window can be signed in to the same site as different accounts (dev, test, prod). You can
+  choose a profile per session or per tab, or give every agent session a private one with
+  `copane.browser.agentLoginStore`. Profiles live in memory until VS Code quits.
+- **Accessibility and performance audits** (`browser_audit`): axe-core findings with their WCAG
+  criterion and level, element refs and fixes, WCAG failures first; and a performance report (load
+  timing, Web Vitals, slowest and largest requests, long tasks, render-blocking resources).
+- **Playwright test export** (`browser_export_test`): what the agent did in a tab as a Playwright
+  test with role and label locators.
+- GitHub Actions: checks on Linux, macOS and Windows, end-to-end suites on Linux, releases built
+  from version tags, and a nightly run against VS Code Insiders.
 - **Terminal names stay true after a window reload.** Sessions get their label and color back when
   they reconnect, in whatever order; a new session no longer takes a returning session's number. A
   session that comes back under another label gets its terminals renamed when they are active.
@@ -36,6 +51,13 @@
 
 Fixed:
 
+- Text typed into password, one-time-code and card fields is no longer repeated in the result of
+  `browser_type` and `browser_fill_form` ("Typed 12 characters (not shown: a password or code
+  field)") or in an exported test.
+- A tab an agent was controlling could no longer load anything after a window reload. Such a tab
+  is now replaced after the reload by a new one at the same address, in the same login profile,
+  under the same tab id.
+- A tab an agent opened right before a window reload came back as "opened by the user".
 - In bash (the default shell on Linux, and Git Bash), commands that chain several commands
   (`a && b`, `a; b`, `a | b`) or use an alias (`ls` is `ls --color=auto` on Ubuntu) returned
   "(no output)" after a 2.5 s wait. They return their output again.
