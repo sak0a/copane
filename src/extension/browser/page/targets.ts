@@ -2,7 +2,7 @@
 // live element, and waiting until that element can take real input: attached, visible, enabled,
 // scrolled into view, not moving, and not covered by something else.
 import { ToolError } from '../../core/errors';
-import { ObjectArg, type PageCall } from './call';
+import { ObjectArg, targetResolved, type PageCall } from './call';
 import { insideQuad, quadToTop } from './frameGeometry';
 import { querySelectorAcrossFrames } from './frameQuery';
 import { frameLabel, frameLevels, framesReachable, frameViewport, hitInFrame, mapOut, scrollFramesTo } from './frameTargets';
@@ -76,8 +76,9 @@ export async function resolveTarget(call: PageCall, args: TargetArgs, options: {
     return { kind: 'point', x: args.x, y: args.y, label: `the point (${Math.round(args.x)}, ${Math.round(args.y)})` };
   }
 
-  if (args.ref !== undefined) return resolveRef(call, args.ref);
-  return resolveSelector(call, args.selector!, options.waitMs ?? DEFAULT_ACTION_TIMEOUT_MS);
+  const target = args.ref !== undefined ? await resolveRef(call, args.ref) : await resolveSelector(call, args.selector!, options.waitMs ?? DEFAULT_ACTION_TIMEOUT_MS);
+  await targetResolved(call, target);
+  return target;
 }
 
 async function resolveRef(call: PageCall, rawRef: string): Promise<ElementTarget> {

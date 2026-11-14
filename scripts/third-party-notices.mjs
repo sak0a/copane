@@ -19,8 +19,12 @@ export function writeThirdPartyNotices(metafiles, root = process.cwd()) {
       const dir = join(root, m[1]);
       if (packages.has(dir)) continue;
       const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
-      const file = readdirSync(dir).find(f => /^(licen[cs]e|copying)(\.|$)/i.test(f));
-      packages.set(dir, { name: pkg.name, version: pkg.version, license: pkg.license ?? 'see text', text: file ? readFileSync(join(dir, file), 'utf8').trim() : FALLBACK[pkg.name] ? readFileSync(join(fallbackDir, FALLBACK[pkg.name]), 'utf8').trim() : undefined, repository: typeof pkg.repository === 'string' ? pkg.repository : pkg.repository?.url });
+      const files = readdirSync(dir);
+      const file = files.find(f => /^(licen[cs]e|copying)(\.|$)/i.test(f));
+      // Licenses of what a package itself bundles (axe-core ships LICENSE-3RD-PARTY.txt).
+      const bundled = files.find(f => /^licen[cs]e-3rd-party/i.test(f));
+      const text = file ? readFileSync(join(dir, file), 'utf8').trim() : FALLBACK[pkg.name] ? readFileSync(join(fallbackDir, FALLBACK[pkg.name]), 'utf8').trim() : undefined;
+      packages.set(dir, { name: pkg.name, version: pkg.version, license: pkg.license ?? 'see text', text: text && bundled ? `${text}\n\n${readFileSync(join(dir, bundled), 'utf8').trim()}` : text, repository: typeof pkg.repository === 'string' ? pkg.repository : pkg.repository?.url });
     }
   }
   const sorted = [...packages.values()].sort((a, b) => a.name.localeCompare(b.name));

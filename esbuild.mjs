@@ -2,7 +2,7 @@
 // MCP stdio server (runs as a plain Node process spawned by the agent, e.g. Claude Code).
 import * as esbuild from 'esbuild';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { writeThirdPartyNotices } from './scripts/third-party-notices.mjs';
 
 const watch = process.argv.includes('--watch');
@@ -31,5 +31,9 @@ if (watch) {
   for (const b of builds) (await esbuild.context(b)).watch();
 } else {
   const results = await Promise.all(builds.map(b => esbuild.build(b)));
-  writeThirdPartyNotices(results.map(r => r.metafile));
+  // axe-core (browser_audit accessibility) ships unmodified next to the bundles and is read only when
+  // the check runs, so it adds nothing to the extension's activation. Listed in the notices like a bundled package.
+  mkdirSync('dist', { recursive: true });
+  copyFileSync('node_modules/axe-core/axe.min.js', 'dist/axe.min.js');
+  writeThirdPartyNotices([...results.map(r => r.metafile), { inputs: { 'node_modules/axe-core/axe.min.js': {} } }]);
 }

@@ -67,6 +67,14 @@ agent and its MCP server also run; the browser itself stays on the UI side and V
   `routes.ts`) is a `FetchClient` registered there; never call `Fetch.*` directly. `Fetch` is enabled
   only while some client needs it on that tab, and every paused request is answered. It covers the
   tab's page target only, not out-of-process iframes or workers.
+- **Test recording**: `page/recorder.ts` keeps, per session and tab, the steps of the session's
+  successful page tool calls (it wraps their handlers and is a `PageHook`: `observeCall`,
+  `targetResolved`). A Playwright locator is chosen when an action resolves its element
+  (`page/locators.ts`, checked to match only that element); `browser_export_test` prints the steps as a
+  test (`page/testCode.ts`). Values typed into secret fields are never stored, only an env var name.
+- **Audits**: `browser_audit` runs axe-core (shipped unmodified as `dist/axe.min.js`, read when first
+  used) in the bridge's isolated world of each document, and reads the performance timeline there
+  too. A tab in the background is painted rarely, which delays paint-bound numbers (interactions).
 
 ## Terminal rules
 

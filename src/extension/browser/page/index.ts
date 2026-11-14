@@ -9,6 +9,7 @@ import type { Event } from '../../core/events';
 import type { BridgeServices } from '../../core/services';
 import type { ToolContext } from '../../core/tools';
 import { actionTools } from './actionTools';
+import { auditTools } from './auditTool';
 import { DownloadManager } from './downloads';
 import { downloadTools } from './downloadTools';
 import { EmulationManager, type TabInfoHost } from './emulation';
@@ -18,9 +19,11 @@ import { debugCdpTools } from './debugCdp';
 import { logTools } from './logTools';
 import { describeOpened, navigationTools } from './navigationTools';
 import { PageStates } from './pageState';
+import { Recorder } from './recorder';
 import { RefStore } from './refs';
 import { scriptTools } from './scriptTools';
 import { snapshotTools } from './snapshotTools';
+import { testExportTools } from './testExportTool';
 import { waitTools } from './waitTools';
 
 /** Sources of per-tab information from the rest of the browser module (request interception). */
@@ -44,8 +47,10 @@ export function registerPageTools(services: BridgeServices, host: TabInfoHost, e
   // Downloads and device emulation (downloads.ts, emulation.ts) hook into page tool calls.
   const downloads = new DownloadManager(services, host, tabId => env.states.get(tabId)?.nextSeq() ?? 0);
   const emulation = new EmulationManager(services, host);
-  env.hooks = [downloads, emulation];
-  context.subscriptions.push(downloads, emulation);
+  // The test recorder (recorder.ts) sees every recorded call and the elements it acts on.
+  const recorder = new Recorder(services);
+  env.hooks = [downloads, emulation, recorder];
+  context.subscriptions.push(downloads, emulation, recorder);
   if (extras.interception) {
     context.subscriptions.push(
       extras.interception.onDidNote(({ tabId, text, topic, to }) => env.states.get(tabId)?.addNote(text, { topic, to })),
@@ -78,14 +83,18 @@ export function registerPageTools(services: BridgeServices, host: TabInfoHost, e
     }),
     { dispose: () => env.states.dispose() },
     services.tools.register([
-      ...navigationTools(env),
-      ...snapshotTools(env),
-      ...actionTools(env),
-      ...waitTools(env),
-      ...logTools(env),
-      ...scriptTools(env),
-      ...downloadTools(env, downloads),
-      ...emulationTools(env, emulation),
+      ...recorder.instrument([
+        ...navigationTools(env),
+        ...snapshotTools(env),
+        ...actionTools(env),
+        ...waitTools(env),
+        ...logTools(env),
+        ...scriptTools(env),
+        ...downloadTools(env, downloads),
+        ...emulationTools(env, emulation),
+      ]),
+      ...testExportTools(env, recorder),
+      ...auditTools(env),
       ...debugCdpTools(services),
     ]),
   );
