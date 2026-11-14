@@ -1,0 +1,23 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Accessibility fixture</title>
+<style>body { font: 15px sans-serif; margin: 16px; } .faint { color: #bbbbbb; } .icon { width: 24px; height: 24px; }</style></head>
+<body>
+<!-- Problems on purpose: no lang, an image without alt, an unlabeled field, an icon button without a name,
+     low-contrast text, a skipped heading level, a duplicate id referenced by a label. -->
+<h1>Checkout</h1>
+<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" width="40" height="40">
+<form id="checkout">
+  <h4>Shipping</h4>
+  <input id="street" placeholder="Street">
+  <label for="zip">Zip</label> <input id="zip">
+  <label for="city">City</label> <input id="city"> <input id="city">
+  <button type="button" class="icon"><svg viewBox="0 0 10 10" width="10" height="10"><circle cx="5" cy="5" r="4"/></svg></button>
+  <p class="faint">Delivery takes 3–5 days.</p>
+  <button type="submit">Pay now</button>
+</form>
+<section id="clean" aria-label="Fine part">
+  <h2>Contact</h2>
+  <label for="mail">Email</label> <input id="mail" type="email">
+  <button type="button">Send</button>
+</section>
+</body></html>

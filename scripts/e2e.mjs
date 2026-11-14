@@ -41,6 +41,7 @@ export const SUITES = {
   'browser-auth': { hostArgs: ['--test-proxy'] },
   'browser-handoff': {},
   'browser-profiles': {},
+  'browser-devtools': {},
   codex: {},
   remote: {
     notInCi: {

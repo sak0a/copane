@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Performance fixture</title>
+<link rel="stylesheet" href="/slow.css?ms=400">
+<script src="/big.js?kb=300"></script>
+</head>
+<body>
+<h1>Slow page</h1>
+<p class="muted">This page is slow on purpose: a render-blocking stylesheet, a large uncompressed script that blocks the main thread, a slow API call and a late banner that shifts the layout.</p>
+<div id="slot"></div>
+<p id="data">Loading…</p>
+<button id="heavy">Heavy click</button>
+<script>
+  fetch('/api?ms=600').then(r => r.json()).then(d => (document.getElementById('data').textContent = 'Items: ' + d.items.length));
+  setTimeout(() => {
+    const banner = document.createElement('div');
+    banner.style.cssText = 'height:120px;background:#fd0';
+    banner.textContent = 'Late banner';
+    document.getElementById('slot').append(banner);
+  }, 300);
+  document.getElementById('heavy').onclick = () => { const end = performance.now() + 220; while (performance.now() < end) {} document.getElementById('heavy').textContent = 'Done'; };
+</script>
+</body></html>

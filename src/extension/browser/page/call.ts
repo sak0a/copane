@@ -10,6 +10,7 @@ import { DialogInterrupt, type DialogInfo, type PageState, type PageStates } fro
 import { clip } from './ringBuffer';
 import type { RefStore, RefTable } from './refs';
 import { accessibleName, roleName, type AXNode } from './snapshot';
+import type { ElementTarget } from './targets';
 
 export interface PageEnv {
   services: BridgeServices;
@@ -33,6 +34,15 @@ export interface PageHook {
   screenshot?(call: PageCall, request: ScreenshotRequest): Promise<ToolContent[] | undefined>;
   /** The page takes touch input instead of mouse presses (mobile emulation). */
   usesTouch?(call: PageCall): Promise<boolean>;
+  /** Sees every call (read or control) once its tab is acquired, before the tool runs (the test recorder). */
+  observeCall?(call: PageCall): void;
+  /** An element the call resolved from the agent's ref or selector, before the tool acts on it (see `targetResolved`). */
+  targetResolved?(call: PageCall, target: ElementTarget): Promise<void>;
+}
+
+/** Tells the hooks which element a call is about to act on (called by resolveTarget in targets.ts). */
+export async function targetResolved(call: PageCall, target: ElementTarget): Promise<void> {
+  for (const hook of call.env.hooks ?? []) await hook.targetResolved?.(call, target);
 }
 
 export interface ScreenshotRequest {
@@ -278,6 +288,7 @@ export async function withPage<T>(env: PageEnv, ctx: ToolContext, tabId: string 
   const state = env.states.forPage(page);
   await Promise.race([state.ready, new Promise(resolve => setTimeout(resolve, 15_000))]);
   const call = new PageCall(env, ctx, tab, page, state);
+  for (const hook of env.hooks ?? []) hook.observeCall?.(call);
   const after: Array<() => void> = [];
   try {
     if (options.access === 'control') {
