@@ -71,7 +71,10 @@ test('a question about a tab waits in the status bar; no browser view is paused,
     const started = Date.now();
     const shot = await x.ok('browser_screenshot', {});
     assert.ok(Date.now() - started < 3000, `the screenshot took ${Date.now() - started} ms`);
-    assert.match(shot, new RegExp(`${visibleSize.replace('x', '×')} px`));
+    // Same size as before the question (a classic scrollbar, as on Linux, is not part of the screenshot).
+    const [w, h] = visibleSize.split('x').map(Number);
+    const [, sw, sh] = shot.match(/(\d+)×(\d+) px/) ?? assert.fail(`no size in: ${shot}`);
+    assert.ok(w - Number(sw) >= 0 && w - Number(sw) <= 20 && Number(sh) === h, `the screenshot is ${sw}×${sh}, the view was ${visibleSize}`);
     await x.ok('browser_open', { url: `${site.url}/long.html?prompts=${stamp}-second` });
     await sleep(1000);
     assert.equal(await size(x), visibleSize, 'a tab opened during the question did not get its real size');

@@ -159,7 +159,7 @@ test('the setting "private" gives every session its own profile and keeps agents
 test('the user opens a tab in a profile with the command; it shows as theirs, in that profile', async () => {
   const url = server.url(`/?user-cmd=${runId}`);
   await a.ok('debug_vscode_command', { command: 'copane.browser.openInProfile', args: [DEV, url] });
-  const tab = await until(async () => (await tabs(a)).find(t => t.url === url && t.notes.includes('login profile') && t.title), 'the user tab in the profile, loaded');
+  const tab = await until(async () => (await tabs(a)).find(t => t.url === url && t.notes.includes('login profile') && t.title.startsWith('Logged in')), 'the user tab in the profile, loaded');
   assert.match(tab.notes, /opened by the user/);
   assert.match(tab.notes, new RegExp(`login profile "${DEV}"`));
   assert.equal(tab.title, 'Logged in as dev-user');
