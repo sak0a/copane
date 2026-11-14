@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- While a tab was being replaced after a window reload, the tab list could briefly show the
+  replacement as an extra tab with a new id.
+
 ## 0.3.0
 
 Agents can hand a tab to you, keep separate logins per environment, audit pages for accessibility

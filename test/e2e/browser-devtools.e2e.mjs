@@ -240,7 +240,7 @@ test('export: failed actions are left out; reset starts over; path writes a file
   const found = await a.ok('browser_snapshot', { find: 'Item 25.3 ' });
   await a.ok('browser_click', { ref: refOf(found, 'link "Item 25\\.3 ') });
   const written = await a.ok('browser_export_test', { name: 'long page', path: 'tests/copane-long.spec.ts' });
-  assert.match(written, /Wrote tests\/copane-long\.spec\.ts \(\d+ steps\)/);
+  assert.match(written, /Wrote tests[\\/]copane-long\.spec\.ts \(\d+ steps\)/);
   const code = readFileSync(join(hostDir, 'ws', 'tests', 'copane-long.spec.ts'), 'utf8');
   exported.set('long page', code);
   assert.doesNotMatch(code, /Never enabled/);

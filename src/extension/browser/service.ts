@@ -123,6 +123,7 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
   reopener: ((tab: vscode.BrowserTab, url: string) => Promise<vscode.BrowserTab | 'keep' | undefined>) | undefined;
   /** Replacing tabs that came back stuck after a window reload; tool calls wait for it. */
   private recovery: Promise<void> | undefined;
+  private replacing = false;
   /** Set by login profiles: a short note added to the in-page indicator's label ("profile dev"). */
   markerNote: ((tabId: string) => string | undefined) | undefined;
   /** Set by login profiles: what browser_open tells the agent about the store of a tab it just opened (once). */
@@ -603,7 +604,8 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
 
   private onOpened(tab: vscode.BrowserTab): void {
     if (this.records.has(tab)) return;
-    const record = this.track(tab, this.freshId());
+    // The replacement of a stuck tab has no id until it takes over the old tab's (replaceStuck).
+    const record = this.track(tab, this.replacing ? '' : this.freshId());
     this.changeEmitter.fire();
     // `openBrowserTab` reports its tab through this event before it returns; wait for it to say which.
     if (this.openingCount > 0) this.unannounced.add(record);
@@ -771,6 +773,7 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
       const url = old.tab.url || 'about:blank';
       const id = old.id;
       this.openingCount++;
+      this.replacing = true;
       try {
         const opened = await this.reopener?.(old.tab, url);
         if (opened === 'keep') {
@@ -793,6 +796,9 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
       } catch (err) {
         this.log.warn(`${id} may be unable to load pages (the window reloaded while its requests were being intercepted) and could not be replaced: ${errorText(err)}. Close it and open it again.`);
       } finally {
+        this.replacing = false;
+        // Whatever else opened meanwhile, or a replacement that did not take over, is a tab like any other.
+        for (const r of this.records.values()) if (!r.id && r !== old) r.id = this.freshId();
         if (--this.openingCount === 0) {
           for (const other of [...this.unannounced]) void this.classify(other);
           this.unannounced.clear();
