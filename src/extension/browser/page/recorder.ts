@@ -17,7 +17,7 @@ import type { PageCall, PageHook } from './call';
 import { focusedAcrossFrames } from './frameQuery';
 import { locateElement, locateSelector, locateText, type LocatedElement } from './locators';
 import { normalizeUrl } from './navigationTools';
-import { DEEP_ACTIVE_ELEMENT } from './scripts';
+import { DEEP_ACTIVE_ELEMENT, SECRET_FIELD } from './scripts';
 import type { ElementTarget } from './targets';
 import { secretEnvName, type Step, type StepTarget, type Text } from './testCode';
 
@@ -60,20 +60,6 @@ interface Pending {
   focusedSecret?: string;
   targets: Located[];
 }
-
-/**
- * Element (this). The field's label when it is a secret field (password, one-time code, card number or
- * code), else ''. Cheap, and run before anything slow, so a secret is recognised even when choosing a
- * locator fails.
- */
-const SECRET_FIELD = `function () {
-  const el = this;
-  if (!el || el.nodeType !== 1) return '';
-  const ac = (el.getAttribute('autocomplete') || '').toLowerCase();
-  if (!(el.type === 'password' || /(current|new)-password|one-time-code|cc-number|cc-csc/.test(ac))) return '';
-  const label = el.labels && el.labels[0] ? el.labels[0].textContent : el.getAttribute('aria-label') || el.name || el.id || 'password';
-  return String(label).replace(/\\s+/g, ' ').trim() || 'password';
-}`;
 
 /** Used as the label when whether a field is secret could not be found out: the value is then kept out. */
 const UNKNOWN_SECRET = 'secret';

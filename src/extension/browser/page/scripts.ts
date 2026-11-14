@@ -327,3 +327,17 @@ export const PAGE_HIT_TEST = `function (x, y) {
   for (let n = el; n; n = n.parentNode || n.host) if (n === this) return true;
   return false;
 }`;
+
+/**
+ * Element (this). The field's label when it is a secret field (password, one-time code, card number or
+ * code), else ''. Cheap, and run before anything slow, so a secret is recognised even when choosing a
+ * locator fails.
+ */
+export const SECRET_FIELD = `function () {
+  const el = this;
+  if (!el || el.nodeType !== 1) return '';
+  const ac = (el.getAttribute('autocomplete') || '').toLowerCase();
+  if (!(el.type === 'password' || /(current|new)-password|one-time-code|cc-number|cc-csc/.test(ac))) return '';
+  const label = el.labels && el.labels[0] ? el.labels[0].textContent : el.getAttribute('aria-label') || el.name || el.id || 'password';
+  return String(label).replace(/\\s+/g, ' ').trim() || 'password';
+}`;

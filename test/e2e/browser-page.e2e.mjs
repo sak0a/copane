@@ -303,6 +303,20 @@ test('type, fill_form (also for selects) and press_key', async () => {
   assert.match(await a.ok('browser_snapshot', { selector: '#result' }), /\\"name\\":\\"Grace\\".*\\"plan\\":\\"pro\\".*\\"notes\\":\\"multi\\\\nline\\"/);
 });
 
+test('typing into a password field is never repeated in a result', async () => {
+  await open('/form.html');
+  const typed = await a.ok('browser_type', { selector: '#pw', text: 'hunter2-SECRET' });
+  assert.match(typed, /Typed 14 characters \(not shown: a password or code field\) into textbox "Password"/);
+  const filled = await a.ok('browser_fill_form', { fields: [{ selector: '#pw', value: 'another-SECRET-9' }] });
+  assert.match(filled, /→ 16 characters \(not shown/);
+  await a.ok('browser_click', { selector: '#pw' });
+  const focused = await a.ok('browser_type', { text: 'focused-SECRET', clear: false });
+  assert.match(focused, /Typed 14 characters \(not shown/);
+  for (const text of [typed, filled, focused, await a.ok('browser_snapshot')]) assert.ok(!text.includes('SECRET'), text);
+  // Ordinary fields are still echoed, which is what lets an agent confirm what it typed.
+  assert.match(await a.ok('browser_type', { selector: '#name', text: 'visible text' }), /Typed "visible text"/);
+});
+
 test('hover shows hover content', async () => {
   await open('/spa.html');
   assert.doesNotMatch(await a.ok('browser_snapshot'), /Helpful tooltip/);

@@ -16,7 +16,7 @@ import { chordLabel, parseChord, type Modifier } from './keys';
 import { DialogInterrupt } from './pageState';
 import { clip } from './ringBuffer';
 import { elementArgs, modifiersArg, pointArgs, tabArg } from './schema';
-import { DEEP_ACTIVE_ELEMENT, DESCRIBE, FOCUS, FOCUS_FOR_TYPING, READ_VALUE, SCROLL_STATE, SELECT_OPTIONS, SET_INPUT_VALUE, SUPPRESS_NATIVE_CONTEXT_MENU } from './scripts';
+import { DEEP_ACTIVE_ELEMENT, DESCRIBE, FOCUS, FOCUS_FOR_TYPING, READ_VALUE, SCROLL_STATE, SECRET_FIELD, SELECT_OPTIONS, SET_INPUT_VALUE, SUPPRESS_NATIVE_CONTEXT_MENU } from './scripts';
 import { actionPoint, inspect, resolveTarget, scrollIntoView, viewport, type ElementInfo, type ElementTarget, type Target } from './targets';
 
 function normalizeModifiers(mods: Array<Modifier | 'ControlOrMeta'> | undefined, isMac: boolean): Modifier[] {
@@ -63,6 +63,24 @@ async function act(call: PageCall, target: Target | undefined, summary: string |
   return report(`${head}${extra ? ` ${extra}` : ''}${now}`, [...effects, ...changes]);
 }
 
+/**
+ * Whether what is typed into this element must not be repeated in tool results: a password,
+ * one-time-code or card field. Unknown counts as secret, so a failed check never leaks a value.
+ */
+async function isSecretField(at: PageCall, objectId: string): Promise<boolean> {
+  try {
+    return (await at.callOn<string>(objectId, SECRET_FIELD, [], { timeoutMs: 2000 })) !== '';
+  } catch (err) {
+    if (err instanceof ToolError && err.code === 'cancelled') throw err;
+    return true;
+  }
+}
+
+/** What a result says was typed: the text, or only its length for a secret field. */
+function typedText(text: string, secret: boolean, max = 80): string {
+  return secret ? `${[...text].length} characters (not shown: a password or code field)` : JSON.stringify(clip(text, max));
+}
+
 async function focusedDescription(call: PageCall): Promise<string | undefined> {
   try {
     // Followed into cross-origin frames (frameQuery.ts).
@@ -80,7 +98,7 @@ async function focusedDescription(call: PageCall): Promise<string | undefined> {
 }
 
 /** Puts text into a field the way a user would: focus, select the old text (clear), type. */
-async function fillField(call: PageCall, target: ElementTarget, info: ElementInfo, value: string, options: { clear: boolean; slowly: boolean }): Promise<string | void> {
+async function fillField(call: PageCall, target: ElementTarget, info: ElementInfo, value: string, options: { clear: boolean; slowly: boolean; secret?: boolean }): Promise<string | void> {
   if (info.kind === 'value') {
     const now = await target.call.callOn<string>(target.objectId, SET_INPUT_VALUE, [value]);
     if (now !== value) return `The field rejected it and holds "${clip(now, 100)}" (expected format for ${info.type} inputs, e.g. ${info.type === 'date' ? '2024-12-31' : info.type === 'time' ? '13:45' : info.type === 'color' ? '#ff0000' : 'a valid value'}).`;
@@ -110,9 +128,10 @@ async function fillField(call: PageCall, target: ElementTarget, info: ElementInf
       const set = await target.call.callOn<string>(target.objectId, SET_INPUT_VALUE, [value]);
       if (set === value) return;
     }
+    if (options.secret) return `The field now holds ${[...now].length} characters, not exactly what was typed (the page reformatted or limited it).`;
     return `The field now holds "${clip(now, 200)}", not exactly what was typed (the page reformatted or limited it).`;
   }
-  if (!options.clear && info.kind === 'text' && !now.endsWith(value)) return `The field now holds "${clip(now, 200)}".`;
+  if (!options.clear && info.kind === 'text' && !now.endsWith(value)) return options.secret ? `The field now holds ${[...now].length} characters.` : `The field now holds "${clip(now, 200)}".`;
 }
 
 export function actionTools(env: PageEnv): ToolDefinition<any>[] {
@@ -161,7 +180,9 @@ export function actionTools(env: PageEnv): ToolDefinition<any>[] {
           if (!target) {
             const focused = await focusedDescription(call);
             if (!focused) throw new ToolError('invalid_input', 'Nothing has focus to type into. Pass ref or selector of the field.');
-            return act(call, undefined, `Typed ${JSON.stringify(clip(args.text, 80))} into the focused ${focused}${args.submit ? ' and pressed Enter' : ''}.`, async () => {
+            const active = await focusedAcrossFrames(call, DEEP_ACTIVE_ELEMENT).catch(() => undefined);
+            const secret = active ? await isSecretField(active.at, active.objectId) : true;
+            return act(call, undefined, `Typed ${typedText(args.text, secret)} into the focused ${focused}${args.submit ? ' and pressed Enter' : ''}.`, async () => {
               await typeText(call, args.text, Boolean(args.slowly));
               if (args.submit) await pressChord(call, parseChord('Enter', call.state.isMac));
             });
@@ -170,12 +191,13 @@ export function actionTools(env: PageEnv): ToolDefinition<any>[] {
           if (info.kind === 'text' || info.kind === 'contenteditable' || info.kind === 'value') {
             await actionPoint(call, target, { verb: 'type into', enabled: true, editable: true });
           }
+          const secret = await isSecretField(target.call, target.objectId);
           return act(
             call,
             target,
-            `Typed ${JSON.stringify(clip(args.text, 80))} into ${target.label}${args.submit ? ' and pressed Enter' : ''}.`,
+            `Typed ${typedText(args.text, secret)} into ${target.label}${args.submit ? ' and pressed Enter' : ''}.`,
             async () => {
-              const note = await fillField(call, target, info, args.text, { clear, slowly: Boolean(args.slowly) });
+              const note = await fillField(call, target, info, args.text, { clear, slowly: Boolean(args.slowly), secret });
               if (args.submit) await pressChord(call, parseChord('Enter', call.state.isMac));
               return note;
             },
@@ -229,8 +251,9 @@ export function actionTools(env: PageEnv): ToolDefinition<any>[] {
               } else {
                 if (typeof field.value !== 'string') throw new ToolError('invalid_input', `${target.label} takes text; pass a string.`);
                 await actionPoint(call, target, { verb: 'type into', enabled: true, editable: true });
-                const note = await fillField(call, target, info, field.value, { clear: true, slowly: false });
-                done.push(`${target.label} → ${JSON.stringify(clip(field.value, 60))}${note ? ` (${note})` : ''}`);
+                const secret = await isSecretField(target.call, target.objectId);
+                const note = await fillField(call, target, info, field.value, { clear: true, slowly: false, secret });
+                done.push(`${target.label} → ${typedText(field.value, secret, 60)}${note ? ` (${note})` : ''}`);
               }
             } catch (err) {
               if (err instanceof DialogInterrupt) break;

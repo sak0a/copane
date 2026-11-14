@@ -280,7 +280,7 @@ test('audit accessibility: rules with refs and fixes; part of the page; refs act
   assert.ok(ref, `no ref for the unnamed button:\n${text}`);
   await a.ok('browser_click', { ref });
   const part = await a.ok('browser_audit', { type: 'accessibility', selector: '#clean' });
-  assert.match(part, /only region "Fine part"[^\n]*: no problems found\./);
+  assert.match(part, /only region "Fine part"[^\n]*: no problems found by the automated checks\./);
   assert.ok(text.length < 3000, `result too long: ${text.length}`);
 });
 

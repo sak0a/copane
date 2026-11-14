@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { contrastDetail, formatA11y, type AxeRule } from '../../src/extension/browser/page/a11yReport';
+import { contrastDetail, formatA11y, wcagOf, type AxeRule } from '../../src/extension/browser/page/a11yReport';
 import type { NetworkEntry } from '../../src/extension/browser/page/networkLog';
 import { clsOf, formatPerf, summarizeNetwork, type PageTimings } from '../../src/extension/browser/page/perfReport';
 
@@ -12,14 +12,30 @@ describe('formatA11y', () => {
     nodes: Array.from({ length: Math.min(nodes, 4) }, (_, i) => ({ label: `el${i} [ref=e${i}]` })),
   });
 
-  it('groups by rule, worst first, with refs and a fix per rule', () => {
-    const text = formatA11y({ tabId: 'tab-1', scope: 'whole page', version: '4.14.0', frames: 1, violations: [rule('heading-order', 'moderate', 1), rule('label', 'critical', 6)], incomplete: [], skipped: [] });
+  it('lists WCAG failures first with their criterion, then best practices, worst first, with refs and a fix', () => {
+    const violations = [
+      { ...rule('heading-order', 'moderate', 1), tags: ['cat.semantics', 'best-practice'] },
+      { ...rule('color-contrast', 'serious', 2), tags: ['wcag2aa', 'wcag143'] },
+      { ...rule('label', 'critical', 6), tags: ['wcag2a', 'wcag412', 'section508'] },
+    ];
+    const text = formatA11y({ tabId: 'tab-1', scope: 'whole page', version: '4.14.0', frames: 1, violations, incomplete: [], skipped: [] });
     const lines = text.split('\n');
-    expect(lines[0]).toBe('Accessibility of tab-1 (whole page; axe-core 4.14.0, WCAG 2.2 A/AA and best practices): 7 problems in 2 rules, worst first.');
-    expect(lines[1]).toBe('- critical label ×6: label help. Fix: give it a <label for>, or aria-label / aria-labelledby.');
+    expect(lines[0]).toBe(
+      'Accessibility of tab-1 (whole page; axe-core 4.14.0, WCAG 2.2 A/AA and best practices): 9 problems in 3 rules; 8 of them fail WCAG A/AA (2 rules); the rest are best practices. WCAG failures first, worst first.',
+    );
+    expect(lines[1]).toBe('- critical label ×6 [WCAG 4.1.2 A]: label help. Fix: give it a <label for>, or aria-label / aria-labelledby.');
     expect(lines[2]).toBe('  el0 [ref=e0]; el1 [ref=e1]; el2 [ref=e2]; el3 [ref=e3]; +2 more');
-    expect(lines[3]).toMatch(/^- moderate heading-order ×1/);
+    expect(lines[3]).toMatch(/^- serious color-contrast ×2 \[WCAG 1\.4\.3 AA\]/);
+    expect(text).toMatch(/\n- moderate heading-order ×1 \[best practice\]/);
     expect(text).toContain('https://dequeuniversity.com/rules/axe/4.14/<rule>');
+    expect(text).toMatch(/not a conformance verdict/);
+  });
+
+  it('reads level and criteria from axe tags', () => {
+    expect(wcagOf(['wcag2aa', 'wcag1410'])).toEqual({ level: 'AA', criteria: ['1.4.10'] });
+    expect(wcagOf(['wcag21a', 'wcag135', 'wcag2a'])).toEqual({ level: 'A', criteria: ['1.3.5'] });
+    expect(wcagOf(['best-practice'])).toBeUndefined();
+    expect(wcagOf(undefined)).toBeUndefined();
   });
 
   it('caps the number of rules and summarises what needs a person', () => {
@@ -31,10 +47,10 @@ describe('formatA11y', () => {
     expect(text).toContain('Not checked: the frame x (timeout).');
   });
 
-  it('says so when nothing is wrong', () => {
-    expect(formatA11y({ tabId: 'tab-2', scope: 'only form [ref=e3]', version: '4.14.0', frames: 1, violations: [], incomplete: [], skipped: [] })).toBe(
-      'Accessibility of tab-2 (only form [ref=e3]; axe-core 4.14.0, WCAG 2.2 A/AA and best practices): no problems found.',
-    );
+  it('says so when nothing is wrong, without claiming conformance', () => {
+    const text = formatA11y({ tabId: 'tab-2', scope: 'only form [ref=e3]', version: '4.14.0', frames: 1, violations: [], incomplete: [], skipped: [] });
+    expect(text.split('\n')[0]).toBe('Accessibility of tab-2 (only form [ref=e3]; axe-core 4.14.0, WCAG 2.2 A/AA and best practices): no problems found by the automated checks.');
+    expect(text).toMatch(/not a conformance verdict/);
   });
 
   it('describes contrast failures with ratio and colours', () => {

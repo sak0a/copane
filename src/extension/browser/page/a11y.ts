@@ -48,7 +48,7 @@ const RUN_AXE = `async function (perRule) {
     const first = rule.nodes[0];
     const check = first && (first.any[0] || first.all[0] || first.none[0]);
     return {
-      id: rule.id, impact: rule.impact, help: rule.help, count: rule.nodes.length, message: check ? check.message : undefined,
+      id: rule.id, impact: rule.impact, help: rule.help, count: rule.nodes.length, message: check ? check.message : undefined, tags: rule.tags,
       nodes: rule.nodes.slice(0, perRule).map(n => {
         const c = n.any[0] || n.all[0] || n.none[0];
         elements.push(n.element || null);
@@ -62,7 +62,7 @@ const RUN_AXE = `async function (perRule) {
 
 interface RawResult {
   version: string;
-  violations: Array<{ id: string; impact: AxeRule['impact']; help: string; count: number; message?: string; nodes: Array<{ index: number; html: string; data?: unknown }> }>;
+  violations: Array<{ id: string; impact: AxeRule['impact']; help: string; count: number; message?: string; tags?: string[]; nodes: Array<{ index: number; html: string; data?: unknown }> }>;
   incomplete: AxeReview[];
 }
 
@@ -176,7 +176,7 @@ export async function accessibilityAudit(call: PageCall, root: ElementTarget | u
     for (const v of raw.violations) {
       const nodes: AxeNode[] = [];
       for (const n of v.nodes) nodes.push({ label: await describeNode(call, doc, n.index, n.html), detail: contrastDetail(n.data) });
-      violations.push({ id: v.id, impact: v.impact, help: v.help, count: v.count, nodes, message: v.message, frame: doc.label });
+      violations.push({ id: v.id, impact: v.impact, help: v.help, count: v.count, nodes, message: v.message, frame: doc.label, tags: v.tags });
     }
     for (const i of raw.incomplete) {
       const known = incomplete.get(i.id);

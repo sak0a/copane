@@ -20,6 +20,8 @@ export interface AxeRule {
   message?: string;
   /** Frame it was found in, when not the top document. */
   frame?: string;
+  /** axe's tags for the rule, e.g. ["wcag2aa", "wcag143"]: which WCAG level and success criteria it tests. */
+  tags?: string[];
 }
 
 export interface AxeReview {
@@ -106,18 +108,43 @@ export const RULE_DOCS = (version: string) => `https://dequeuniversity.com/rules
 const MAX_RULES = 12;
 const MAX_NODES = 4;
 
+/**
+ * What a rule means for WCAG conformance, from axe's tags: the level it fails ("A" or "AA") with the
+ * success criteria ("1.4.3"), or undefined for a best-practice rule that no WCAG criterion requires.
+ */
+export function wcagOf(tags: string[] | undefined): { level: 'A' | 'AA'; criteria: string[] } | undefined {
+  if (!tags) return undefined;
+  const level = tags.some(t => /^wcag\d+aa$/.test(t)) ? 'AA' : tags.some(t => /^wcag\d+a$/.test(t)) ? 'A' : undefined;
+  if (!level) return undefined;
+  // "wcag143" is criterion 1.4.3, "wcag1410" is 1.4.10: principle, guideline, then the criterion number.
+  const criteria = tags.flatMap(t => {
+    const m = /^wcag(\d)(\d)(\d+)$/.exec(t);
+    return m ? [`${m[1]}.${m[2]}.${m[3]}`] : [];
+  });
+  return { level, criteria };
+}
+
 export function formatA11y(r: A11yInput): string {
   const total = r.violations.reduce((n, v) => n + v.count, 0);
   const frames = r.frames > 1 ? `, ${r.frames} documents` : '';
   const head = `Accessibility of ${r.tabId} (${r.scope}${frames}; axe-core ${r.version}, WCAG 2.2 A/AA and best practices)`;
   const lines: string[] = [];
-  if (total === 0) lines.push(`${head}: no problems found.`);
-  else lines.push(`${head}: ${total} problem${total === 1 ? '' : 's'} in ${r.violations.length} rule${r.violations.length === 1 ? '' : 's'}, worst first.`);
-  const sorted = [...r.violations].sort((a, b) => rank(a.impact) - rank(b.impact) || b.count - a.count);
+  const failing = r.violations.filter(v => wcagOf(v.tags));
+  const failingCount = failing.reduce((n, v) => n + v.count, 0);
+  if (total === 0) lines.push(`${head}: no problems found by the automated checks.`);
+  else {
+    const verdict = failing.length
+      ? `${failingCount} of them fail WCAG A/AA (${failing.length} rule${failing.length === 1 ? '' : 's'}); the rest are best practices`
+      : 'none of them fails a WCAG A/AA criterion; all are best practices';
+    lines.push(`${head}: ${total} problem${total === 1 ? '' : 's'} in ${r.violations.length} rule${r.violations.length === 1 ? '' : 's'}; ${verdict}. WCAG failures first, worst first.`);
+  }
+  const sorted = [...r.violations].sort((a, b) => Number(!wcagOf(a.tags)) - Number(!wcagOf(b.tags)) || rank(a.impact) - rank(b.impact) || b.count - a.count);
   for (const v of sorted.slice(0, MAX_RULES)) {
     const fix = FIXES[v.id] ?? (v.message ? clip(v.message, 160) : clip(v.help, 160));
     const where = v.frame ? ` (in ${v.frame})` : '';
-    lines.push(`- ${v.impact ?? 'minor'} ${v.id} ×${v.count}${where}: ${clip(v.help, 120)}. Fix: ${fix}.`);
+    const wcag = wcagOf(v.tags);
+    const standard = wcag ? `WCAG ${wcag.criteria.join(', ') || ''} ${wcag.level}`.replace('  ', ' ') : 'best practice';
+    lines.push(`- ${v.impact ?? 'minor'} ${v.id} ×${v.count}${where} [${standard}]: ${clip(v.help, 120)}. Fix: ${fix}.`);
     const shown = v.nodes.slice(0, MAX_NODES).map(n => (n.detail ? `${n.label} ${n.detail}` : n.label));
     const more = v.count - shown.length;
     if (shown.length) lines.push(`  ${shown.join('; ')}${more > 0 ? `; +${more} more` : ''}`);
@@ -131,7 +158,8 @@ export function formatA11y(r: A11yInput): string {
     lines.push(`Needs a human look (axe could not decide, e.g. text over images): ${items.join(', ')}${r.incomplete.length > 6 ? ', …' : ''}.`);
   }
   for (const s of r.skipped.slice(0, 3)) lines.push(`Not checked: ${s}.`);
-  if (total > 0) lines.push(`Rule details: ${RULE_DOCS(r.version)}<rule>. Automated checks find only part of the problems (keyboard use, focus order and meaning need a person).`);
+  if (total > 0) lines.push(`Rule details: ${RULE_DOCS(r.version)}<rule>.`);
+  lines.push('This is not a conformance verdict: automated checks cover only part of WCAG. Keyboard operation, focus order and visibility, meaningful alt text and labels, captions, zoom and reflow need a person; check each state of the page (dialogs, menus, error messages) separately.');
   return lines.join('\n');
 }
 
