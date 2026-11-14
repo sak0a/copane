@@ -38,6 +38,8 @@ export interface PageHook {
   observeCall?(call: PageCall): void;
   /** An element the call resolved from the agent's ref or selector, before the tool acts on it (see `targetResolved`). */
   targetResolved?(call: PageCall, target: ElementTarget): Promise<void>;
+  /** A line for a performance measurement of a page load that started at `loadedAt` (e.g. it was throttled). */
+  measurementNote?(call: PageCall, loadedAt: number | undefined): string | undefined;
 }
 
 /** Tells the hooks which element a call is about to act on (called by resolveTarget in targets.ts). */

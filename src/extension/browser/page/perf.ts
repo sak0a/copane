@@ -194,5 +194,7 @@ export async function performanceAudit(call: PageCall, options: { reload: boolea
   if (timings.lcp && lcp) timings.lcp.ref = await lcpRef(call, lcp);
   const network = summarizeNetwork(call.state.network.entries.all(), call.state.loaderId, call.state.url);
   const loadedAgo = t.nav ? Date.now() - (t.timeOrigin + t.nav.load) : undefined;
-  return formatPerf({ tabId: call.tab.id, url: call.state.url, browser: t.chrome ? `Chromium ${t.chrome}` : 'Chromium', loadedAgo: loadedAgo !== undefined && loadedAgo >= 0 ? loadedAgo : undefined, reloaded: options.reload, background: !call.tab.active, timings, network });
+  const conditions = (call.env.hooks ?? []).map(h => h.measurementNote?.(call, t.timeOrigin)).filter((n): n is string => !!n);
+  return formatPerf({
+    conditions, tabId: call.tab.id, url: call.state.url, browser: t.chrome ? `Chromium ${t.chrome}` : 'Chromium', loadedAgo: loadedAgo !== undefined && loadedAgo >= 0 ? loadedAgo : undefined, reloaded: options.reload, background: !call.tab.active, timings, network });
 }

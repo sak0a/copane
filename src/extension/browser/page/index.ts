@@ -61,7 +61,7 @@ export function registerPageTools(services: BridgeServices, host: TabInfoHost, e
   const env: PageEnv = { services, states: new PageStates(services.log, attachFrame), refs: new RefStore(), cursors: new Map(), baselines: new Map() };
   // Downloads and device emulation (downloads.ts, emulation.ts) hook into page tool calls.
   const downloads = new DownloadManager(services, host, tabId => env.states.get(tabId)?.nextSeq() ?? 0);
-  const emulation = new EmulationManager(services, host);
+  const emulation = new EmulationManager(services, host, env.states);
   // The test recorder (recorder.ts) sees every recorded call and the elements it acts on.
   const recorder = new Recorder(services);
   env.hooks = [downloads, emulation, new SignInHint(), recorder];

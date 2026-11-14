@@ -258,6 +258,13 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
     if (this.records.has(record.tab)) this.untrack(record.tab);
   }
 
+  async attach(tabId: string): Promise<CdpPage> {
+    this.assertAvailable();
+    const record = this.find(normalizeTabId(tabId));
+    if (!record) throw new ToolError('not_found', `There is no tab "${tabId}".`);
+    return this.connect(record);
+  }
+
   async revealTab(tabId: string): Promise<void> {
     this.assertAvailable();
     const record = this.find(normalizeTabId(tabId));

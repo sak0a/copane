@@ -44,6 +44,24 @@ export interface NetworkEntry {
    * withheld from agents (see privacy.ts), also when they arrive later.
    */
   withheld?: boolean;
+  /** CDP `Response.timing` (ms offsets from `requestTime`, seconds), for HAR timings. */
+  timing?: ResourceTiming;
+  /** "http/1.1", "h2", ... */
+  protocol?: string;
+  remoteAddress?: string;
+}
+
+export interface ResourceTiming {
+  requestTime: number;
+  dnsStart: number;
+  dnsEnd: number;
+  connectStart: number;
+  connectEnd: number;
+  sslStart: number;
+  sslEnd: number;
+  sendStart: number;
+  sendEnd: number;
+  receiveHeadersEnd: number;
 }
 
 const MAX_URL = 2000;
@@ -160,7 +178,11 @@ export class NetworkLog {
   }
 
   /** `Network.responseReceived` */
-  onResponse(p: { requestId: string; type?: string; response: { status: number; statusText?: string; headers?: Record<string, unknown>; mimeType?: string; fromDiskCache?: boolean; fromServiceWorker?: boolean; fromPrefetchCache?: boolean; encodedDataLength?: number } }): void {
+  onResponse(p: {
+    requestId: string;
+    type?: string;
+    response: { status: number; statusText?: string; headers?: Record<string, unknown>; mimeType?: string; fromDiskCache?: boolean; fromServiceWorker?: boolean; fromPrefetchCache?: boolean; encodedDataLength?: number; timing?: ResourceTiming; protocol?: string; remoteIPAddress?: string; remotePort?: number };
+  }): void {
     const entry = this.live.get(p.requestId);
     if (!entry) return;
     const r = p.response;
@@ -171,6 +193,12 @@ export class NetworkLog {
     entry.responseHeaders = entry.withheld ? undefined : capHeaders(r.headers);
     entry.fromCache ||= Boolean(r.fromDiskCache || r.fromPrefetchCache);
     if (p.type) entry.type = p.type;
+    if (r.timing && typeof r.timing.requestTime === 'number') {
+      const t = r.timing;
+      entry.timing = { requestTime: t.requestTime, dnsStart: t.dnsStart, dnsEnd: t.dnsEnd, connectStart: t.connectStart, connectEnd: t.connectEnd, sslStart: t.sslStart, sslEnd: t.sslEnd, sendStart: t.sendStart, sendEnd: t.sendEnd, receiveHeadersEnd: t.receiveHeadersEnd };
+    }
+    entry.protocol = r.protocol;
+    entry.remoteAddress = r.remoteIPAddress;
   }
 
   /** `Network.loadingFinished` */

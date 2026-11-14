@@ -132,6 +132,8 @@ export interface PerfInput {
   background: boolean;
   timings: PageTimings;
   network: NetworkSummary;
+  /** Lines about conditions the numbers were measured under (throttling); none: unthrottled. */
+  conditions?: string[];
 }
 
 export function formatPerf(p: PerfInput): string {
@@ -180,8 +182,10 @@ export function formatPerf(p: PerfInput): string {
     if (n.uncompressed.length) lines.push(`Not compressed: ${n.uncompressed.map(r => `${r.id} ${r.label} ${formatBytes(r.bytes)}`).join(' · ')} (no Content-Encoding).`);
   }
   if (t.renderBlocking.length) lines.push(`Render-blocking: ${t.renderBlocking.slice(0, 5).map(r => `${clip(short(r.url, p.url), 70)} ${ms(r.duration)}`).join(' · ')}${t.renderBlocking.length > 5 ? `, +${t.renderBlocking.length - 5} more` : ''}.`);
+  const throttled = !!p.conditions?.length;
+  lines.push(...(p.conditions ?? []));
   lines.push(
-    `Measured in VS Code's embedded browser (${p.browser}) on this machine, without CPU or network throttling: good for comparing before and after a change and for finding the biggest costs; not comparable with Lighthouse scores or field Core Web Vitals, which use slower devices and networks. Details of a request: browser_network_requests with id.`,
+    `Measured in VS Code's embedded browser (${p.browser}) on this machine, ${throttled ? 'with the throttling above' : 'without CPU or network throttling'}: good for comparing before and after a change and for finding the biggest costs; not comparable with Lighthouse scores or field Core Web Vitals, which use slower devices and networks. Details of a request: browser_network_requests with id.`,
   );
   return lines.join('\n');
 }

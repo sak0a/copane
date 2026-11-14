@@ -8,7 +8,9 @@
 // these CDP commands into its device profile; see emulationLogic.ts), so the browser's device toolbar
 // shows them and the user can change or close it there. Colour scheme, reduced motion, locale and time
 // zone are overrides of our CDP session that VS Code does not show; the tab's info (`emulation`), a
-// context key and the editor title button "Reset Agent Emulation" make them visible.
+// context key and the editor title button "Reset Agent Emulation" make them visible. So does network
+// and CPU throttling, which also goes to the tab's cross-origin frames and outlives the CDP session
+// (throttle.ts).
 import * as vscode from 'vscode';
 import { ToolError } from '../../core/errors';
 import type { BridgeServices, BrowserTabInfo, CdpPage } from '../../core/services';
@@ -17,9 +19,11 @@ import type { ToolContent } from '../../../shared/protocol';
 import { image, text } from '../../core/tools';
 import { viewIdOf } from '../decorations';
 import type { PageCall, PageHook, ScreenshotRequest } from './call';
-import { describeEmulation, emulationSteps, isEmulating, mergeEmulation, shortEmulationLabel, type EmulateArgs, type EmulationSettings } from './emulationLogic';
+import { describeEmulation, emulationSteps, isEmulating, isThrottling, mergeEmulation, shortEmulationLabel, type EmulateArgs, type EmulationSettings } from './emulationLogic';
 import { imageSize } from './imageSize';
-import { DialogInterrupt } from './pageState';
+import { DialogInterrupt, type PageStates } from './pageState';
+import { ThrottleTargets } from './throttle';
+import { sameNetwork, throttlingNote } from './throttleLogic';
 import { screenshotScale } from './screenshotMath';
 import { TOGGLE_BRIDGE_UI } from './scripts';
 import { elementBox, viewport } from './targets';
@@ -39,6 +43,8 @@ interface TabEmulation {
   page: CdpPage;
   /** The tab's user agent before any override, for the Accept-Language override. */
   baseUserAgent: string | undefined;
+  /** When the current network/CPU throttling started (ms since epoch). */
+  throttledSince?: number;
 }
 
 const CONTEXT_KEY = 'copane.browser.activeTabEmulated';
@@ -51,11 +57,16 @@ export class EmulationManager implements PageHook, vscode.Disposable {
   private readonly touchCache = new Map<string, { value: boolean; at: number; loaderId: string | undefined }>();
   private readonly subscriptions: vscode.Disposable[] = [];
   private contextValue = false;
+  private readonly throttle: ThrottleTargets;
+  private disposing = false;
 
   constructor(
     private readonly services: BridgeServices,
     private readonly host: TabInfoHost,
+    /** The tabs' page states, for their frame targets (throttling). */
+    private readonly states?: PageStates,
   ) {
+    this.throttle = new ThrottleTargets(services.context?.workspaceState, services.log);
     this.subscriptions.push(
       host.addTabInfoProvider(tabId => {
         const s = this.tabs.get(tabId);
@@ -74,7 +85,21 @@ export class EmulationManager implements PageHook, vscode.Disposable {
         for (const key of [...this.ended.keys()]) if (key.startsWith(`${change.session.id}|`)) this.ended.delete(key);
       }),
       vscode.commands.registerCommand('copane.browser.resetEmulation', (arg?: unknown) => this.resetCommand(arg)),
+      // Tabs an earlier run left throttled are attached as soon as they are listed, which undoes it (reattach).
+      services.browser.onDidChange(() => this.attachLeftovers()),
     );
+    setTimeout(() => this.attachLeftovers(), 0);
+  }
+
+  private readonly leftoversTried = new Set<string>();
+
+  private attachLeftovers(): void {
+    if (!this.services.browser.available || !this.services.browser.attach) return;
+    for (const tabId of this.throttle.markedTabs()) {
+      if (this.leftoversTried.has(tabId) || this.tabs.has(tabId) || !this.services.browser.getTab(tabId)) continue;
+      this.leftoversTried.add(tabId);
+      void this.services.browser.attach(tabId).catch(err => this.services.log.warn(`${tabId}: could not attach to undo throttling: ${err instanceof Error ? err.message : String(err)}`));
+    }
   }
 
   // ------------------------------------------------------------------ browser_emulate
@@ -107,6 +132,11 @@ export class EmulationManager implements PageHook, vscode.Disposable {
     const baseUserAgent = state?.baseUserAgent ?? (await call.evaluate<string>('function () { return navigator.userAgent; }').catch(() => undefined));
     const record: TabEmulation = state ?? { sessionId: session.id, settings: {}, page: call.page, baseUserAgent };
     record.page = call.page;
+    if (isThrottling(next)) {
+      // Remembered before it is applied: throttling outlives the CDP session (throttle.ts).
+      this.throttle.cancelLeftover(tabId);
+      await this.throttle.remember(tabId);
+    }
     try {
       for (const step of emulationSteps(prev, next, { baseUserAgent })) {
         await call.send(step.method, step.params, { timeoutMs: 10_000 });
@@ -120,6 +150,8 @@ export class EmulationManager implements PageHook, vscode.Disposable {
         reducedMotion: next.reducedMotion ?? prev.reducedMotion,
         locale: next.locale ?? prev.locale,
         timezone: next.timezone ?? prev.timezone,
+        network: next.network ?? prev.network,
+        cpu: next.cpu ?? prev.cpu,
       };
       this.tabs.set(tabId, record);
       const ending = this.end(tabId, undefined);
@@ -134,6 +166,10 @@ export class EmulationManager implements PageHook, vscode.Disposable {
     if (isEmulating(next)) this.tabs.set(tabId, record);
     else this.tabs.delete(tabId);
     this.touchCache.delete(tabId);
+    const throttleChanged = !sameNetwork(prev.network, next.network) || prev.cpu !== next.cpu;
+    if (throttleChanged) record.throttledSince = isThrottling(next) ? Date.now() : undefined;
+    this.throttle.follow(tabId, call.state, next);
+    if (!isThrottling(next)) this.throttle.forget(tabId);
     this.changed();
 
     if (!isEmulating(next)) {
@@ -147,6 +183,11 @@ export class EmulationManager implements PageHook, vscode.Disposable {
     const mismatch = this.sizeMismatch(next, vp);
     if (mismatch) lines.push(mismatch);
     if (next.device?.mobile) lines.push('Clicks are sent as taps; hover menus, right-click, modifier clicks and dragging do not work while mobile is on.');
+    if (throttleChanged && isThrottling(next)) {
+      lines.push(
+        `It covers the page and its cross-origin frames${next.network?.offline ? ', which see navigator.onLine false' : ''}; responses mocked with browser_route are not slowed and still arrive offline. Your tools keep working. Reload (browser_history) to see a ${next.network ? 'slow or offline' : 'slow'} page load.`,
+      );
+    }
     lines.push(
       `${next.device ? 'The user sees the device in the browser\'s device toolbar. ' : ''}It lasts until you call browser_emulate with reset: true, release the tab, leave it idle for ${this.host.idleSeconds()} s, or the user resets it.`,
     );
@@ -169,6 +210,9 @@ export class EmulationManager implements PageHook, vscode.Disposable {
     this.touchCache.delete(tabId);
     if (reason) this.ended.set(`${state.sessionId}|${tabId}`, reason);
     this.changed();
+    this.throttle.stop(tabId);
+    // While the extension shuts down the commands may not get through: the next run clears leftovers.
+    if (!this.disposing) this.throttle.forget(tabId);
     const page = state.page;
     if (page.closed) return;
     try {
@@ -184,16 +228,21 @@ export class EmulationManager implements PageHook, vscode.Disposable {
   /** A new CDP connection to an emulated tab has none of our session's overrides: apply them again. */
   private reattach(page: CdpPage): void {
     const state = this.tabs.get(page.tabId);
+    if (!state && this.states) this.throttle.clearLeftover(page, () => this.states!.forPage(page));
     page.onDidClose(() =>
       setTimeout(() => {
         if (this.services.browser.getTab(page.tabId)) return;
         this.tabs.delete(page.tabId);
         this.touchCache.delete(page.tabId);
+        // The tab is gone, and its throttling with it.
+        this.throttle.stop(page.tabId);
+        if (!this.disposing) this.throttle.forget(page.tabId);
         this.changed();
       }, 0),
     );
     if (!state || state.page === page) return;
     state.page = page;
+    if (this.states && isThrottling(state.settings)) this.throttle.follow(page.tabId, this.states.forPage(page), state.settings);
     void (async () => {
       for (const step of emulationSteps({}, state.settings, { baseUserAgent: state.baseUserAgent, sessionOnly: true })) await page.send(step.method, step.params, { timeoutMs: 5000 });
     })().catch(err => this.services.log.warn(`${page.tabId}: could not restore emulation: ${err instanceof Error ? err.message : String(err)}`));
@@ -326,6 +375,13 @@ export class EmulationManager implements PageHook, vscode.Disposable {
     void vscode.commands.executeCommand('setContext', CONTEXT_KEY, value);
   }
 
+  /** browser_audit performance: says that the numbers were (or were not) taken under throttling. */
+  measurementNote(call: PageCall, loadedAt: number | undefined): string | undefined {
+    const s = this.tabs.get(call.tab.id);
+    if (!s || !isThrottling(s.settings)) return undefined;
+    return throttlingNote({ network: s.settings.network, cpu: s.settings.cpu, since: s.throttledSince ?? 0 }, loadedAt);
+  }
+
   /** The session that emulates a tab, for messages. */
   describeOwner(tabId: string): string | undefined {
     const s = this.tabs.get(tabId);
@@ -334,9 +390,11 @@ export class EmulationManager implements PageHook, vscode.Disposable {
   }
 
   dispose(): void {
+    this.disposing = true;
     for (const s of this.subscriptions.splice(0)) s.dispose();
     // Do not leave the user's tabs in phone size when the extension goes away.
     for (const tabId of [...this.tabs.keys()]) void this.end(tabId, undefined);
+    this.throttle.dispose();
   }
 }
 

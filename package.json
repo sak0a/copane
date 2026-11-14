@@ -82,7 +82,7 @@
       },
       {
         "command": "copane.browser.resetEmulation",
-        "title": "End Agent's Device Emulation in Browser Tab",
+        "title": "End Agent's Device Emulation and Throttling in Browser Tab",
         "shortTitle": "End Emulation",
         "category": "Copane",
         "icon": "$(device-mobile)"

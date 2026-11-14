@@ -13,7 +13,7 @@ export function emulationTools(env: PageEnv, manager: EmulationManager): ToolDef
       name: 'browser_emulate',
       title: 'Emulate device or media',
       description:
-        'Emulates a device (viewport in CSS px, pixel ratio, touch), color scheme, reduced motion, locale or time zone in the tab, e.g. to check a responsive layout. A call changes only what it passes; releasing the tab ends it all. Without arguments: reports what is emulated.',
+        'Emulates a device (viewport in CSS px, pixel ratio, touch), color scheme, reduced motion, locale, time zone, a slow network or offline, or a slow CPU in the tab, e.g. to check a responsive layout. A call changes only what it passes; releasing the tab ends it all. Without arguments: reports what is emulated.',
       input: {
         preset: z
           .enum(PRESET_IDS)
@@ -28,6 +28,8 @@ export function emulationTools(env: PageEnv, manager: EmulationManager): ToolDef
         reducedMotion: z.boolean().optional(),
         locale: z.string().optional().describe('e.g. "de-DE" (Intl, navigator.language, Accept-Language); "" ends it.'),
         timezone: z.string().optional().describe('e.g. "America/New_York"; "" ends it.'),
+        network: z.string().optional().describe('offline, 3g, slow-4g, fast-4g (DevTools presets), "<down kbit/s>/<up kbit/s>/<latency ms>", or none.'),
+        cpu: z.number().optional().describe('Slowdown factor, e.g. 4 or 6; 1 ends it.'),
         reset: z.boolean().optional().describe('End all emulation first.'),
         tab: tabArg,
       },

@@ -182,6 +182,11 @@ export interface BrowserService {
   closeTab(tabId: string): Promise<void>;
   /** Brings the tab to the front in the editor area. */
   revealTab(tabId: string): Promise<void>;
+  /**
+   * Establishes the tab's CDP connection without an agent session (firing `onDidAttachPage` if it is
+   * new), e.g. to undo state an earlier run of the extension left in the tab. Optional so fakes stay valid.
+   */
+  attach?(tabId: string): Promise<CdpPage>;
   /** Ends a session's control of a tab (or whoever controls it when `sessionId` is omitted). */
   releaseTab(tabId: string, sessionId?: string): void;
   /** User takeover: while paused, agents cannot act on the tab. */

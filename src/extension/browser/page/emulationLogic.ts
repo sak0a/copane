@@ -8,6 +8,8 @@
 // Everything else (`setEmulatedMedia`, `setTimezoneOverride`, `setLocaleOverride`, a user agent
 // override with `acceptLanguage`) passes through to Chromium as an override of our own CDP session:
 // invisible in VS Code, and gone when that session closes.
+// Network and CPU throttling (throttleLogic.ts) also pass through, but outlive the session.
+import { cpuStep, describeCpu, describeNetwork, networkStep, parseCpu, parseNetwork, sameNetwork, shortCpu, shortNetwork, type NetworkThrottle } from './throttleLogic';
 
 export interface DeviceSettings {
   /** Preset name, when the device is exactly a preset (possibly turned to landscape). */
@@ -30,6 +32,10 @@ export interface EmulationSettings {
   locale?: string;
   /** IANA, e.g. "Asia/Tokyo". */
   timezone?: string;
+  /** Network throttling or offline (page and frame targets). */
+  network?: NetworkThrottle;
+  /** CPU slowdown factor, > 1 (page and frame targets). */
+  cpu?: number;
 }
 
 export interface EmulateArgs {
@@ -43,6 +49,10 @@ export interface EmulateArgs {
   reducedMotion?: boolean;
   locale?: string;
   timezone?: string;
+  /** A preset, "none", or "<down kbit/s>/<up kbit/s>/<latency ms>" (throttleLogic.ts). */
+  network?: string;
+  /** Slowdown factor; 1 ends it. */
+  cpu?: number;
   reset?: boolean;
 }
 
@@ -107,6 +117,8 @@ export function mergeEmulation(current: EmulationSettings, args: EmulateArgs): E
   if (args.reducedMotion !== undefined) next.reducedMotion = args.reducedMotion || undefined;
   if (args.locale !== undefined) next.locale = args.locale.trim() ? checkLocale(args.locale.trim()) : undefined;
   if (args.timezone !== undefined) next.timezone = args.timezone.trim() ? checkTimezone(args.timezone.trim()) : undefined;
+  if (args.network !== undefined) next.network = parseNetwork(args.network);
+  if (args.cpu !== undefined) next.cpu = parseCpu(args.cpu);
   return next;
 }
 
@@ -143,7 +155,11 @@ export function checkTimezone(timezone: string): string {
 }
 
 export function isEmulating(s: EmulationSettings | undefined): boolean {
-  return !!s && (!!s.device || !!s.colorScheme || !!s.reducedMotion || !!s.locale || !!s.timezone);
+  return !!s && (!!s.device || !!s.colorScheme || !!s.reducedMotion || !!s.locale || !!s.timezone || !!s.network || !!s.cpu);
+}
+
+export function isThrottling(s: EmulationSettings | undefined): boolean {
+  return !!s && (!!s.network || !!s.cpu);
 }
 
 export interface CdpStep {
@@ -204,6 +220,9 @@ export function emulationSteps(prev: EmulationSettings, next: EmulationSettings,
       params: next.locale && userAgent ? { userAgent, acceptLanguage: acceptLanguage(next.locale) } : { userAgent: '', acceptLanguage: '' },
     });
   }
+  // Throttling of the page target; frame targets get the same commands (throttle.ts).
+  if (!sameNetwork(prev.network, next.network) || (options.sessionOnly && next.network)) steps.push(networkStep(next.network));
+  if (prev.cpu !== next.cpu || (options.sessionOnly && next.cpu)) steps.push(cpuStep(next.cpu));
   return steps;
 }
 
@@ -226,12 +245,22 @@ export function describeEmulation(s: EmulationSettings): string {
   if (s.reducedMotion) parts.push('reduced motion');
   if (s.locale) parts.push(`locale ${s.locale}`);
   if (s.timezone) parts.push(`time zone ${s.timezone}`);
+  if (s.network) parts.push(describeNetwork(s.network));
+  if (s.cpu) parts.push(describeCpu(s.cpu));
   return parts.join(', ') || 'nothing';
 }
 
 /** A short label for views and tooltips: "iPhone 15 Pro · dark", "800×600 · de-DE". */
 export function shortEmulationLabel(s: EmulationSettings): string {
   const d = s.device;
-  const parts = [d ? (d.name ?? (d.width && d.height ? `${d.width}×${d.height}` : 'device')) : '', s.colorScheme ?? '', s.reducedMotion ? 'reduced motion' : '', s.locale ?? '', s.timezone ?? ''];
+  const parts = [
+    d ? (d.name ?? (d.width && d.height ? `${d.width}×${d.height}` : 'device')) : '',
+    s.colorScheme ?? '',
+    s.reducedMotion ? 'reduced motion' : '',
+    s.locale ?? '',
+    s.timezone ?? '',
+    s.network ? shortNetwork(s.network) : '',
+    s.cpu ? shortCpu(s.cpu) : '',
+  ];
   return parts.filter(Boolean).join(' · ');
 }
