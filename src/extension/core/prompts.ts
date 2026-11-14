@@ -3,6 +3,7 @@
 // prompts look alike and can be answered automatically in development and tests.
 import * as vscode from 'vscode';
 import type { Logger } from './log';
+import { StatusBarQuestions } from './promptStatus';
 
 export interface UserPrompt {
   /** One sentence, naming the session, e.g. 'Claude 2 wants to use the tab "localhost:3000".' */
@@ -22,6 +23,15 @@ export interface UserPrompt {
    * the default for anything where clear buttons matter more (consent).
    */
   autoClose?: boolean;
+  /**
+   * Where the question appears. "notification" (default): a notification. "statusBar": a status bar
+   * item the user clicks to answer the question in a modal dialog (promptStatus.ts). Use it for
+   * questions about a browser tab: VS Code pauses a browser view while a notification covers it, and a
+   * status bar item covers nothing. `autoClose` is implied (the item goes away when `signal` aborts).
+   */
+  placement?: 'notification' | 'statusBar';
+  /** Short text for the status bar item, e.g. "Claude 2 asks to use tab-3" (default: the message, shortened). */
+  summary?: string;
 }
 
 /** A text field the user types into, e.g. a user name, or a password with `password: true`. */
@@ -55,7 +65,9 @@ export class VscodePrompts implements PromptService {
   /** Answers queued by the `debug_answer_prompts` tool (development only), used before asking the user. */
   readonly queuedAnswers: Array<string | null> = [];
   /** Prompts shown so far, newest last, for tests to inspect. Input prompts have `input` set; a password answer is recorded as "(hidden)". */
-  readonly history: Array<{ message: string; choices: string[]; answer: string | undefined; input?: { prompt: string; value?: string; password: boolean } }> = [];
+  readonly history: Array<{ message: string; choices: string[]; answer: string | undefined; input?: { prompt: string; value?: string; password: boolean }; placement?: 'notification' | 'statusBar' }> = [];
+  /** Questions shown in the status bar (`placement: "statusBar"`). */
+  readonly statusBar = new StatusBarQuestions();
 
   private nextId = 1;
   /** Dismissable prompts that are on screen, by id. */
@@ -65,7 +77,7 @@ export class VscodePrompts implements PromptService {
 
   async ask(prompt: UserPrompt): Promise<string | undefined> {
     const answer = await this.resolve(prompt);
-    this.history.push({ message: prompt.message, choices: prompt.choices, answer });
+    this.history.push({ message: prompt.message, choices: prompt.choices, answer, placement: prompt.placement ?? 'notification' });
     if (this.history.length > 50) this.history.shift();
     return answer;
   }
@@ -108,6 +120,7 @@ export class VscodePrompts implements PromptService {
       return queued !== undefined && prompt.choices.includes(queued) ? queued : undefined;
     }
     if (prompt.signal?.aborted) return undefined;
+    if (prompt.placement === 'statusBar' && !prompt.modal) return this.statusBar.ask(prompt);
     if (prompt.autoClose && prompt.signal && !prompt.modal) return this.askDismissable(prompt, prompt.signal);
     const shown = vscode.window.showInformationMessage(prompt.message, { modal: prompt.modal ?? false, detail: prompt.modal ? prompt.detail : undefined }, ...prompt.choices);
     const signal = prompt.signal;
@@ -159,8 +172,11 @@ export class VscodePrompts implements PromptService {
     });
   }
 
-  /** Registers the command behind the choice links. */
+  /** Registers the command behind the choice links, and the status bar questions. */
   register(): vscode.Disposable {
-    return vscode.commands.registerCommand(ANSWER_COMMAND, (id: string, choice: string) => this.open.get(id)?.(choice));
+    return vscode.Disposable.from(
+      vscode.commands.registerCommand(ANSWER_COMMAND, (id: string, choice: string) => this.open.get(id)?.(choice)),
+      this.statusBar.register(),
+    );
   }
 }

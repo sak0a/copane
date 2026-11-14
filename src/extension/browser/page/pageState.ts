@@ -108,6 +108,8 @@ export class PageState {
   constructor(
     page: CdpPage,
     private readonly log: Logger,
+    /** Called for every frame target of the tab before its document runs (request interception). */
+    private readonly attachFrame?: (session: CdpPage) => Promise<void> | void,
   ) {
     this.page = page;
     this.bind(page);
@@ -264,6 +266,7 @@ export class PageState {
       nextSeq: () => this.nextSeq(),
       activity,
       changed: () => this.changeEmitter.fire(),
+      attachFrame: this.attachFrame,
     });
   }
 
@@ -421,11 +424,14 @@ export class PageState {
 export class PageStates {
   private readonly byTab = new Map<string, PageState>();
 
-  constructor(private readonly log: Logger) {}
+  constructor(
+    private readonly log: Logger,
+    private readonly attachFrame?: (session: CdpPage) => Promise<void> | void,
+  ) {}
 
   forPage(page: CdpPage): PageState {
     let state = this.byTab.get(page.tabId);
-    if (!state) this.byTab.set(page.tabId, (state = new PageState(page, this.log)));
+    if (!state) this.byTab.set(page.tabId, (state = new PageState(page, this.log, this.attachFrame)));
     else if (state.page !== page) state.bind(page);
     return state;
   }

@@ -42,6 +42,9 @@ export const SUITES = {
   'browser-handoff': {},
   'browser-profiles': {},
   'browser-devtools': {},
+  'browser-frame-requests': {},
+  'browser-tab-ids': {},
+  'browser-prompts': {},
   codex: {},
   remote: {
     notInCi: {

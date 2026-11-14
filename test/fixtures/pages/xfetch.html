@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Fetching frame</title>
+<!-- A cross-origin frame that requests /json as soon as it runs (before load) and again on a click.
+     ?id=<name> labels it; ?c=<origin> embeds a nested fetching frame from that origin. -->
+<style>body { font: 13px sans-serif; margin: 6px; } p { margin: 2px 0; }</style></head>
+<body>
+<script>
+  const q = new URLSearchParams(location.search);
+  const frameName = q.get('id') || 'frame';
+  async function load(where) {
+    try {
+      const r = await fetch('/json?from=' + frameName + '&when=' + where, { cache: 'no-store' });
+      return 'status ' + r.status + ' ' + (await r.text());
+    } catch (e) {
+      return 'error ' + e.message;
+    }
+  }
+  // Starts at once, while the document is still being parsed.
+  const early = load('early');
+  addEventListener('DOMContentLoaded', async () => {
+    document.getElementById('early').textContent = 'early ' + frameName + ': ' + (await early);
+  });
+</script>
+<p id="early">early pending</p>
+<button id="go" onclick="(async () => { document.getElementById('late').textContent = 'late pending'; document.getElementById('late').textContent = 'late ' + frameName + ': ' + (await load('late')); })()">Fetch in <span></span></button>
+<p id="late">late none</p>
+<script>
+  document.querySelector('#go span').textContent = frameName;
+  const c = q.get('c');
+  if (c) {
+    const f = document.createElement('iframe');
+    f.id = 'inner'; f.title = 'Inner fetching frame'; f.width = 360; f.height = 110;
+    f.src = c + '/xfetch.html?id=' + frameName + '-inner';
+    document.body.appendChild(f);
+  }
+</script>
+</body></html>

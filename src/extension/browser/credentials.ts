@@ -275,6 +275,8 @@ export class CredentialPrompts implements FetchClient, vscode.Disposable {
       choices: [LOG_IN, LOG_IN_REMEMBER, CANCEL],
       signal,
       autoClose: true,
+      placement: 'statusBar',
+      summary: `${challenge.source === 'Proxy' ? 'A proxy' : displayHost(challenge.origin)} asks for a login`,
     });
     if (choice !== LOG_IN && choice !== LOG_IN_REMEMBER) return undefined;
     const input = this.services.prompts.input;

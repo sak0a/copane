@@ -6,7 +6,7 @@
 // State kept here, never on the shared CdpPage: one PageState per tab (recorders, frames, dialog), and
 // per-session ref tables, read cursors and the last view of each page (for reporting changes).
 import type { Event } from '../../core/events';
-import type { BridgeServices } from '../../core/services';
+import type { BridgeServices, CdpPage } from '../../core/services';
 import type { ToolContext } from '../../core/tools';
 import { actionTools } from './actionTools';
 import { auditTools } from './auditTool';
@@ -35,6 +35,8 @@ export interface PageToolExtras {
     readonly onDidNote: Event<{ tabId: string; text: string; topic?: string; to?: string }>;
     /** A request was answered by the bridge (mocked, delayed, ...): marked in the network log. */
     readonly onDidIntercept: Event<{ tabId: string; networkId: string; note: string }>;
+    /** Serves a cross-origin frame target of a tab too; resolves once what the tab needs is in effect there. */
+    attachFrame?(session: CdpPage): Promise<void>;
   };
 }
 
@@ -54,7 +56,9 @@ export interface PageHooks {
 
 export function registerPageTools(services: BridgeServices, host: TabInfoHost, extras: PageToolExtras = {}): PageHooks {
   const { browser, context } = services;
-  const env: PageEnv = { services, states: new PageStates(services.log), refs: new RefStore(), cursors: new Map(), baselines: new Map() };
+  // Frame targets are served by request interception too (rules and login prompts reach into frames).
+  const attachFrame = extras.interception?.attachFrame?.bind(extras.interception);
+  const env: PageEnv = { services, states: new PageStates(services.log, attachFrame), refs: new RefStore(), cursors: new Map(), baselines: new Map() };
   // Downloads and device emulation (downloads.ts, emulation.ts) hook into page tool calls.
   const downloads = new DownloadManager(services, host, tabId => env.states.get(tabId)?.nextSeq() ?? 0);
   const emulation = new EmulationManager(services, host);

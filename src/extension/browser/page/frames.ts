@@ -13,6 +13,11 @@
 // A frame that navigates to another site keeps its target; one that navigates to the page's own site
 // becomes part of the page target (its target detaches); a removed frame detaches. Frame ids are
 // stable across all of that, and the target id of a frame target is its root frame's id.
+//
+// New frame targets are held before their document runs (`waitForDebuggerOnStart`) until the registry
+// has enabled its domains there and `hooks.attachFrame` (request interception) is in place, so a
+// frame's earliest requests are recorded and intercepted too. The hold is bounded (FRAME_HOLD_MS) and
+// always released; a frame that was already running when the bridge attached is not held.
 import type { Disposable } from '../../core/events';
 import type { Logger } from '../../core/log';
 import type { CdpPage } from '../../core/services';
@@ -26,7 +31,9 @@ function clipUrl(url: string): string {
 
 export const FRAME_WORLD_NAME = '__agent_bridge__';
 
-const AUTO_ATTACH = { autoAttach: true, waitForDebuggerOnStart: false, flatten: true, filter: [{ type: 'iframe', exclude: false }] };
+const AUTO_ATTACH = { autoAttach: true, waitForDebuggerOnStart: true, flatten: true, filter: [{ type: 'iframe', exclude: false }] };
+/** Longest a new frame waits for the bridge before it runs anyway. */
+export const FRAME_HOLD_MS = 3000;
 
 export interface FrameTarget {
   /** Target id, which is also the id of the frame this target renders (the iframe's content frame). */
@@ -71,6 +78,11 @@ export interface FrameHooks {
   activity(): void;
   /** Something about the frames changed (wakes waiters). */
   changed(): void;
+  /**
+   * A frame target attached (request interception serves it from here on). A new frame's document
+   * waits for the returned promise (at most FRAME_HOLD_MS) before it runs.
+   */
+  attachFrame?(session: CdpPage): Promise<void> | void;
 }
 
 export class FrameRegistry {
@@ -183,9 +195,17 @@ export class FrameRegistry {
     this.byId.clear();
   }
 
-  private onAttached(p: { sessionId: string; targetInfo: { targetId: string; type: string; url?: string; parentFrameId?: string } }, via: FrameTarget | undefined): void {
-    if (this.disposed || p?.targetInfo?.type !== 'iframe' || !p.sessionId) return;
+  private onAttached(
+    p: { sessionId: string; targetInfo: { targetId: string; type: string; url?: string; parentFrameId?: string }; waitingForDebugger?: boolean },
+    via: FrameTarget | undefined,
+  ): void {
+    if (!p?.sessionId) return;
     const session = this.page.childSession!(p.sessionId);
+    if (this.disposed || p.targetInfo?.type !== 'iframe') {
+      // Only iframes are asked for; anything else that waits for us must not stay paused.
+      if (p.waitingForDebugger) void session.send('Runtime.runIfWaitingForDebugger', {}, { timeoutMs: 5000 }).catch(() => {});
+      return;
+    }
     const info = p.targetInfo;
     const previous = this.byId.get(info.targetId);
     if (previous && previous.session === session) return;
@@ -227,7 +247,7 @@ export class FrameRegistry {
         this.hooks.changed();
       }),
     );
-    frame.ready = this.initialize(frame);
+    frame.ready = this.initialize(frame, p.waitingForDebugger === true);
     this.hooks.changed();
   }
 
@@ -299,21 +319,41 @@ export class FrameRegistry {
     on('Network.requestServedFromCache', p => network.onServedFromCache(p));
   }
 
-  private async initialize(frame: FrameTarget): Promise<void> {
+  private async initialize(frame: FrameTarget, held: boolean): Promise<void> {
     const { session } = frame;
     const quick = { timeoutMs: 5000 };
     const enable = (method: string, params: Record<string, unknown> = {}) =>
       session.send(method, params, quick).then(undefined, err => {
         if (!session.closed) this.hooks.log.debug(`frames: ${method} failed in ${frame.url || frame.id}: ${err instanceof Error ? err.message : String(err)}`);
       });
-    await Promise.all([
+    const attach = async () => {
+      try {
+        await this.hooks.attachFrame?.(session);
+      } catch (err) {
+        this.hooks.log.warn(`frames: attaching ${frame.url || frame.id} failed`, err);
+      }
+    };
+    // Everything that must be in place before the frame's document runs: recording, nested frames
+    // (held the same way), and interception.
+    const before = Promise.all([
       enable('Page.enable'),
       enable('Page.setLifecycleEventsEnabled', { enabled: true }),
       enable('Network.enable', { maxTotalBufferSize: 5_000_000, maxResourceBufferSize: 2_000_000, maxPostDataSize: 65_536 }),
       enable('Log.enable'),
       enable('DOM.enable'),
       enable('Runtime.enable'),
+      enable('Target.setAutoAttach', AUTO_ATTACH),
+      attach(),
     ]);
+    if (held) {
+      let timer: NodeJS.Timeout | undefined;
+      await Promise.race([before, new Promise<void>(resolve => (timer = setTimeout(resolve, FRAME_HOLD_MS)))]);
+      clearTimeout(timer);
+      // Always release the frame, whatever failed above: a held frame shows nothing and loads nothing.
+      await enable('Runtime.runIfWaitingForDebugger');
+    } else {
+      await before;
+    }
     try {
       const { frameTree } = await session.send('Page.getFrameTree', {}, quick);
       const visit = (node: any) => {
@@ -331,7 +371,6 @@ export class FrameRegistry {
     } catch {
       // The frame is going away or busy; tools that use it find out.
     }
-    await enable('Target.setAutoAttach', AUTO_ATTACH);
     this.hooks.changed();
   }
 }

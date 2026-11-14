@@ -12,6 +12,7 @@ import { CdpConnection } from './cdp';
 import { ConsentStore, siteOf, type ConsentAnswer } from './consent';
 import { browserViewUri, TabDecorations } from './decorations';
 import { PageMarker, type MarkerAction, type MarkerState } from './marker';
+import { MAX_RETIRED, matchRestoredTabs, retiredMessage, type RetiredTab } from './tabRestore';
 import { candidatesFor, compareTabIds, parseState, type PersistedBrowserState, type PersistedTab } from './tabState';
 
 interface TabRecord {
@@ -87,6 +88,8 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
   private openingCount = 0;
   private nextTabNumber = 1;
   private remembered: PersistedBrowserState = parseState(undefined);
+  /** Ids given up at a window reload (tabRestore.ts), newest first: a call with one gets a clear error. */
+  private retired: RetiredTab[] = [];
   private restoring = true;
   private persistTimer: NodeJS.Timeout | undefined;
   private decorations: TabDecorations | undefined;
@@ -138,6 +141,7 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
     }
     this.remembered = parseState(services.context.workspaceState.get(STATE_KEY));
     this.nextTabNumber = this.remembered.nextNumber;
+    this.retired = this.remembered.retired ?? [];
     this.consent.restore(this.remembered.consent);
     for (const [sessionId, tabId] of Object.entries(this.remembered.currentTab)) this.currentTab.set(sessionId, tabId);
     this.ready = this.restore();
@@ -454,7 +458,10 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
     if (tabId !== undefined && tabId.trim() !== '') {
       const id = normalizeTabId(tabId);
       const record = this.find(id);
-      if (!record) throw new ToolError('not_found', `There is no tab "${tabId}". It may have been closed; call browser_list_tabs for the open tabs.`);
+      if (!record) {
+        const retired = this.retired.find(t => t.id === id);
+        throw new ToolError('not_found', retired ? retiredMessage(retired) : `There is no tab "${tabId}". It may have been closed; call browser_list_tabs for the open tabs.`);
+      }
       return record;
     }
     const current = this.currentTab.get(session.id);
@@ -462,7 +469,8 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
     const record = this.find(current);
     if (!record) {
       this.currentTab.delete(session.id);
-      throw new ToolError('not_found', `Your current tab ${current} was closed. Open a new one with browser_open, or pick one from browser_list_tabs and pass \`tab\`.`);
+      const retired = this.retired.find(t => t.id === current);
+      throw new ToolError('not_found', retired ? retiredMessage(retired, true) : `Your current tab ${current} was closed. Open a new one with browser_open, or pick one from browser_list_tabs and pass \`tab\`.`);
     }
     return record;
   }
@@ -503,7 +511,8 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
       const prompt = consentPrompt(sessionDisplayName(session), record.tab, siteOf(url));
       this.log.info(`asking the user whether ${session.label} may use ${record.id} (${url})`);
       const promise = this.services.prompts
-        .ask({ message: prompt.message, choices: prompt.choices, signal: controller.signal })
+        // In the status bar, not a notification: a notification over the browser pauses the very tab it asks about.
+        .ask({ message: prompt.message, choices: prompt.choices, signal: controller.signal, placement: 'statusBar', summary: `${sessionDisplayName(session)} asks to use ${record.id}${siteOf(url) ? ` (${siteOf(url)})` : ''}` })
         .then(
           answer => {
             if (controller.signal.aborted) return;
@@ -526,7 +535,7 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
     if (outcome === 'timeout') {
       throw new ToolError(
         'timeout',
-        `The user has not answered whether you may use ${record.id} yet; the request stays open in VS Code. Do not retry in a loop: continue with other work or ask the user in chat, then call again (it will not ask twice).`,
+        `The user has not answered whether you may use ${record.id} yet; the question waits in VS Code's status bar (bottom left, "${sessionDisplayName(session)} asks to use ${record.id}"). Do not retry in a loop: continue with other work or ask the user in chat to answer it there, then call again (it will not ask twice).`,
       );
     }
   }
@@ -681,39 +690,47 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
   // ------------------------------------------------------------------ Restoring ids after a window reload
 
   private async restore(): Promise<void> {
-    const taken = new Set<string>();
-    const pending: Array<Promise<void>> = [];
-    for (const tab of vscode.window.browserTabs) {
+    const records = vscode.window.browserTabs.map(tab => {
       const record = this.track(tab, '');
       record.announced = true; // It was there before this extension host started.
-      if (candidatesFor(this.remembered, tab.url, taken).length === 0) {
-        record.id = this.freshId();
-        continue;
-      }
-      pending.push(
-        CdpConnection.identify(tab).then(
-          viewId => {
-            const entry = viewId ? this.remembered.tabs.find(t => t.viewId === viewId && !taken.has(t.viewId)) : undefined;
-            record.viewId = viewId;
-            if (entry) {
-              taken.add(entry.viewId);
-              this.adopt(record, entry);
-            }
-          },
+      return record;
+    });
+    // VS Code's view id is exact, but reading it needs a CDP session on the tab's browser target (never
+    // its page). Only read it for tabs that may be one the bridge was attached to before; tabs nobody
+    // used are recognised by their URL alone (tabRestore.ts).
+    const viewIds = new Map<TabRecord, string | undefined>();
+    const pending = records
+      .filter(r => candidatesFor(this.remembered, r.tab.url, new Set()).length > 0)
+      .map(record =>
+        CdpConnection.identify(record.tab).then(
+          viewId => void viewIds.set(record, viewId),
           err => this.log.debug(`could not identify a restored tab: ${errorText(err)}`),
         ),
       );
-    }
     if (pending.length) await Promise.race([Promise.all(pending), sleep(IDENTIFY_TIMEOUT_MS)]);
+    const live = records.filter(r => this.records.has(r.tab));
+    const result = matchRestoredTabs(this.remembered.tabs, live.map(r => ({ url: r.tab.url, viewId: viewIds.get(r) })));
+    live.forEach((record, i) => {
+      const entry = result.matches[i];
+      record.viewId = viewIds.get(record) ?? entry?.viewId;
+      if (entry) this.adopt(record, entry);
+    });
     for (const record of this.records.values()) if (!record.id) record.id = this.freshId();
-    // Decisions and current tabs that point at tabs that are gone mean nothing any more.
-    const live = new Set(this.allRecords().map(r => r.id));
-    for (const t of this.remembered.tabs) if (!live.has(t.id)) this.consent.forgetTab(t.id);
-    for (const [sessionId, tabId] of this.currentTab) if (!live.has(tabId)) this.currentTab.delete(sessionId);
+    // Ids that were not given back are never handed out again (nextNumber is past them), and a call
+    // that uses one is told what happened instead of reaching another tab.
+    this.retired = [...result.retired, ...this.retired.filter(t => !result.retired.some(r => r.id === t.id))].slice(0, MAX_RETIRED);
+    // Decisions that point at tabs that are gone mean nothing any more; a current tab that was retired
+    // stays until the session next uses it, so it hears why.
+    const liveIds = new Set(this.allRecords().map(r => r.id));
+    for (const t of this.remembered.tabs) if (!liveIds.has(t.id)) this.consent.forgetTab(t.id);
+    for (const [sessionId, tabId] of this.currentTab) if (!liveIds.has(tabId) && !this.retired.some(t => t.id === tabId)) this.currentTab.delete(sessionId);
     this.restoring = false;
     this.persist();
     this.changeEmitter.fire();
-    if (pending.length) this.log.info(`restored ${taken.size} of ${pending.length} remembered tab ids`);
+    if (this.remembered.tabs.length) {
+      const ambiguous = result.retired.filter(t => t.reason === 'ambiguous').length;
+      this.log.info(`restored ${result.byViewId + result.byUrl} of ${this.remembered.tabs.length} remembered tab ids (${result.byViewId} by view id, ${result.byUrl} by URL)${ambiguous ? `; ${ambiguous} could not be told apart from another tab with the same URL and got new ids` : ''}`);
+    }
   }
 
   private adopt(record: TabRecord, entry: PersistedTab): void {
@@ -735,8 +752,8 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
   private persist(): void {
     if (this.restoring || !this.available) return;
     const tabs: PersistedTab[] = [];
+    // Every tab, also those nobody attached to (no view id): after a reload they are matched by URL.
     for (const r of this.allRecords()) {
-      if (!r.viewId) continue;
       tabs.push({ id: r.id, viewId: r.viewId, origin: r.origin, openedBy: r.openedBy, openerTab: r.openerTab, paused: r.paused || undefined, url: r.tab.url });
     }
     const state: PersistedBrowserState = {
@@ -745,6 +762,7 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
       tabs,
       currentTab: Object.fromEntries(this.currentTab),
       consent: this.consent.snapshot(),
+      retired: this.retired.length ? this.retired : undefined,
     };
     this.remembered = state;
     void Promise.resolve(this.services.context.workspaceState.update(STATE_KEY, state)).then(undefined, err => this.log.warn(`could not save tab state: ${errorText(err)}`));
