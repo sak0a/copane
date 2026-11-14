@@ -51,14 +51,13 @@ reading the new tab's `browserContextId`.
 
 ### Found on the way, not specific to profiles
 
-With `copane.browser.loginPrompts` on (the default), a tab that an agent session **controls** at the
-moment of a window reload comes back stuck loading, and every CDP command that needs the renderer
-(`Runtime.evaluate`, `Page.navigate`) times out. Reproduced with the profiles module switched off and in
-the default store; it does not happen with `loginPrompts` off or when the tab was released before the
-reload. Likely cause: the CDP `Fetch` interception the previous extension host enabled is never turned
-off (`FetchInterception.dispose` sends `Fetch.disable` asynchronously, after its page connections may
-already be closed, and the extension host goes away right after). A new session's `Fetch.enable` /
-`Fetch.disable` did not release the tab. Not investigated further here. The profiles e2e releases its tabs before reloading.
+**Window reload while a tab is controlled** (not specific to profiles; fixed). A reload ends the
+extension host before it can turn CDP `Fetch` interception off (its messages to the browser are
+cancelled first), and the browser then holds every request of that tab for a listener that is gone:
+nothing loads in it again, and nothing a new session sends releases it. Copane remembers which tabs
+were being intercepted and, after a reload, replaces each with a new tab at the same address, in the
+same login store, under the same tab id (`BrowserServiceImpl.replaceStuck`). The page is loaded again,
+so unsaved form input in it is lost. The profiles e2e reloads with a controlled tab.
 
 ## Precedence
 

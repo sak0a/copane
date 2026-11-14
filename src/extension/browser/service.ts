@@ -31,6 +31,8 @@ interface TabRecord {
   lastController: string | undefined;
   /** `onDidOpenTab` has fired for it (or it existed before activation). */
   announced: boolean;
+  /** Restored after a window reload with its requests still held for the old extension host; see `replaceStuck`. */
+  stuck?: boolean;
 }
 
 interface PendingConsent {
@@ -112,6 +114,15 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
    * Throws a ToolError to refuse.
    */
   opener: ((session: AgentSession, url: string, options: { background?: boolean; profile?: string }) => Promise<vscode.BrowserTab | undefined>) | undefined;
+  /** Set by request interception: whether the tab's requests are being intercepted now. */
+  holdsRequests: ((tabId: string) => boolean) | undefined;
+  /**
+   * Set by login profiles: opens the replacement of a tab that came back stuck after a window reload in
+   * the same login store. undefined: open it the usual way; 'keep': do not replace this tab.
+   */
+  reopener: ((tab: vscode.BrowserTab, url: string) => Promise<vscode.BrowserTab | 'keep' | undefined>) | undefined;
+  /** Replacing tabs that came back stuck after a window reload; tool calls wait for it. */
+  private recovery: Promise<void> | undefined;
   /** Set by login profiles: a short note added to the in-page indicator's label ("profile dev"). */
   markerNote: ((tabId: string) => string | undefined) | undefined;
   /** Set by login profiles: what browser_open tells the agent about the store of a tab it just opened (once). */
@@ -196,6 +207,7 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
   async acquire(session: AgentSession, tabId: string | undefined, access: TabAccess, signal?: AbortSignal): Promise<{ tab: BrowserTabInfo; page: CdpPage }> {
     this.assertAvailable();
     await this.ready;
+    await this.recovery;
     const record = this.resolve(session, tabId);
     await this.checkAccess(session, record, signal);
     if (access === 'control') this.takeLease(session, record);
@@ -207,6 +219,7 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
   async openTab(session: AgentSession, url: string, options: { background?: boolean; profile?: string } = {}): Promise<BrowserTabInfo> {
     this.assertAvailable();
     await this.ready;
+    await this.recovery;
     this.openingCount++;
     let record: TabRecord;
     try {
@@ -218,6 +231,8 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
       this.setCurrent(session.id, record.id);
       this.services.tabLeases.acquire(record.id, session.id, { force: true });
       this.announce(record);
+      // Saved at once, not after the usual delay: a window reload right now must not turn the tab into one "opened by the user".
+      this.persistNow();
     } finally {
       if (--this.openingCount === 0) {
         for (const other of [...this.unannounced]) void this.classify(other);
@@ -724,13 +739,67 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
     const liveIds = new Set(this.allRecords().map(r => r.id));
     for (const t of this.remembered.tabs) if (!liveIds.has(t.id)) this.consent.forgetTab(t.id);
     for (const [sessionId, tabId] of this.currentTab) if (!liveIds.has(tabId) && !this.retired.some(t => t.id === tabId)) this.currentTab.delete(sessionId);
+    const stuck = live.filter((r, i) => result.matches[i]?.heldRequests);
+    for (const r of stuck) r.stuck = true;
     this.restoring = false;
     this.persist();
     this.changeEmitter.fire();
+    if (stuck.length) this.recovery = this.replaceStuck(stuck);
     if (this.remembered.tabs.length) {
       const ambiguous = result.retired.filter(t => t.reason === 'ambiguous').length;
       this.log.info(`restored ${result.byViewId + result.byUrl} of ${this.remembered.tabs.length} remembered tab ids (${result.byViewId} by view id, ${result.byUrl} by URL)${ambiguous ? `; ${ambiguous} could not be told apart from another tab with the same URL and got new ids` : ''}`);
     }
+  }
+
+  /**
+   * A window reload ends the extension host without a chance to hand request interception back (its
+   * messages to the browser are cancelled first), and the browser keeps holding every request of such a
+   * tab for a listener that no longer exists: the page is still shown, but nothing loads in it again.
+   * Nothing reaches that old listener, so the tab is replaced by a new one at the same address, in the
+   * same login store, under the same id.
+   */
+  private async replaceStuck(records: TabRecord[]): Promise<void> {
+    for (const old of records) {
+      if (!this.records.has(old.tab)) continue;
+      const url = old.tab.url || 'about:blank';
+      const id = old.id;
+      this.openingCount++;
+      try {
+        const opened = await this.reopener?.(old.tab, url);
+        if (opened === 'keep') {
+          old.stuck = false;
+          continue;
+        }
+        const tab = opened ?? (await vscode.window.openBrowserTab(url, { background: vscode.window.activeBrowserTab !== old.tab, preserveFocus: true }));
+        const fresh = this.records.get(tab) ?? this.track(tab, '');
+        this.unannounced.delete(fresh);
+        old.id = ''; // Its close must not release the id's lease or forget its consent.
+        fresh.id = id;
+        fresh.origin = old.origin;
+        fresh.openedBy = old.openedBy;
+        fresh.openerTab = old.openerTab;
+        fresh.paused = old.paused;
+        fresh.announced = true;
+        this.log.info(`${id} was reloaded in a new tab: the window reloaded while its requests were being intercepted, which left the old tab unable to load anything`);
+        await old.tab.close();
+        if (fresh.origin === 'agent') void this.connect(fresh).catch(err => this.log.debug(`could not attach to ${id} after replacing it: ${errorText(err)}`));
+      } catch (err) {
+        this.log.warn(`${id} may be unable to load pages (the window reloaded while its requests were being intercepted) and could not be replaced: ${errorText(err)}. Close it and open it again.`);
+      } finally {
+        if (--this.openingCount === 0) {
+          for (const other of [...this.unannounced]) void this.classify(other);
+          this.unannounced.clear();
+        }
+      }
+    }
+    this.persist();
+    this.updateContextKeys();
+    this.changeEmitter.fire();
+  }
+
+  /** Request interception was switched on or off on a tab: remembered, in case the window reloads. */
+  requestsHeldChanged(): void {
+    this.persistNow();
   }
 
   private adopt(record: TabRecord, entry: PersistedTab): void {
@@ -749,12 +818,18 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
     }, 300);
   }
 
+  private persistNow(): void {
+    if (this.persistTimer) clearTimeout(this.persistTimer);
+    this.persistTimer = undefined;
+    this.persist();
+  }
+
   private persist(): void {
     if (this.restoring || !this.available) return;
     const tabs: PersistedTab[] = [];
     // Every tab, also those nobody attached to (no view id): after a reload they are matched by URL.
     for (const r of this.allRecords()) {
-      tabs.push({ id: r.id, viewId: r.viewId, origin: r.origin, openedBy: r.openedBy, openerTab: r.openerTab, paused: r.paused || undefined, url: r.tab.url });
+      tabs.push({ id: r.id, viewId: r.viewId, origin: r.origin, openedBy: r.openedBy, openerTab: r.openerTab, paused: r.paused || undefined, heldRequests: r.stuck || this.holdsRequests?.(r.id) || undefined, url: r.tab.url });
     }
     const state: PersistedBrowserState = {
       version: 1,

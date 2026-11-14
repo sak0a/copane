@@ -115,12 +115,16 @@ export class FetchInterception implements Disposable {
   private readonly overflowed = new Set<string>();
   private readonly interceptEmitter = new Emitter<{ tabId: string; networkId: string; note: string }>();
   private readonly noteEmitter = new Emitter<{ tabId: string; text: string; topic?: string; to?: string }>();
+  private readonly activeEmitter = new Emitter<string>();
   private disposed = false;
 
   /** A request was answered by a client with a note for the network log. */
   readonly onDidIntercept: Event<{ tabId: string; networkId: string; note: string }> = this.interceptEmitter.event;
   /** Something the agent driving the tab should learn with its next action result. */
   readonly onDidNote: Event<{ tabId: string; text: string; topic?: string; to?: string }> = this.noteEmitter.event;
+
+  /** `Fetch` was switched on or off on a tab's page (the tab id). */
+  readonly onDidChangeActive: Event<string> = this.activeEmitter.event;
 
   constructor(private readonly log: Logger) {}
 
@@ -257,6 +261,7 @@ export class FetchInterception implements Disposable {
         await page.send('Fetch.disable', {}, { timeoutMs: ANSWER_TIMEOUT_MS });
       }
       target.applied = want;
+      if (!target.frame) this.activeEmitter.fire(tabId);
       // One line per tab, not per frame: a page can have dozens of frames.
       if (!target.frame) this.log.debug(`${tabId}: ${want ? `intercepting ${patterns.map(p => p.urlPattern + (p.resourceType ? ` (${p.resourceType})` : '')).join(', ')}${auth ? ' + logins' : ''}` : 'interception off'}`);
     } catch (err) {
@@ -389,6 +394,7 @@ export class FetchInterception implements Disposable {
     this.clients.length = 0;
     this.interceptEmitter.dispose();
     this.noteEmitter.dispose();
+    this.activeEmitter.dispose();
   }
 }
 

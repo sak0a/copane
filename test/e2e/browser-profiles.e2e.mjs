@@ -220,11 +220,8 @@ test('a window reload keeps profiles with open tabs (and their tab ids); a profi
     kept = openedId(await r.ok('browser_open', { url: server.url('/login?user=keeper'), profile: keep }));
     const dropped = openedId(await r.ok('browser_open', { url: server.url('/login?user=dropper'), profile: drop }));
     await r.ok('browser_close_tab', { tab: dropped });
-    // Tabs a session still controls come back stuck loading after a reload when login prompts are on:
-    // the previous extension host's CDP Fetch interception is never turned off (not specific to
-    // profiles; see docs/browser-profiles.md). Releasing first avoids it.
-    await r.ok('browser_release_tab', { all: true });
-    await a.ok('browser_release_tab', { all: true });
+    // The session still controls its tab, so its requests are being intercepted (login prompts): the
+    // reload leaves such a tab unable to load anything, and Copane replaces it (service.ts, replaceStuck).
     await sleep(1000); // state is saved shortly after changes
     await r.call('debug_vscode_command', { command: 'workbench.action.reloadWindow' }, { timeoutMs: 5000 }).catch(() => {});
   } finally {
@@ -247,6 +244,7 @@ test('a window reload keeps profiles with open tabs (and their tab ids); a profi
   try {
     assert.match((await tabInfo(again, kept)).notes, new RegExp(`login profile "${keep}"`), 'the tab kept its id and profile');
     assert.equal(await who(again, kept), 'Logged in as keeper', 'its login survived the reload');
+    assert.match(await again.ok('browser_navigate', { tab: kept, url: server.url('/?after-reload') }), /Logged in as keeper/, 'the tab still loads pages, in its profile');
     assert.match(await again.ok('browser_open', { url: server.url('/'), profile: keep }), new RegExp(`"Logged in as keeper"[\\s\\S]*shared with ${kept}`));
     assert.match(await again.ok('browser_profiles'), new RegExp(`- ${drop}: logins lost \\(none of its tabs was open when the window reloaded`));
     const reopened = await again.ok('browser_open', { url: server.url('/'), profile: drop });

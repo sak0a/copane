@@ -13,6 +13,12 @@ export interface PersistedTab {
   openedBy?: string;
   openerTab?: string;
   paused?: boolean;
+  /**
+   * Requests of the tab were being intercepted (login prompts, browser_route) when this was saved. If
+   * the window reloads in that state, the browser keeps holding the tab's requests for the extension
+   * host that is gone, so the tab is replaced after the reload (service.ts, `replaceStuck`).
+   */
+  heldRequests?: boolean;
   /** Last known URL: restored tabs are only identified (which costs a CDP attach) when one matches. */
   url: string;
 }

@@ -21,8 +21,10 @@ export function activateBrowser(services: BridgeServices): void {
   const interception = new FetchInterception(scopedLogger(services.log, 'fetch'));
   const routes = new RequestRoutes(services, browser, interception);
   const credentials = new CredentialPrompts(services, interception);
+  browser.holdsRequests = tabId => interception.isActive(tabId);
   services.context.subscriptions.push(
     browser,
+    interception.onDidChangeActive(() => browser.requestsHeldChanged()),
     certificates,
     browser.onDidAttachPage(page => interception.attach(page)),
     routes,

@@ -14,6 +14,7 @@ export function activateProfiles(services: BridgeServices, browser: BrowserServi
   if (!browser.available) return [];
   const profiles = new ProfileManager(services, browser);
   browser.opener = (session, url, options) => profiles.openForAgent(session, url, options);
+  browser.reopener = (tab, url) => profiles.reopen(tab, url);
   browser.markerNote = tabId => profiles.markerNote(tabId);
   browser.sessionProfile = sessionId => profiles.sessionProfile(sessionId);
   browser.openNote = tabId => profiles.takeNote(tabId);

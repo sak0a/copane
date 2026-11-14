@@ -152,6 +152,18 @@ export class ProfileManager implements vscode.Disposable {
     return note;
   }
 
+  /**
+   * `BrowserServiceImpl.reopener`: the replacement of a profile tab opens in its profile. A tab that
+   * lost its profile (VS Code restarted) is kept as it is: it must not move to the default store.
+   */
+  async reopen(tab: vscode.BrowserTab, url: string): Promise<vscode.BrowserTab | 'keep' | undefined> {
+    await this.ready;
+    const t = this.tabs.get(tab);
+    if (!t) return undefined;
+    if (t.detached) return 'keep';
+    return (await this.open(t.profile, url)).tab;
+  }
+
   /** Opens `url` in a new tab of profile `key` (not the default store). */
   open(key: string, url: string): Promise<OpenedInProfile> {
     const previous = this.queues.get(key) ?? Promise.resolve();
