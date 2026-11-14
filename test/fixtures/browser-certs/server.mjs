@@ -21,6 +21,6 @@ export async function startSelfSignedServer() {
   return {
     /** `host` is "127.0.0.1" or "localhost": two names for the same server, so two hosts to approve. */
     url: (host, path = '/') => `https://${host}:${port}${path}`,
-    close: () => new Promise(resolve => server.close(resolve)),
+    close: () => new Promise(resolve => { server.closeAllConnections?.(); server.close(() => resolve()); }),
   };
 }

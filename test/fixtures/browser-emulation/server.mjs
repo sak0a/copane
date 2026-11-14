@@ -83,7 +83,7 @@ export async function startEmulationServer() {
   const { port } = server.address();
   return {
     url: (path = '/') => `http://127.0.0.1:${port}${path}`,
-    close: () => new Promise(resolve => server.close(() => resolve())),
+    close: () => new Promise(resolve => { server.closeAllConnections?.(); server.close(() => resolve()); }),
   };
 }
 

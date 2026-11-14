@@ -69,7 +69,7 @@ export async function startFixtureServer() {
     base,
     host: `127.0.0.1:${port}`,
     url: path => `${base}${path}`,
-    close: () => new Promise(resolve => server.close(() => resolve())),
+    close: () => new Promise(resolve => { server.closeAllConnections?.(); server.close(() => resolve()); }),
   };
 }
 

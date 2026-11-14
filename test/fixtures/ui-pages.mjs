@@ -13,6 +13,6 @@ export async function startPageServer() {
   const { port } = server.address();
   return {
     url: title => `http://127.0.0.1:${port}/${encodeURIComponent(title)}`,
-    close: () => new Promise(resolve => server.close(resolve)),
+    close: () => new Promise(resolve => { server.closeAllConnections?.(); server.close(() => resolve()); }),
   };
 }

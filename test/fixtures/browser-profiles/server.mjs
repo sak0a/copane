@@ -98,7 +98,7 @@ export async function startProfileServer() {
     url: (path = '/') => `${base}${path}`,
     /** The same server under the other site name (a cross-origin frame of `base` pages). */
     otherUrl: (path = '/') => `http://localhost:${port}${path}`,
-    close: () => new Promise(resolve => server.close(resolve)),
+    close: () => new Promise(resolve => { server.closeAllConnections?.(); server.close(() => resolve()); }),
   };
 }
 

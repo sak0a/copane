@@ -170,7 +170,8 @@ ${url.searchParams.has('auto') ? 'load();' : ''}
     close: () =>
       new Promise(resolve => {
         server.closeAllConnections?.();
-        server.close(resolve);
+        server.closeAllConnections?.();
+        server.close(() => resolve());
       }),
   };
 }
@@ -248,7 +249,8 @@ export async function startAuthProxy({ user = 'proxyuser', password = 'proxy pas
     },
     close: () =>
       new Promise(resolve => {
-        server.close(resolve);
+        server.closeAllConnections?.();
+        server.close(() => resolve());
         for (const s of sockets) s.destroy();
       }),
   };

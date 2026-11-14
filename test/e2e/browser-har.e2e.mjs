@@ -71,7 +71,7 @@ test('default: a valid HAR 1.2 of the page and its cross-origin frame, secrets m
   await a.ok('browser_history', { action: 'reload' });
   assert.equal(await a.ok('browser_evaluate', { function: '() => window.done' }), 'done');
   const result = await a.ok('browser_network_requests', { har: 'har-e2e/default.har' });
-  assert.match(result, /^Wrote har-e2e\/default\.har \([\d.]+ kB\): \d+ requests \(\d+ from cross-origin frames\) on \d+ pages?, HAR 1\.2\./);
+  assert.match(result, /^Wrote har-e2e[\\/]default\.har \([\d.]+ kB\): \d+ requests \(\d+ from cross-origin frames\) on \d+ pages?, HAR 1\.2\./);
   assert.match(result, /Masked: .*cookies \(sid, theme\).*Authorization headers are never recorded\. harInclude \["secrets"\] keeps the values, which you can then read too\./);
   assert.match(result, /query parameters \(access_token\)/);
   assert.match(result, /headers \(X-Api-Key\)/);
@@ -141,7 +141,7 @@ test('secrets: kept when asked (Authorization is never recorded), and the result
 
 test('filters apply: only the matching requests are written', async () => {
   const result = await a.ok('browser_network_requests', { har: 'har-e2e/fetches.har', types: ['fetch'], filter: '127.0.0.1' });
-  assert.match(result, /Wrote har-e2e\/fetches\.har .*: \d+ requests on/);
+  assert.match(result, /Wrote har-e2e[\\/]fetches\.har .*: \d+ requests on/);
   const log = await checkHar(read('fetches.har'));
   assert.ok(log.entries.length >= 4);
   assert.ok(log.entries.every(e => e._resourceType === 'fetch' && e.request.url.includes('127.0.0.1')), JSON.stringify(log.entries.map(e => e.request.url)));
@@ -175,7 +175,7 @@ test('where it may be written: inside the workspace, .har, never over a file it 
   assert.match(theirs.text, /exists and was not written by browser_network_requests; pick another path \(it is never overwritten\)/);
   assert.equal(read('theirs.har'), '{"log":{"version":"1.2","creator":{"name":"Chrome"}}}');
   // Its own file it overwrites.
-  assert.match(await a.ok('browser_network_requests', { har: 'har-e2e/default.har' }), /^Wrote har-e2e\/default\.har/);
+  assert.match(await a.ok('browser_network_requests', { har: 'har-e2e/default.har' }), /^Wrote har-e2e[\\/]default\.har/);
   const stray = await a.call('browser_network_requests', { harInclude: ['bodies'] });
   assert.match(stray.text, /harInclude applies only with har/);
   assert.ok(!existsSync(join(tmpdir(), 'har-e2e')));

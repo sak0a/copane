@@ -66,6 +66,7 @@ export async function startFixtureServer({ port = 0, host = '127.0.0.1' } = {}) 
       new Promise(resolve => {
         for (const res of hanging) res.destroy();
         server.closeAllConnections?.();
+        server.closeAllConnections?.();
         server.close(() => resolve());
       }),
   };
