@@ -141,39 +141,85 @@ export function isBackgroundRequest(e: { url: string; type: string }, recurring:
 // functions' source, so they must stay self-contained: no imports, literal constants only.
 
 export interface NodeRecord {
-  /** Page time of the node's first and last mutation since the watch began. */
+  /** Page time of the element's first and last change since the watch began (or since its mark expired). */
   first: number;
   last: number;
-  /** Separate bursts of mutations (more than 250 ms apart). */
+  /** Separate bursts of changes (more than 250 ms apart). */
   bursts: number;
   /** Shortest pause between two bursts. */
   minGap: number;
-}
-
-/** The record after another mutation of the node at `now`. */
-export function recordMutation(r: NodeRecord | undefined, now: number): NodeRecord {
-  if (!r) return { first: now, last: now, bursts: 1, minGap: Infinity };
-  const gap = now - r.last;
-  if (gap > 250) return { first: r.first, last: now, bursts: r.bursts + 1, minGap: Math.min(r.minGap, gap) };
-  return { first: r.first, last: now, bursts: r.bursts, minGap: r.minGap };
-}
-
-/** The node changes on its own: bursts again within 6 s (a clock, a carousel, polling), or keeps changing for a second (an animation). */
-export function isRecurring(r: NodeRecord): boolean {
-  return (r.bursts >= 2 && r.minGap <= 6000) || (r.bursts === 1 && r.last - r.first >= 1000);
+  /** Page time at which it was first seen to change on its own (0: not seen). */
+  establishedAt: number;
 }
 
 /**
- * Whether a node's change counts as an update: "recurring" never does; "changed" does; "pending" is
- * not known yet. A node first changed within 5.5 s of the watch's start might be a clock or a poll
- * (period up to 5 s) that simply had not ticked yet: it counts once it has not changed again for 5.5 s.
+ * The element changes on its own: it changed at least 3 separate times (a clock, a carousel, a feed),
+ * twice within 1.5 s, or kept changing for a second (an animation). Two changes far apart are not
+ * enough: that is what two edits look like.
  */
-export function nodeVerdict(r: NodeRecord, now: number, start: number): 'recurring' | 'changed' | 'pending' {
-  if (isRecurring(r)) return 'recurring';
-  if (r.bursts >= 2) return 'changed';
-  if (r.first - start >= 5500) return 'changed';
+export function isRecurring(r: NodeRecord): boolean {
+  return r.bursts >= 3 || (r.bursts >= 2 && r.minGap <= 1500) || (r.bursts === 1 && r.last - r.first >= 1000);
+}
+
+/** The record after another change of the element at `now`. */
+export function recordMutation(r: NodeRecord | undefined, now: number): NodeRecord {
+  if (!r) return { first: now, last: now, bursts: 1, minGap: Infinity, establishedAt: 0 };
+  const gap = now - r.last;
+  if (gap <= 250) {
+    const same = { first: r.first, last: now, bursts: r.bursts, minGap: r.minGap, establishedAt: r.establishedAt };
+    if (!same.establishedAt && isRecurring(same)) same.establishedAt = now;
+    return same;
+  }
+  // Still for about twice its usual interval (at least 4 s): it stopped changing on its own; start over.
+  const interval = r.bursts > 1 ? (r.last - r.first) / (r.bursts - 1) : 0;
+  if (isRecurring(r) && gap > Math.max(4000, 2 * interval)) return { first: now, last: now, bursts: 1, minGap: Infinity, establishedAt: 0 };
+  const next = { first: r.first, last: now, bursts: r.bursts + 1, minGap: Math.min(r.minGap, gap), establishedAt: r.establishedAt };
+  if (!next.establishedAt && isRecurring(next)) next.establishedAt = now;
+  return next;
+}
+
+/**
+ * Whether an element's change counts as an update: "recurring" (changes on its own) never does, nor
+ * does "idle" (it used to, and its mark expires with its next change); "changed" does; "pending" is
+ * not known yet. A change counts once the element has not changed again for 5.5 s, or at once when it
+ * is the element's first change at least 5.5 s after the watch began (anything changing on its own
+ * with a period up to 5 s would have changed before).
+ */
+export function nodeVerdict(r: NodeRecord, now: number, start: number): 'recurring' | 'idle' | 'changed' | 'pending' {
+  if (isRecurring(r)) {
+    const interval = r.bursts > 1 ? (r.last - r.first) / (r.bursts - 1) : 0;
+    return now - r.last <= Math.max(4000, 2 * interval) ? 'recurring' : 'idle';
+  }
   if (now - r.last >= 5500) return 'changed';
+  if (r.bursts === 1 && r.first - start >= 5500) return 'changed';
   return 'pending';
+}
+
+/**
+ * Records to forget after a check saw a recognised update (a hot-update message or request, a reload):
+ * changes since `since` were the update, so they are no evidence that an element changes on its own.
+ * Elements known to change on their own before `since` stay known.
+ */
+export function forgetUpdate(r: NodeRecord, since: number): boolean {
+  return r.last >= since && !(r.establishedAt && r.establishedAt < since);
+}
+
+// ---------------------------------------------------------------- requests in flight
+
+/**
+ * A request that still keeps the page from settling: not finished, of the current document (a request
+ * the previous document started never finishes once it is gone), and not an event stream or socket.
+ */
+export function stillInFlight(
+  e: { end: number | undefined; failed: string | undefined; status: number | undefined; type: string; startedAt: number; loaderId: string | undefined; seq: number },
+  now: number,
+  doc: { loaderId: string | undefined; startSeq: number },
+): boolean {
+  if (e.end !== undefined || e.failed || e.status !== undefined) return false;
+  if (e.type === 'EventSource' || e.type === 'WebSocket') return false;
+  if (now - e.startedAt >= 60_000) return false;
+  if (e.loaderId && doc.loaderId && e.loaderId !== doc.loaderId) return false;
+  return e.seq >= doc.startSeq || (Boolean(e.loaderId) && e.loaderId === doc.loaderId);
 }
 
 // ---------------------------------------------------------------- frames
@@ -202,6 +248,8 @@ export interface UpdateFacts {
   requestUrls: string[];
   overlay: boolean;
   newErrors: number;
+  /** Failed requests listed as new. */
+  newFailures?: number;
   domChanged: boolean;
   /** URLs of frames that loaded a new document. */
   frames: string[];
@@ -229,7 +277,8 @@ export function describeUpdate(f: UpdateFacts): string {
   if (f.frames.length) return `a reload of the frame ${list(unique(f.frames))}`;
   if (f.overlay) return 'an error shown by the dev server';
   if (f.newErrors) return 'a new error (no hot-update message seen)';
-  if (f.domChanged) return 'DOM changes (no hot-update message seen)';
+  if (f.newFailures) return 'a failed request (no hot-update message seen)';
+  if (f.domChanged) return 'DOM changes only, no dev-server message (if this page changes on its own, this may not be your edit: check again, or use reload: true)';
   return 'a change';
 }
 

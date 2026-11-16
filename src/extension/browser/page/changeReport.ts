@@ -76,6 +76,8 @@ export interface ChangeReport {
   selfChanging: number;
   /** What the screenshot's source says about the attached image (an emulated device). */
   imageNote?: string;
+  /** The page did not answer for this long during the check (busy with a long script). */
+  busyMs?: number;
 }
 
 export function formatChange(r: ChangeReport): string {
@@ -93,6 +95,7 @@ export function formatChange(r: ChangeReport): string {
   if (r.warnings) tail.push(`+ ${count(r.warnings, 'new warning')} (browser_console_messages shows them).`);
   if (r.selfChanging) tail.push(`Note: ${selfChangingNote(r.selfChanging)}`);
   if (r.unsettled) tail.push(unsettledNote(r.unsettled));
+  if (r.busyMs) tail.push(`Note: the page was busy (not answering) for ${formatMs(r.busyMs)} after the update: a long-running script, which users feel as a frozen page.`);
   if (r.imageNote && r.imageAttached) tail.push(`About the after-screenshot: ${r.imageNote}`);
   if (nothing) {
     const lines = [`${head}: no new errors or failed requests, and the screenshot is unchanged. The edit does not show in this view (other route or state?), or it did not apply.`];

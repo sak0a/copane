@@ -12,6 +12,10 @@
 //   late     a hot update, then a console error 900 ms later
 //   slowfail a hot update that starts /api/slow?ms=5000, which answers 500 after 5 s
 //   hang     logs a hot update, then blocks the page's main thread for 20 s
+//   busy     a hot update, then a 4 s synchronous render
+//   slowpoll a hot update that calls /api/slow a third time (see slowcalls in app.js); it fails after 2 s
+//   same     prints webpack-dev-server's lines for a rebuild that changed nothing
+//   stalereload starts loading a slow script, then reloads the page
 //   frame    story.html (in a frame of frame.html) reloads itself
 //   none     nothing reaches the page
 //
@@ -54,7 +58,9 @@ export async function startChangeServer({ port = 0, host = '127.0.0.1' } = {}) {
       if (url.pathname === '/api/status') return send(200, JSON.stringify({ n: ++polls }), 'application/json');
       if (url.pathname === '/api/slow') {
         await new Promise(resolve => setTimeout(resolve, Number(url.searchParams.get('ms') ?? 5000)));
-        return send(500, JSON.stringify({ error: 'slow and failing' }), 'application/json');
+        const status = Number(url.searchParams.get('status') ?? 500);
+        if (url.searchParams.get('js')) return send(status, '/* late script */', 'text/javascript');
+        return send(status, JSON.stringify(status >= 400 ? { error: 'slow and failing' } : { ok: true }), 'application/json');
       }
       const pages = { '/': 'app.html', '/app.html': 'app.html', '/plain.html': 'plain.html', '/missing.html': 'missing.html', '/frame.html': 'frame.html', '/story.html': 'story.html' };
       if (pages[url.pathname]) {

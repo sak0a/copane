@@ -1,6 +1,6 @@
 import { deflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { ChangeBaselines, OVERLAY_TEXT, WATCH, type Baseline } from '../../src/extension/browser/page/change';
+import { ChangeBaselines, OVERLAY_TEXT, STOP_WATCH, WATCH, type Baseline } from '../../src/extension/browser/page/change';
 import {
   cleanLocation,
   dedupeErrors,
@@ -18,12 +18,14 @@ import {
   isHmrRequest,
   isRecurring,
   nodeVerdict,
+  forgetUpdate,
   recordMutation,
   recurringErrors,
   recurringRequests,
   reloadedFrames,
   requestKey,
   settleBlocker,
+  stillInFlight,
   type NodeRecord,
   type SettleFacts,
   type UpdateFacts,
@@ -409,51 +411,92 @@ describe('HMR patterns', () => {
 });
 
 describe('DOM changes the page makes on its own', () => {
-  /** Feeds mutations at these page times into one node's record. */
+  /** Feeds changes at these page times into one element's record. */
   const feed = (times: number[]) => times.reduce<NodeRecord | undefined>((r, t) => recordMutation(r, t), undefined)!;
 
-  it('a clock ticking every second, or every 5 s, is recurring after its second tick', () => {
-    expect(isRecurring(feed([1000]))).toBe(false);
+  it('a clock ticking every 2 s or every 5 s changes on its own from its third tick; every second, from its second', () => {
+    expect(isRecurring(feed([1000, 3000]))).toBe(false);
+    expect(isRecurring(feed([1000, 3000, 5000]))).toBe(true);
     expect(isRecurring(feed([1000, 2000]))).toBe(true);
-    expect(isRecurring(feed([1000, 6000]))).toBe(true);
+    expect(isRecurring(feed([1000, 6000, 11_000]))).toBe(true);
     expect(nodeVerdict(feed([1000, 2000, 3000]), 3500, 0)).toBe('recurring');
+    // Until then its changes are not counted yet (they do not stay still for 5.5 s).
+    expect(nodeVerdict(feed([1000]), 1900, 0)).toBe('pending');
+    expect(nodeVerdict(feed([1000, 6000]), 10_000, 0)).toBe('pending');
   });
 
-  it('an animation that keeps changing for a second is recurring', () => {
+  it('two changes within 1.5 s, or a second of continuous change, is an animation', () => {
+    expect(isRecurring(feed([1000, 2200]))).toBe(true);
     expect(isRecurring(feed(Array.from({ length: 70 }, (_, i) => i * 16)))).toBe(true);
     expect(isRecurring(feed(Array.from({ length: 20 }, (_, i) => i * 16)))).toBe(false);
   });
 
-  it('a first change soon after the watch began waits to be told from a slow clock', () => {
-    // Watch started at 0; the node changed once at 800 (a clock with a 5 s period might do that).
-    expect(nodeVerdict(feed([800]), 2000, 0)).toBe('pending');
-    expect(nodeVerdict(feed([800]), 6400, 0)).toBe('changed'); // 5.5 s without repeating
-    expect(nodeVerdict(feed([800, 5000]), 6400, 0)).toBe('recurring'); // it was a clock
+  it('an element edited twice, 3 s apart, is an edit both times (not a clock)', () => {
+    // Watch started at 0; edits at 6 s and 9 s.
+    expect(nodeVerdict(feed([6000]), 6100, 0)).toBe('changed');
+    const twice = feed([6000, 9000]);
+    expect(isRecurring(twice)).toBe(false);
+    expect(nodeVerdict(twice, 10_000, 0)).toBe('pending');
+    expect(nodeVerdict(twice, 14_600, 0)).toBe('changed');
   });
 
-  it('a first change long after the watch began counts at once', () => {
+  it('the mark expires when the element has been still for twice its interval (at least 4 s)', () => {
+    const clock = feed([1000, 2000, 3000]);
+    expect(nodeVerdict(clock, 6900, 0)).toBe('recurring');
+    expect(nodeVerdict(clock, 7100, 0)).toBe('idle');
+    // Its next change starts a new record: an ordinary element again.
+    const later = recordMutation(clock, 20_000);
+    expect(later).toMatchObject({ first: 20_000, bursts: 1, establishedAt: 0 });
+    const slow = feed([0, 10_000, 20_000]);
+    expect(nodeVerdict(slow, 39_000, 0)).toBe('recurring');
+    expect(nodeVerdict(slow, 41_000, 0)).toBe('idle');
+  });
+
+  it('a first change soon after the watch began waits to be told from a slow clock; later it counts at once', () => {
+    expect(nodeVerdict(feed([800]), 2000, 0)).toBe('pending');
+    expect(nodeVerdict(feed([800]), 6400, 0)).toBe('changed');
     expect(nodeVerdict(feed([9000]), 9100, 0)).toBe('changed');
   });
 
-  it('two edits far apart on the same element both count', () => {
-    expect(nodeVerdict(feed([9000, 30_000]), 30_100, 0)).toBe('changed');
+  it('remembers when an element was first seen changing on its own, and forgets what a recognised update changed', () => {
+    const clock = feed([1000, 3000, 5000, 7000]);
+    expect(clock.establishedAt).toBe(5000);
+    expect(feed([1000, 2000]).establishedAt).toBe(2000);
+    expect(forgetUpdate(clock, 6500)).toBe(false); // known before the update: stays known
+    expect(forgetUpdate(feed([5000, 5600]), 4000)).toBe(true); // changed (twice) during the update: forgotten
+    expect(forgetUpdate(feed([2000]), 4000)).toBe(false); // not changed since: kept
   });
 
-  it('a record of mutations in one burst stays one burst', () => {
-    expect(feed([1000, 1100, 1200])).toEqual({ first: 1000, last: 1200, bursts: 1, minGap: Infinity });
+  it('a record of changes in one burst stays one burst', () => {
+    expect(feed([1000, 1100, 1200])).toEqual({ first: 1000, last: 1200, bursts: 1, minGap: Infinity, establishedAt: 0 });
     expect(feed([1000, 1300])).toMatchObject({ bursts: 2, minGap: 300 });
   });
 
   it('the page script embeds these functions as they are', () => {
-    // WATCH inlines their source; it must be self-contained (runs in the page's isolated world).
-    for (const fn of [recordMutation, isRecurring, nodeVerdict]) {
-      const copy = new Function(`return (${fn.toString()});`)();
-      expect(typeof copy).toBe('function');
-    }
-    const copy = new Function(`return (${nodeVerdict.toString()});`)() as typeof nodeVerdict;
-    const isRec = new Function(`return (${isRecurring.toString()});`)();
-    expect(() => copy(feed([1000, 2000]), 3000, 0)).toThrow(); // it calls isRecurring by name...
-    expect(new Function('isRecurring', `return (${nodeVerdict.toString()});`)(isRec)(feed([1000, 2000]), 3000, 0)).toBe('recurring'); // ...which WATCH defines beside it
+    // WATCH inlines their source; they must be self-contained apart from each other.
+    const scope = new Function(`const ${isRecurring.name} = ${isRecurring.toString()}; const ${recordMutation.name} = ${recordMutation.toString()}; const ${nodeVerdict.name} = ${nodeVerdict.toString()}; const ${forgetUpdate.name} = ${forgetUpdate.toString()}; return [${recordMutation.name}, ${nodeVerdict.name}, ${forgetUpdate.name}];`)();
+    const [rec, verdict] = scope as [typeof recordMutation, typeof nodeVerdict];
+    const r = [1000, 2000, 3000].reduce<NodeRecord | undefined>((x, t) => rec(x, t), undefined)!;
+    expect(verdict(r, 3500, 0)).toBe('recurring');
+  });
+});
+
+describe('requests in flight', () => {
+  const req = (e: Partial<Parameters<typeof stillInFlight>[0]>) => ({ end: undefined, failed: undefined, status: undefined, type: 'Script', startedAt: 0, loaderId: 'L2', seq: 50, ...e });
+  const doc = { loaderId: 'L2', startSeq: 40 };
+
+  it('only requests of the current document keep the page busy', () => {
+    expect(stillInFlight(req({}), 1000, doc)).toBe(true);
+    // A hot-update script the previous document started, never finished: gone with that document.
+    expect(stillInFlight(req({ loaderId: 'L1', seq: 30 }), 1000, doc)).toBe(false);
+    expect(stillInFlight(req({ loaderId: undefined, seq: 30 }), 1000, doc)).toBe(false);
+    // The new document's own request is sent before its navigation is recorded.
+    expect(stillInFlight(req({ type: 'Document', seq: 38 }), 1000, doc)).toBe(true);
+  });
+
+  it('finished, failed, answered, streams and very old requests do not', () => {
+    for (const e of [{ end: 5 }, { failed: 'net::ERR_ABORTED' }, { status: 200 }, { type: 'EventSource' }, { type: 'WebSocket' }]) expect(stillInFlight(req(e), 1000, doc), JSON.stringify(e)).toBe(false);
+    expect(stillInFlight(req({}), 61_000, doc)).toBe(false);
   });
 });
 
@@ -488,7 +531,8 @@ describe('describeUpdate', () => {
     expect(describeUpdate(facts({ frames: ['http://127.0.0.2:4000/story.html'] }))).toBe('a reload of the frame http://127.0.0.2:4000/story.html');
     expect(describeUpdate(facts({ overlay: true }))).toBe('an error shown by the dev server');
     expect(describeUpdate(facts({ newErrors: 1 }))).toBe('a new error (no hot-update message seen)');
-    expect(describeUpdate(facts({ domChanged: true }))).toBe('DOM changes (no hot-update message seen)');
+    expect(describeUpdate(facts({ newFailures: 1 }))).toBe('a failed request (no hot-update message seen)');
+    expect(describeUpdate(facts({ domChanged: true }))).toBe('DOM changes only, no dev-server message (if this page changes on its own, this may not be your edit: check again, or use reload: true)');
   });
 });
 
@@ -751,6 +795,11 @@ describe('more report texts', () => {
     expect(text).toContain('Note: The page changes on its own (2 elements keep changing');
   });
 
+  it('a page that was busy for a while after the update', () => {
+    expect(formatChange(report({ busyMs: 4200 }))).toContain('Note: the page was busy (not answering) for 4.2 s after the update: a long-running script, which users feel as a frozen page.');
+    expect(formatChange(report({}))).not.toContain('busy');
+  });
+
   it('a rebuild that changed nothing', () => {
     expect(formatNoUpdate({ tabId: 'tab-2', how: 'nothing', line: '[webpack-dev-server] Nothing changed.', elapsedMs: 300 })).toBe(
       'No update in tab-2 after 300 ms: the dev server rebuilt, but nothing changed ("[webpack-dev-server] Nothing changed."). The edit did not change the bundle: was the file saved with a change, and does this page import it?',
@@ -791,7 +840,7 @@ describe('formatTimeout', () => {
 // ---------------------------------------------------------------- baselines
 
 describe('ChangeBaselines', () => {
-  const baseline = (tabId: string): Baseline => ({ tabId, seq: 0, loaderId: 'l', url: 'u', takenAt: 0, docErrors: [], docFailureUrls: [], view, lastOverlay: '', watchMark: 0, watchDoc: 'l', frames: {}, pending: [], reported: { errors: 0, failures: 0 } });
+  const baseline = (tabId: string): Baseline => ({ tabId, seq: 0, loaderId: 'l', url: 'u', takenAt: 0, docErrors: [], docFailureUrls: [], view, lastOverlay: '', watchMark: 0, watchDoc: 'l', lastDoc: 'l', failedBefore: [], frames: {}, pending: [], reported: { errors: 0, failures: 0 } });
 
   it('keeps the 10 most recently used, per session and tab', () => {
     const store = new ChangeBaselines(() => true);
@@ -813,9 +862,23 @@ describe('ChangeBaselines', () => {
     expect(store.wasEvicted('s1\u0000tab-0')).toBe(false);
   });
 
+  it('says when a tab lost its last baseline, so its DOM watch can stop', () => {
+    const dropped: string[] = [];
+    const store = new ChangeBaselines(() => true, 2, tabId => dropped.push(tabId));
+    store.set('s1\u0000tab-1', baseline('tab-1'));
+    store.set('s2\u0000tab-1', baseline('tab-1'));
+    store.set('s1\u0000tab-2', baseline('tab-2')); // evicts s1/tab-1; s2 still has tab-1
+    expect(dropped).toEqual([]);
+    store.dropSession('s2');
+    expect(dropped).toEqual(['tab-1']);
+    store.dropSession('s1');
+    expect(dropped).toEqual(['tab-1', 'tab-2']);
+  });
+
   it('the page scripts are valid JavaScript', () => {
     expect(() => new Function('return (' + WATCH + ');')).not.toThrow();
     expect(() => new Function('return (' + OVERLAY_TEXT + ');')).not.toThrow();
+    expect(() => new Function('return (' + STOP_WATCH + ');')).not.toThrow();
   });
 
   it('drops a session\'s baselines and those of closed tabs', () => {

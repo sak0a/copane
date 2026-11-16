@@ -4,11 +4,19 @@ import { z } from 'zod';
 import { ToolError } from '../../core/errors';
 import { defineTool, type ToolDefinition } from '../../core/tools';
 import { withPage, type PageCall, type PageEnv } from './call';
-import { ChangeBaselines, checkChange, takeBaseline } from './change';
+import { ChangeBaselines, checkChange, stopWatch, takeBaseline } from './change';
 import { tabArg } from './schema';
 
 export function changeTools(env: PageEnv, options: { locate?: (call: PageCall, location: string) => Promise<string | undefined> } = {}): ToolDefinition<any>[] {
-  const baselines = new ChangeBaselines(tabId => Boolean(env.services.browser.getTab(tabId)));
+  // When a tab's last baseline is dropped (evicted, or its session ended), its DOM watch stops.
+  const baselines = new ChangeBaselines(
+    tabId => Boolean(env.services.browser.getTab(tabId)),
+    undefined,
+    tabId => {
+      const state = env.states.get(tabId);
+      if (state) stopWatch(state);
+    },
+  );
   env.services.context.subscriptions.push(
     env.services.sessions.onDidChange(change => {
       if (change.type === 'removed') baselines.dropSession(change.session.id);

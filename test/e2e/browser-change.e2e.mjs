@@ -118,7 +118,7 @@ test('a baseline with a build error showing: the check waits for the fix and say
 test('a CSS-only change: a region from DOM changes alone', async () => {
   await open();
   const { text } = await change('css');
-  assert.match(text, /after DOM changes \(no hot-update message seen\)/);
+  assert.match(text, /after DOM changes only, no dev-server message/);
   const regions = regionsOf(text);
   assert.equal(regions.length, 1, text);
   near(regions[0], [400, 520, 120, 240], 'the box');
@@ -233,7 +233,7 @@ test('on a clock page, a hot update and a CSS-only change still count, and the n
   await a.ok('browser_check_change', { action: 'baseline' });
   await site.edit('css');
   const css = await a.ok('browser_check_change', { action: 'check' });
-  assert.match(css, /after DOM changes \(no hot-update message seen\)/);
+  assert.match(css, /after DOM changes only, no dev-server message/);
   assert.ok(regionsOf(css).some(r => Math.abs(r[0] - 400) <= 2 && Math.abs(r[2] - 120) <= 2), css);
 });
 
@@ -368,6 +368,93 @@ test('the page indicator is shown again after a check is cancelled while it capt
     controller.abort();
     await pending;
     await until(async () => !(await indicator()).includes('hidden'), `the indicator to be shown again (cancelled after ${delay} ms)`, { timeoutMs: 5000 });
+  }
+});
+
+// ---------------------------------------------------------------- second review
+
+test('the same element edited twice, 3 s apart, counts both times; a new baseline starts over', async () => {
+  await open();
+  await a.ok('browser_check_change', { action: 'baseline' });
+  await sleep(6000);
+  await site.edit('css');
+  const first = await a.ok('browser_check_change', { action: 'check' });
+  assert.match(first, /after DOM changes only, no dev-server message/, first);
+  await sleep(3000);
+  await site.edit('css');
+  const second = await a.ok('browser_check_change', { action: 'check' });
+  assert.match(second, /after DOM changes only, no dev-server message/, second);
+  await a.ok('browser_check_change', { action: 'baseline' });
+  await site.edit('css');
+  const third = await a.ok('browser_check_change', { action: 'check' });
+  assert.match(third, /after DOM changes only, no dev-server message/, third);
+  for (const t of [first, second, third]) assert.doesNotMatch(t, /The page changes on its own/, t);
+});
+
+test('a request to an endpoint the page called before fails after the check: the next check lists it', async () => {
+  await open('/app.html?slowcalls=2');
+  await sleep(800);
+  await a.ok('browser_check_change', { action: 'baseline' });
+  await site.edit('slowpoll');
+  const first = await a.ok('browser_check_change', { action: 'check' });
+  await sleep(2500);
+  const second = await a.ok('browser_check_change', { action: 'check', timeout: 4 });
+  const failure = /new failed request: r\d+ {2}GET 500 fetch {2}http:\/\/127\.0\.0\.1:\d+\/api\/slow\?ms=2000&status=500&n=3/;
+  const listed = [first, second].filter(t => failure.test(t)).length;
+  assert.equal(listed, 1, `listed ${listed} times:\n--- first\n${first}\n--- second\n${second}`);
+});
+
+test("a request the previous document left unfinished does not hold the check open", async () => {
+  await open();
+  await a.ok('browser_check_change', { action: 'baseline' });
+  await site.edit('stalereload');
+  const text = await a.ok('browser_check_change', { action: 'check' });
+  assert.match(text, /after a full reload \(new document\), settled after ([\d.]+) (m?s)/, text);
+  const [, n, unit] = /settled after ([\d.]+) (m?s)/.exec(text);
+  assert.ok((unit === 'ms' ? Number(n) : Number(n) * 1000) < 4000, text);
+  assert.doesNotMatch(text, /requests were still running/, text);
+});
+
+test('after a reload, the next checks are named after what happened since the last check', async () => {
+  await open();
+  await a.ok('browser_check_change', { action: 'baseline' });
+  await site.edit('reload');
+  assert.match(await a.ok('browser_check_change', { action: 'check' }), /after a full reload \(new document\)/);
+  await site.edit('hmr');
+  const hot = await a.ok('browser_check_change', { action: 'check' });
+  assert.match(hot, /after a hot update \(Vite: \/src\/app\.js\)/, hot);
+  assert.doesNotMatch(hot, /Navigated:/);
+  await site.edit('same');
+  const same = await a.ok('browser_check_change', { action: 'check' });
+  assert.match(same, /^No update in tab-\d+ after [\d.]+ m?s: the dev server rebuilt, but nothing changed \("\[webpack-dev-server\] Nothing changed\."\)/, same);
+});
+
+test('a page busy for 4 s after a real update: waited for, and said', async () => {
+  await open();
+  await a.ok('browser_check_change', { action: 'baseline' });
+  await site.edit('busy');
+  const text = await a.ok('browser_check_change', { action: 'check' });
+  assert.match(text, /^Change in tab-\d+ after a hot update \(Vite: \/src\/app\.js\)/, text);
+  assert.match(text, /Note: the page was busy \(not answering\) for [3-5]\.\d s after the update/, text);
+});
+
+test('a carousel (2 s) and a feed (1.5 s) change on their own: no false update', async () => {
+  for (const page of ['/app.html?carousel=2000', '/app.html?feed=1500']) {
+    await open(page);
+    await a.ok('browser_check_change', { action: 'baseline' });
+    for (let i = 0; i < 2; i++) {
+      const text = await a.ok('browser_check_change', { action: 'check', timeout: 5 });
+      assert.match(text, /^No update reached/, `${page}, check ${i + 1}:\n${text}`);
+    }
+  }
+});
+
+test('a slow ticker (7 s) without an edit: a timeout, or a DOM-only result that says it may not be the edit', async () => {
+  await open('/app.html?ticker=7000');
+  await a.ok('browser_check_change', { action: 'baseline' });
+  for (let i = 0; i < 2; i++) {
+    const text = await a.ok('browser_check_change', { action: 'check', timeout: 8 });
+    assert.ok(/^No update reached/.test(text) || /DOM changes only, no dev-server message \(if this page changes on its own, this may not be your edit: check again, or use reload: true\)/.test(text), text);
   }
 });
 
