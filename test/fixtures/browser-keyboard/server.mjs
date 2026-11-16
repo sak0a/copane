@@ -4,10 +4,21 @@
 //
 //   index.html      known problems: no skip link, invisible focus, unreachable controls, tabindex=3,
 //                   shadow DOM, a same-origin and a cross-origin frame
-//   trap.html       a widget that keeps Tab inside; ?dialog opens a modal <dialog>
+//   trap.html       a widget that keeps Tab inside; ?dialog opens a modal <dialog>; ?first drops the
+//                   button before it (the trap holds stop 1)
 //   skip.html       a skip link whose target does not exist
 //   many.html       400 links (the step limit)
-//   frame.html      the frames' content (?same: a link; ?cross: a button without a focus style)
+//   frame.html      the frames' content (?same: a link; ?cross: a button without a focus style;
+//                   ?pair: a link and then a button without a focus style)
+//   opaque.html     a closed shadow root with three buttons and a same-site cross-origin frame
+//                   (serve it from localhost with `other` another localhost port)
+//   modal.html      an aria-modal dialog over the page; ?none leaves it closed
+//   forms.html      a disabled fieldset, visually hidden checkboxes (one with a ring on its label),
+//                   a text field with a selection, a same-origin frame (frame.html?pair)
+//   empty.html      nothing focusable
+//   bigtrap.html    a trap of 100 links
+//   nav.html        the second link's focus handler loads another page
+//   alert.html      the second button's focus handler opens an alert
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { dirname, extname, join, normalize } from 'node:path';
@@ -40,8 +51,15 @@ export async function startKeyboardServer({ port = 0, host = '127.0.0.1', other 
   return { port: actual, url: origin, close: () => new Promise(resolve => { server.closeAllConnections?.(); server.close(() => resolve()); }) };
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+/** The three servers the suite uses: the main site, a cross-site origin and a same-site one. */
+export async function startKeyboardServers() {
   const other = await startKeyboardServer({ host: 'localhost' });
-  const s = await startKeyboardServer({ port: Number(process.argv[2] ?? 0), other: other.url });
-  console.log(`keyboard fixtures: ${s.url} (cross-origin frames from ${other.url})`);
+  const site = await startKeyboardServer({ other: other.url });
+  const sameSite = await startKeyboardServer({ host: 'localhost', other: other.url });
+  return { site, other, sameSite, close: () => Promise.all([site.close(), other.close(), sameSite.close()]) };
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const s = await startKeyboardServers();
+  console.log(`keyboard fixtures: ${s.site.url} (cross-origin frames from ${s.other.url}; same-site frames: ${s.sameSite.url}/opaque.html)`);
 }

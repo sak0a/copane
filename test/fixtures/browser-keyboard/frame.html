@@ -6,7 +6,7 @@
 <style>
   body { font: 14px sans-serif; margin: 8px; }
   /* The cross-origin frame's button shows no focus at all: focus-not-visible. */
-  #chat, #chat:focus, #chat:focus-visible { outline: none; border: 1px solid #888; background: #eee; }
+  #chat, #chat:focus, #chat:focus-visible, #pairbutton, #pairbutton:focus, #pairbutton:focus-visible { outline: none; border: 1px solid #888; background: #eee; }
 </style>
 </head>
 <body>
@@ -14,6 +14,7 @@
 <script>
   const content = document.getElementById('content');
   if (location.search.includes('cross')) content.innerHTML = '<button id="chat" type="button">Open chat</button>';
+  else if (location.search.includes('pair')) content.innerHTML = '<a id="pairlink" href="#here">Pair link</a><button id="pairbutton" type="button">Pair button</button>';
   else content.innerHTML = '<a id="framelink" href="#here">Frame link</a>';
 </script>
 </body>

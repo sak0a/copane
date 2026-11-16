@@ -3,6 +3,7 @@
 // accessibility report (a11yReport.ts): impact, rule, WCAG criterion and level, what, fix, then the
 // elements with their refs. Pure, unit-tested.
 import { at, type Box } from './keyboardLogic';
+import { clip } from './ringBuffer';
 
 export type KbRuleId = 'keyboard-trap' | 'not-focusable' | 'focus-not-visible' | 'skip-link-missing' | 'skip-link-broken' | 'focus-order';
 
@@ -67,6 +68,8 @@ export interface KbProblem {
   what?: string;
   /** The elements, e.g. 'button "Search" [ref=e40]'; at most 8 are shown. */
   items: string[];
+  /** How many elements there are when not `count` (a trap is one problem with many members). */
+  itemTotal?: number;
 }
 
 export interface KbStopLine {
@@ -79,6 +82,8 @@ export interface KbStopLine {
   frame?: string;
   /** Focused by script instead of Tab (the start of the walk). */
   scripted?: boolean;
+  /** Further Tab stops inside it that cannot be told apart (a closed shadow root, a frame not entered). */
+  inside?: { count: number; what: string };
 }
 
 export type KbEnd =
@@ -93,7 +98,11 @@ export type KbEnd =
   /** Stopped at a keyboard trap found at this stop (1-based). */
   | { kind: 'trap'; stop: number }
   /** A region with no Tab stop: Tab from its start went to `next` (or nowhere). */
-  | { kind: 'empty'; next?: string };
+  | { kind: 'empty'; next?: string }
+  /** Nothing in the page takes focus with Tab. */
+  | { kind: 'none' }
+  /** Tab stayed inside a container the walk cannot see into for many presses; Shift+Tab gets out. */
+  | { kind: 'opaque'; label: string; presses: number };
 
 export interface KbInput {
   tabId: string;
@@ -111,11 +120,14 @@ export interface KbInput {
   notes: string[];
   /** DOM changes in the page while Tab was pressed (focus handlers). */
   pageChanges?: number;
+  /** The tab is not the active one in the editor: VS Code paints it rarely, which slows the walk. */
+  background?: boolean;
 }
 
 export const MAX_LISTED_STOPS = 40;
 const MAX_ITEMS = 8;
 const MAX_CHARS = 5000;
+const MAX_ITEM_CHARS = 300;
 const IMPACT = ['critical', 'serious', 'moderate'];
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -130,7 +142,7 @@ function head(r: KbInput): string {
   const docs = r.documents > 1 ? `, ${r.documents} documents` : '';
   const what = `Keyboard walk of ${r.tabId} (${r.scope}${docs})`;
   const seconds = `${(r.ms / 1000).toFixed(1)} s`;
-  const n = r.stops.length;
+  const n = stopCount(r.stops);
   const { total, text } = problemSummary(r.problems);
   const restored = r.notRestored ? `Focus could not be restored: ${r.notRestored}.` : 'Focus and scroll restored.';
   const incomplete = 'Unreachable elements and the skip link are not checked on an incomplete walk.';
@@ -147,45 +159,62 @@ function head(r: KbInput): string {
     case 'limit':
       return `${what}: stopped after ${n} Tab stops (the limit), ${seconds}, before getting back to the start. ${incomplete} Walk one region at a time (ref/selector of a section). ${soFar} ${restored}`;
     case 'time':
-      return `${what}: stopped after ${seconds} (the time limit) at stop ${n}. ${incomplete} Walk one region at a time (ref/selector of a section). ${soFar} ${restored}`;
+      return `${what}: stopped after ${seconds} (the time limit) at stop ${n}. ${incomplete} Walk one region at a time (ref/selector of a section)${r.background ? '; the tab is in the background, where VS Code paints it rarely: walks are faster when it is the visible tab' : ''}. ${soFar} ${restored}`;
     case 'trap':
       return `${what}: ${plural(n, 'Tab stop')}, ${seconds}; stopped at a keyboard trap (stop ${r.end.stop}); later stops and unreachable elements are not checked. ${plural(total, 'problem')}. ${restored}`;
     case 'empty':
       return `${what}: no Tab stop inside it (Tab from its start went to ${r.end.next ?? 'nothing'}), ${seconds}; ${text}. ${restored}`;
+    case 'none':
+      return `${what}: no Tab stops: nothing on the page takes focus with Tab, ${seconds}; ${text}. ${restored}`;
+    case 'opaque':
+      return `${what}: ${plural(n, 'Tab stop')}, ${seconds}; stopped after ${r.end.presses} Tab presses inside ${r.end.label}, whose inside cannot be inspected (Shift+Tab leaves it, so it is not a trap). Later stops and unreachable elements are not checked. ${soFar} ${restored}`;
   }
 }
 
-function stopLine(s: KbStopLine, i: number): string {
+/** Tab stops, counting those inside opaque containers. */
+const stopCount = (stops: KbStopLine[]) => stops.reduce((n, s) => n + 1 + (s.inside?.count ?? 0), 0);
+
+function stopLine(s: KbStopLine, number: number): string {
   const tabindex = s.tabindex ? ` tabindex=${s.tabindex}` : '';
   const frame = s.frame ? ` in ${s.frame}` : '';
   const scripted = s.scripted ? ' (focused by script)' : '';
-  return `${i + 1} ${s.label}${at(s.box)}${tabindex}${frame}${scripted}`;
+  const inside = s.inside ? `, then ${plural(s.inside.count, 'more stop')} inside it (${s.inside.what}: not inspected)` : '';
+  return `${number} ${s.label}${at(s.box)}${tabindex}${frame}${scripted}${inside}`;
 }
 
 function problemLines(p: KbProblem): string[] {
   const rule = KB_RULES[p.id];
   const out = [`- ${rule.impact} ${p.id} ×${p.count} [WCAG ${rule.wcag} ${rule.level}]: ${p.what ?? rule.what}. Fix: ${rule.fix}.`];
-  const shown = p.items.slice(0, MAX_ITEMS);
-  const more = p.count - shown.length;
+  const shown = p.items.slice(0, MAX_ITEMS).map(i => clip(i, MAX_ITEM_CHARS));
+  const more = (p.itemTotal ?? p.count) - shown.length;
   if (shown.length) out.push(`  ${shown.join('; ')}${more > 0 ? `; +${more} more` : ''}`);
   return out;
 }
 
+/** The result, at most about 5,000 characters: fewer listed stops first, then a cut. */
 export function formatKeyboard(r: KbInput): string {
+  let text = '';
   for (const listed of [MAX_LISTED_STOPS, 20, 10]) {
-    const text = compose(r, listed);
-    if (text.length <= MAX_CHARS || listed === 10) return text;
+    text = compose(r, listed);
+    if (text.length <= MAX_CHARS) return text;
   }
-  return compose(r, 10);
+  return `${text.slice(0, MAX_CHARS - 80).replace(/\n[^\n]*$/, '')}\n… (cut at ${MAX_CHARS} characters; walk a smaller region for the rest)`;
 }
 
 function compose(r: KbInput, listed: number): string {
   const lines = [head(r)];
   const n = r.stops.length;
   if (n) {
-    lines.push(n > listed ? `Focus order (page CSS px): first ${listed} of ${n}` : 'Focus order (page CSS px):');
-    r.stops.slice(0, listed).forEach((s, i) => lines.push(stopLine(s, i)));
-    if (n > listed) lines.push(`… ${n - listed} more stops (pass a region's ref/selector to list them).`);
+    const total = stopCount(r.stops);
+    const shown = r.stops.slice(0, listed);
+    const rest = total - stopCount(shown);
+    lines.push(rest > 0 ? `Focus order (page CSS px): first ${total - rest} of ${total}` : 'Focus order (page CSS px):');
+    let number = 1;
+    for (const s of shown) {
+      lines.push(stopLine(s, number));
+      number += 1 + (s.inside?.count ?? 0);
+    }
+    if (rest > 0) lines.push(`… ${rest} more stops (pass a region's ref/selector to list them).`);
   }
   const problems = [...r.problems].filter(p => p.count > 0).sort((a, b) => IMPACT.indexOf(KB_RULES[a.id].impact) - IMPACT.indexOf(KB_RULES[b.id].impact));
   for (const p of problems) lines.push(...problemLines(p));

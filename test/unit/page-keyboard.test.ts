@@ -1,17 +1,38 @@
+import { deflateSync, inflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { WalkTracker, focusShows, judgeSkipLink, orderJumps, signatureOf, type OrderStop, type RawStyle, type SkipStop, type StepVerdict } from '../../src/extension/browser/page/keyboardLogic';
+import {
+  MIN_CHANGED_PIXELS,
+  OPAQUE_LIMIT,
+  WalkTracker,
+  changedPixels,
+  decodePng,
+  decideEnd,
+  endNeeds,
+  focusShows,
+  judgeSkipLink,
+  orderJumps,
+  signatureOf,
+  splitInside,
+  type Observed,
+  type OrderStop,
+  type RawStyle,
+  type SkipStop,
+  type StepVerdict,
+} from '../../src/extension/browser/page/keyboardLogic';
 import { formatKeyboard, MAX_LISTED_STOPS, type KbInput } from '../../src/extension/browser/page/keyboardReport';
 
-/** Feeds keys to a tracker; returns the first verdict that is not "continue" (or the last) and the tracker. */
-function walk(keys: Array<string | undefined>): { verdict: StepVerdict; tracker: WalkTracker } {
+/** Feeds observations to a tracker (a plain string = a key); returns the first verdict that is not "continue" (or the last). */
+function walk(steps: Array<string | undefined | Observed>): { verdict: StepVerdict; tracker: WalkTracker } {
   const tracker = new WalkTracker();
   let verdict: StepVerdict = { kind: 'continue' };
-  for (const k of keys) {
-    verdict = tracker.push(k);
+  for (const s of steps) {
+    verdict = tracker.push(typeof s === 'object' ? s : { key: s });
     if (verdict.kind !== 'continue') break;
   }
   return { verdict, tracker };
 }
+const captured = (key: string): Observed => ({ key, captured: true });
+const opaque = (key: string): Observed => ({ key, opaque: true });
 
 describe('WalkTracker', () => {
   it('ends a full round when focus comes back to stop 1', () => {
@@ -24,11 +45,36 @@ describe('WalkTracker', () => {
     expect(walk(['a', 'b', undefined]).verdict).toEqual({ kind: 'left' });
   });
 
-  it('calls Tab captured only after focus stays put three times (one dropped key press is forgiven)', () => {
+  it('calls Tab captured only when the page took the key (preventDefault); a press that did not move focus otherwise is ignored', () => {
     expect(walk(['a', 'b', 'b', 'c', 'a']).verdict).toEqual({ kind: 'wrap' });
-    const { verdict, tracker } = walk(['a', 'b', 'b', 'b']);
+    expect(walk(['a', 'b', 'b', 'b', 'b', 'c', 'a']).verdict).toEqual({ kind: 'wrap' });
+    const { verdict, tracker } = walk(['a', 'b', captured('b')]);
     expect(verdict).toEqual({ kind: 'stuck', index: 1 });
     expect(tracker.stops).toEqual(['a', 'b']);
+  });
+
+  it('a captured Tab on the only stop is stuck, not a wrap (an editor that takes Tab)', () => {
+    expect(walk(['ed', captured('ed')]).verdict).toEqual({ kind: 'stuck', index: 0 });
+    expect(walk(['ed', 'ed', 'ed']).verdict).toEqual({ kind: 'continue' });
+  });
+
+  it('focus staying on an opaque container counts as stops inside it, and wraps and cycles as usual', () => {
+    const { verdict, tracker } = walk(['a', 'x', opaque('x'), opaque('x'), 'b', 'a']);
+    expect(verdict).toEqual({ kind: 'wrap' });
+    expect(tracker.stops).toEqual(['a', 'x', 'x~1', 'x~2', 'b']);
+    expect(splitInside('x~2')).toEqual({ key: 'x', inside: 2 });
+    expect(splitInside('top#12')).toEqual({ key: 'top#12', inside: 0 });
+    // An opaque container as stop 1 with stops inside it: the wrap is the next time focus reaches it from outside.
+    expect(walk(['F', opaque('F'), opaque('F'), 'b', 'F']).tracker.stops).toEqual(['F', 'F~1', 'F~2', 'b']);
+    // A cycle that goes through a container repeats its inside stops too.
+    expect(walk(['s', 'x', opaque('x'), 'y', 'x', opaque('x'), 'y', 'x']).verdict).toEqual({ kind: 'cycle', start: 1, length: 3 });
+  });
+
+  it('gives up on an element after OPAQUE_LIMIT presses that do not leave it', () => {
+    const inside = Array.from({ length: OPAQUE_LIMIT }, () => opaque('x'));
+    expect(walk(['a', 'x', ...inside]).verdict).toEqual({ kind: 'opaque', index: OPAQUE_LIMIT - 1 + 1 });
+    const still = Array.from({ length: OPAQUE_LIMIT }, () => 'x');
+    expect(walk(['a', 'x', ...still]).verdict).toEqual({ kind: 'opaque', index: 1 });
   });
 
   it('finds a cycle when the same stops follow again in the same order, and lists one round', () => {
@@ -45,6 +91,43 @@ describe('WalkTracker', () => {
 
   it('a two-stop cycle', () => {
     expect(walk(['a', 'b', 'c', 'b', 'c', 'b']).verdict).toEqual({ kind: 'cycle', start: 1, length: 2 });
+  });
+});
+
+describe('decideEnd', () => {
+  const facts = (verdict: Parameters<typeof decideEnd>[0]['verdict'], inModal: boolean[], extra: Partial<Parameters<typeof decideEnd>[0]> = {}) =>
+    decideEnd({ verdict, inModal, region: false, limitReached: false, ...extra });
+
+  it('a wrap on the whole page is complete only when no reachable stop was missed', () => {
+    expect(facts({ kind: 'wrap' }, [false, false, false])).toEqual({ kind: 'complete' });
+    // A trap holding stop 1: Tab goes b1, b2, b3, b1 while another button is reachable.
+    expect(facts({ kind: 'wrap' }, [false, false, false], { missedTabStop: true })).toEqual({ kind: 'cycle', start: 0, length: 3 });
+    expect(endNeeds({ kind: 'wrap' }, [false, false], false)).toBe('missed-stop');
+  });
+
+  it('focus kept inside a modal dialog (native or aria-modal) is contained, whether it wraps or cycles', () => {
+    expect(facts({ kind: 'wrap' }, [true, true, true])).toEqual({ kind: 'modal' });
+    expect(facts({ kind: 'cycle', start: 2, length: 3 }, [false, false, true, true, true])).toEqual({ kind: 'modal' });
+    expect(facts({ kind: 'cycle', start: 1, length: 2 }, [false, false, false])).toEqual({ kind: 'cycle', start: 1, length: 2 });
+    expect(endNeeds({ kind: 'wrap' }, [true, true], false)).toBeUndefined();
+  });
+
+  it('a region that wraps is a trap unless it holds the page start', () => {
+    expect(facts({ kind: 'wrap' }, [false, false], { region: true })).toEqual({ kind: 'cycle', start: 0, length: 2 });
+    expect(facts({ kind: 'wrap' }, [false, false], { region: true, regionHoldsPageStart: true })).toEqual({ kind: 'complete' });
+    expect(endNeeds({ kind: 'wrap' }, [false], true)).toBe('region-start');
+    expect(facts({ kind: 'outside' }, [false], { region: true })).toEqual({ kind: 'left-region' });
+    expect(facts({ kind: 'outside' }, [], { region: true })).toEqual({ kind: 'empty' });
+  });
+
+  it('no stops at all, limits, stuck and opaque', () => {
+    expect(facts({ kind: 'left' }, [])).toEqual({ kind: 'none' });
+    expect(facts({ kind: 'wrap' }, [])).toEqual({ kind: 'none' });
+    expect(facts({ kind: 'continue' }, [false], { limitReached: true })).toEqual({ kind: 'limit' });
+    expect(facts({ kind: 'continue' }, [false])).toEqual({ kind: 'time' });
+    expect(facts({ kind: 'stuck', index: 0 }, [false])).toEqual({ kind: 'stuck', index: 0 });
+    expect(facts({ kind: 'opaque', index: 1 }, [false, false])).toEqual({ kind: 'opaque', index: 1 });
+    expect(endNeeds({ kind: 'left' }, [false], false)).toBeUndefined();
   });
 });
 
@@ -230,5 +313,107 @@ describe('formatKeyboard', () => {
     expect(text).toContain('Focus could not be restored: the page navigated.');
     expect(text).toContain('The page changed while Tab was pressed (4 DOM changes)');
     expect(text).toContain('Stop 1 was focused by script.');
+  });
+
+  it('no Tab stops, and a walk stopped inside a container that cannot be seen into', () => {
+    expect(formatKeyboard(input({ stops: [], end: { kind: 'none' } })).split('\n')[0]).toBe(
+      'Keyboard walk of tab-2 (whole page): no Tab stops: nothing on the page takes focus with Tab, 1.6 s; no problems found. Focus and scroll restored.',
+    );
+    const head = formatKeyboard(input({ end: { kind: 'opaque', label: '<x-c> [ref=e3] (a closed shadow root)', presses: 50 } })).split('\n')[0];
+    expect(head).toContain('stopped after 50 Tab presses inside <x-c> [ref=e3] (a closed shadow root), whose inside cannot be inspected (Shift+Tab leaves it, so it is not a trap)');
+  });
+
+  it('stops inside an opaque container are folded into it and counted', () => {
+    const text = formatKeyboard(
+      input({ stops: [{ label: 'button "First" [ref=e1]' }, { label: '<x-c> [ref=e2]', inside: { count: 2, what: 'a closed shadow root' } }, { label: 'button "Last" [ref=e3]' }] }),
+    );
+    expect(text.split('\n')[0]).toContain(': 5 Tab stops, back to the start');
+    expect(text).toContain('2 <x-c> [ref=e2], then 2 more stops inside it (a closed shadow root: not inspected)');
+    expect(text).toContain('5 button "Last" [ref=e3]');
+  });
+
+  it('a large trap lists 8 members and "+N more", and the whole result stays under 5,000 characters', () => {
+    const members = Array.from({ length: 100 }, (_, i) => `link "Menu entry number ${i + 1}" [ref=e${i + 10}]`);
+    const text = formatKeyboard(
+      input({
+        stops: stops(101).map((s, i) => ({ ...s, label: `link "Menu entry number ${i}" with a long name for this test [ref=e${i + 10}]` })),
+        end: { kind: 'trap', stop: 2 },
+        problems: [{ id: 'keyboard-trap', count: 1, what: 'Tab cycles inside navigation "Big menu" [ref=e9] through 100 stops; Shift+Tab cannot leave it either', items: members, itemTotal: 100 }],
+      }),
+    );
+    expect(text).toContain('link "Menu entry number 8" [ref=e17]; +92 more');
+    expect(text).not.toContain('Menu entry number 9" [ref=e18];');
+    expect(text.length).toBeLessThanOrEqual(5000);
+    const huge = formatKeyboard(input({ problems: Array.from({ length: 40 }, (_, i) => ({ id: 'focus-order' as const, count: 1, what: 'x'.repeat(200), items: ['y'.repeat(400)] })).slice(0, 40) }));
+    expect(huge.length).toBeLessThanOrEqual(5000);
+    expect(huge).toMatch(/cut at 5000 characters/);
+  });
+
+  it('the time-limit head says when the tab is in the background', () => {
+    expect(formatKeyboard(input({ stops: stops(20), end: { kind: 'time' }, ms: 30_000, background: true })).split('\n')[0]).toContain('the tab is in the background, where VS Code paints it rarely');
+  });
+});
+
+describe('pixel comparison (decodePng, changedPixels)', () => {
+  /** Encodes an RGB(A) image as a PNG, filtering row y with filters[y % filters.length] (0 None … 4 Paeth). */
+  function encode(width: number, height: number, channels: 3 | 4, pixel: (x: number, y: number) => number[], filters = [0, 1, 2, 3, 4], depth = 8): Uint8Array {
+    const stride = width * channels;
+    const img = Array.from({ length: height }, (_, y) => Uint8Array.from(Array.from({ length: width }, (_, x) => pixel(x, y).slice(0, channels)).flat()));
+    const raw: number[] = [];
+    for (let y = 0; y < height; y++) {
+      const f = filters[y % filters.length]!;
+      raw.push(f);
+      for (let x = 0; x < stride; x++) {
+        const v = img[y]![x]!;
+        const a = x >= channels ? img[y]![x - channels]! : 0;
+        const b = y > 0 ? img[y - 1]![x]! : 0;
+        const c = x >= channels && y > 0 ? img[y - 1]![x - channels]! : 0;
+        const p = a + b - c;
+        const paeth = Math.abs(p - a) <= Math.abs(p - b) && Math.abs(p - a) <= Math.abs(p - c) ? a : Math.abs(p - b) <= Math.abs(p - c) ? b : c;
+        const pred = [0, a, b, (a + b) >> 1, paeth][f]!;
+        raw.push((v - pred) & 255);
+      }
+    }
+    const chunk = (type: string, body: Uint8Array) => {
+      const out = Buffer.alloc(12 + body.length);
+      out.writeUInt32BE(body.length, 0);
+      out.write(type, 4, 'latin1');
+      Buffer.from(body).copy(out, 8);
+      return out;
+    };
+    const ihdr = Buffer.alloc(13);
+    ihdr.writeUInt32BE(width, 0);
+    ihdr.writeUInt32BE(height, 4);
+    ihdr[8] = depth;
+    ihdr[9] = channels === 4 ? 6 : 2;
+    return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(Buffer.from(raw))), chunk('IEND', new Uint8Array())]);
+  }
+  const gradient = (x: number, y: number) => [(x * 37 + y * 11) & 255, (x * 5 + y * 71) & 255, (x * y * 13) & 255, 255];
+
+  it('decodes RGBA and RGB with all five filters', () => {
+    for (const channels of [3, 4] as const) {
+      const img = decodePng(encode(9, 10, channels, gradient), inflateSync)!;
+      expect(img).toMatchObject({ width: 9, height: 10, channels });
+      for (const [x, y] of [[0, 0], [8, 9], [4, 3], [7, 4]] as const) {
+        expect([...img.data.subarray((y * 9 + x) * channels, (y * 9 + x) * channels + 3)]).toEqual(gradient(x, y).slice(0, 3));
+      }
+    }
+  });
+
+  it('refuses what it cannot read', () => {
+    expect(decodePng(encode(4, 4, 4, gradient, [0], 16), inflateSync)).toBeUndefined();
+    expect(decodePng(new Uint8Array([1, 2, 3]), inflateSync)).toBeUndefined();
+  });
+
+  it('a stray anti-aliased pixel is not a change; a focus ring is', () => {
+    const white = () => [255, 255, 255, 255];
+    const base = decodePng(encode(40, 20, 4, white), inflateSync)!;
+    // What a real capture showed: one pixel of the neighbouring link's text at (250,250,255) instead of white.
+    const noise = decodePng(encode(40, 20, 4, (x, y) => (x === 15 && y === 12 ? [250, 250, 255, 255] : white())), inflateSync)!;
+    expect(changedPixels(base, noise)).toBe(0);
+    const ring = decodePng(encode(40, 20, 4, (x, y) => (y === 2 && x >= 2 && x < 38 ? [0, 0, 255, 255] : white())), inflateSync)!;
+    expect(changedPixels(base, ring)).toBe(36);
+    expect(changedPixels(base, ring)! >= MIN_CHANGED_PIXELS).toBe(true);
+    expect(changedPixels(base, decodePng(encode(41, 20, 4, white), inflateSync)!)).toBeUndefined();
   });
 });

@@ -4,27 +4,31 @@
 //   node test/e2e/browser-keyboard.e2e.mjs --name kbd [--only <text>]
 //
 // The fixture pages (test/fixtures/browser-keyboard) have known problems: no skip link, focus that does
-// not show, controls Tab never reaches, a positive tabindex, a keyboard trap, a modal dialog, a broken
-// skip link, and 400 links for the step limit. They are served on 127.0.0.1, with the cross-origin
-// frame on localhost (another site, so another process: a frame target).
-import { startKeyboardServer } from '../fixtures/browser-keyboard/server.mjs';
+// not show, controls Tab never reaches, a positive tabindex, keyboard traps, a modal dialog, a broken
+// skip link, 400 links for the step limit, and pages for the walk's edge cases (closed shadow roots,
+// frames it cannot read, aria-modal, hidden inputs, focus handlers that navigate or alert). The main
+// site is 127.0.0.1; the cross-origin frame comes from localhost (another site, so another process: a
+// frame target); opaque.html is served from a second localhost port, so its frame is cross-origin but
+// the same site (same process, not readable from the page).
+import { startKeyboardServers } from '../fixtures/browser-keyboard/server.mjs';
 import { agent, assert, run, test } from './harness.mjs';
 
-const other = await startKeyboardServer({ host: 'localhost' });
-const site = await startKeyboardServer({ other: other.url });
+const servers = await startKeyboardServers();
+const { site, sameSite } = servers;
 
 const a = await agent({ session: `browser-keyboard-${Date.now()}` });
 
 let tab;
-async function open(path) {
+async function open(url) {
+  const full = url.startsWith('http') ? url : `${site.url}${url}`;
   if (!tab) {
-    const text = await a.ok('browser_open', { url: `${site.url}${path}`, background: true });
+    const text = await a.ok('browser_open', { url: full, background: true });
     tab = /Opened (tab-\d+)/.exec(text)?.[1];
     assert.ok(tab, `no tab id in: ${text}`);
     await a.ok('browser_wait_for', { loadState: 'load' });
     return text;
   }
-  const text = await a.ok('browser_navigate', { url: `${site.url}${path}` });
+  const text = await a.ok('browser_navigate', { url: full });
   await a.ok('browser_wait_for', { loadState: 'load' });
   return text;
 }
@@ -34,7 +38,13 @@ const opened = await open('/index.html');
 const isolated = /A frame navigated to http:\/\/localhost/.test(opened) ? undefined : 'needs site isolation (localhost and 127.0.0.1 as separate sites)';
 
 const has = (text, part) => assert.ok(text.includes(part), `expected the result to contain\n  ${part}\nbut it is:\n${text}`);
+const hasNot = (text, part) => assert.ok(!text.includes(part), `expected the result not to contain\n  ${part}\nbut it is:\n${text}`);
 const refOf = (line) => /\[ref=(e\d+)\]/.exec(line)?.[1];
+const problemLine = (text, id) => {
+  const lines = text.split('\n');
+  const i = lines.findIndex(l => l.startsWith(`- `) && l.includes(` ${id} `));
+  return i < 0 ? '' : `${lines[i]}\n${lines[i + 1] ?? ''}`;
+};
 
 let whole;
 
@@ -59,14 +69,23 @@ test('whole page: every planted problem with its WCAG criterion, shadow DOM and 
   has(whole, '(jumps ');
   const search = lines.find(l => /^\d+ button "Search"/.test(l));
   assert.ok(search, `no Search stop:\n${whole}`);
-  const invisible = lines[lines.findIndex(l => l.includes('focus-not-visible')) + 1];
-  has(invisible, `button "Search" [ref=${refOf(search)}]`);
+  has(problemLine(whole, 'focus-not-visible'), `button "Search" [ref=${refOf(search)}]`);
 });
 
-test('whole page: the cross-origin frame is walked into, its focus style checked by style', async () => {
+test('whole page: the cross-origin frame is walked into and its invisible focus found', async () => {
   if (!whole) whole = await a.ok('browser_audit', { type: 'keyboard' });
   assert.match(whole, /\d+ button "Open chat" \[ref=e\d+\] \(\d+,\d+\) in the frame http:\/\/localhost:\d+\/frame\.html/);
-  assert.match(whole, /button "Open chat" \[ref=e\d+\] \(in the frame http:\/\/localhost:\d+\/frame\.html; style check only\)/);
+  assert.match(problemLine(whole, 'focus-not-visible'), /button "Open chat" \[ref=e\d+\]/);
+}, { skip: isolated });
+
+test('a cross-origin frame that had focus before (a click inside it) is still walked', async () => {
+  await open('/index.html');
+  await a.ok('browser_click', { selector: "iframe[title='Cross-origin frame'] >>> #chat" });
+  await a.ok('browser_evaluate', { function: '() => { document.activeElement.blur(); return 1; }' });
+  const text = await a.ok('browser_audit', { type: 'keyboard' });
+  assert.match(text.split('\n')[0], /\(whole page, 3 documents\): 14 Tab stops, back to the start/);
+  assert.match(problemLine(text, 'focus-not-visible'), /button "Open chat"/);
+  hasNot(problemLine(text, 'not-focusable'), 'Open chat');
 }, { skip: isolated });
 
 test('refs from the result work with browser_click', async () => {
@@ -92,6 +111,15 @@ test('focus, scroll and selection are put back', async () => {
   assert.equal(none, '[0,true]');
 });
 
+test('a closed shadow root and a same-site frame: their stops are seen, not taken for a trap', async () => {
+  await open(`${sameSite.url}/opaque.html`);
+  const text = await a.ok('browser_audit', { type: 'keyboard' });
+  assert.match(text.split('\n')[0], /: 6 Tab stops, back to the start/);
+  for (const name of ['First', 'One', 'Two', 'Three', 'Open chat', 'Last']) assert.match(text, new RegExp(`\\n\\d+ button "${name}"`));
+  has(text, 'button "Open chat" [ref=');
+  hasNot(text, 'keyboard-trap');
+});
+
 test('keyboard trap: Tab and Shift+Tab stay inside the widget', async () => {
   await open('/trap.html');
   const text = await a.ok('browser_audit', { type: 'keyboard' });
@@ -99,6 +127,24 @@ test('keyboard trap: Tab and Shift+Tab stay inside the widget', async () => {
   assert.match(text, /- critical keyboard-trap ×1 \[WCAG 2\.1\.2 A\]: Tab cycles inside group "Chat" \[ref=e\d+\] through 3 stops; Shift\+Tab cannot leave it either\./);
   has(text, 'textbox "Message"');
   has(text, 'button "Close"');
+  hasNot(text, 'DOM change');
+});
+
+test('a trap that holds stop 1 is a trap, not a complete walk', async () => {
+  await open('/trap.html?first');
+  const text = await a.ok('browser_audit', { type: 'keyboard' });
+  has(text, 'stopped at a keyboard trap (stop 1)');
+  has(text, 'Shift+Tab cannot leave it either');
+  hasNot(text, 'not-focusable');
+  hasNot(text, 'back to the start');
+});
+
+test('a large trap stays readable: 8 members and "+N more", under 5,000 characters', async () => {
+  await open('/bigtrap.html');
+  const text = await a.ok('browser_audit', { type: 'keyboard' }, { timeoutMs: 90_000 });
+  has(text, 'keyboard-trap');
+  has(text, '; +92 more');
+  assert.ok(text.length <= 5000, `${text.length} characters`);
 });
 
 test('a modal dialog given as the region keeps focus inside, as it should', async () => {
@@ -109,7 +155,56 @@ test('a modal dialog given as the region keeps focus inside, as it should', asyn
   const text = await a.ok('browser_audit', { type: 'keyboard', ref });
   has(text, `(only dialog "Delete project?" [ref=${ref}]): 2 Tab stops; focus stays inside the modal dialog, as it should`);
   has(text, 'No problems found.');
-  assert.ok(!text.includes('keyboard-trap'), text);
+  hasNot(text, 'keyboard-trap');
+});
+
+test('an aria-modal dialog: contained, and the page behind it is not reported unreachable', async () => {
+  await open('/modal.html');
+  const text = await a.ok('browser_audit', { type: 'keyboard' });
+  has(text, 'focus stays inside the modal dialog, as it should');
+  hasNot(text, 'not-focusable');
+  hasNot(text, 'Behind');
+});
+
+test('forms: disabled fieldsets are not unreachable; hidden inputs judged by their label; selections kept', async () => {
+  await open('/forms.html');
+  const text = await a.ok('browser_audit', { type: 'keyboard' });
+  hasNot(text, 'Disabled inside');
+  hasNot(text, 'Disabled field');
+  const invisible = problemLine(text, 'focus-not-visible');
+  has(invisible, 'checkbox "Bad switch"');
+  has(invisible, '(the input itself is visually hidden; nothing near it shows focus)');
+  hasNot(invisible, 'Good switch');
+  const selection = await a.ok('browser_evaluate', { function: "() => { const t = document.getElementById('text'); return JSON.stringify([t.selectionStart, t.selectionEnd]); }" });
+  assert.equal(selection, '[2,5]');
+});
+
+test('pixel checks are repeatable (10 walks): invisible focus in a same-origin frame, a ring only pixels show', async () => {
+  await open('/forms.html');
+  let found = 0;
+  let wrong = 0;
+  for (let i = 0; i < 10; i++) {
+    const text = await a.ok('browser_audit', { type: 'keyboard' });
+    const invisible = problemLine(text, 'focus-not-visible');
+    if (invisible.includes('button "Pair button"')) found++;
+    else console.log(`      run ${i + 1} missed the Pair button:\n${text}`);
+    // Its ring is drawn by a great-grandparent (:focus-within), which only the pictures show.
+    if (invisible.includes('Deep ring')) {
+      wrong++;
+      console.log(`      run ${i + 1} flagged Deep ring:\n${text}`);
+    }
+  }
+  console.log(`      Pair button flagged in ${found} of 10 walks; Deep ring wrongly flagged in ${wrong} of 10`);
+  assert.equal(found, 10);
+  assert.equal(wrong, 0);
+});
+
+test('a page with nothing focusable: no Tab stops (the bridge\'s own indicator is never one)', async () => {
+  await open('/empty.html');
+  const text = await a.ok('browser_audit', { type: 'keyboard' });
+  has(text, 'no Tab stops: nothing on the page takes focus with Tab');
+  hasNot(text, 'Focus order');
+  has(problemLine(text, 'not-focusable'), 'Pretend button');
 });
 
 test('a skip link whose target does not exist', async () => {
@@ -117,7 +212,7 @@ test('a skip link whose target does not exist', async () => {
   const text = await a.ok('browser_audit', { type: 'keyboard' });
   assert.match(text, /- moderate skip-link-broken ×1 \[WCAG 2\.4\.1 A\]: the skip link goes nowhere: nothing on the page has id "content"\./);
   assert.match(text, /\n {2}link "Skip to content" \[ref=e\d+\]/);
-  assert.ok(!text.includes('skip-link-missing'), text);
+  hasNot(text, 'skip-link-missing');
 });
 
 test('a long page stops at the step limit and says so', async () => {
@@ -127,6 +222,40 @@ test('a long page stops at the step limit and says so', async () => {
   has(text, 'Focus order (page CSS px): first 40 of 250');
   has(text, '… 210 more stops');
   assert.ok(text.length < 5000, `${text.length} characters`);
+});
+
+test('a focus handler that navigates: the error names the last stop, and the tab stays usable', async () => {
+  await open('/nav.html');
+  const r = await a.call('browser_audit', { type: 'keyboard' });
+  assert.ok(r.isError, r.text);
+  has(r.text, 'navigated while Tab was pressed after stop 1 (link "One" [ref=');
+  await a.ok('browser_wait_for', { loadState: 'load' });
+  const snap = await a.ok('browser_snapshot');
+  has(snap, 'skip.html');
+});
+
+test('a focus handler that opens an alert: the error says where the walk stopped', async () => {
+  await open('/alert.html');
+  const r = await a.call('browser_audit', { type: 'keyboard' });
+  assert.ok(r.isError, r.text);
+  has(r.text, 'alert dialog');
+  has(r.text, 'The keyboard walk stopped after stop 1 (button "One" [ref=');
+  has(r.text, 'focus and scroll were not restored');
+  await a.ok('browser_handle_dialog', { accept: true });
+});
+
+test('under device emulation, focus is judged by style only and the emulation stays', async () => {
+  await open('/index.html');
+  await a.ok('browser_emulate', { preset: 'pixel-8' });
+  try {
+    const before = await a.ok('browser_evaluate', { function: '() => innerWidth' });
+    const text = await a.ok('browser_audit', { type: 'keyboard' });
+    has(problemLine(text, 'focus-not-visible'), 'style check only: device emulation');
+    const after = await a.ok('browser_evaluate', { function: '() => innerWidth' });
+    assert.equal(after, before);
+  } finally {
+    await a.ok('browser_emulate', { reset: true });
+  }
 });
 
 test('reload is refused; a second session is refused while the first holds the tab', async () => {
@@ -139,7 +268,7 @@ test('reload is refused; a second session is refused while the first holds the t
   try {
     const busy = await b.call('browser_audit', { type: 'keyboard', tab });
     assert.ok(busy.isError, `the second session was let in:\n${busy.text}`);
-    assert.match(busy.text, /Claude|session|control|busy|using/i);
+    assert.match(busy.text, /is being controlled by/);
     // Reading stays open to it.
     await b.ok('browser_audit', { type: 'accessibility', tab });
   } finally {
@@ -154,5 +283,5 @@ test('cleanup: close the tab', async () => {
 try {
   await run();
 } finally {
-  await Promise.all([site.close(), other.close()]);
+  await servers.close();
 }

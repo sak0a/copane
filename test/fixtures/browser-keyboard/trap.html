@@ -27,6 +27,7 @@
   const last = document.getElementById('close');
   last.addEventListener('keydown', e => { if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); first.focus(); } });
   first.addEventListener('keydown', e => { if (e.key === 'Tab' && e.shiftKey) { e.preventDefault(); last.focus(); } });
+  if (location.search.includes('first')) document.getElementById('before').remove();
   if (location.search.includes('dialog')) document.getElementById('confirm').showModal();
 </script>
 </body>
