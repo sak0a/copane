@@ -1,11 +1,10 @@
-import { deflateSync, inflateSync } from 'node:zlib';
+import { deflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import {
   MIN_CHANGED_PIXELS,
   OPAQUE_LIMIT,
   WalkTracker,
   changedPixels,
-  decodePng,
   decideEnd,
   endNeeds,
   focusShows,
@@ -19,6 +18,7 @@ import {
   type SkipStop,
   type StepVerdict,
 } from '../../src/extension/browser/page/keyboardLogic';
+import { decodePng } from '../../src/extension/browser/page/png';
 import { formatKeyboard, MAX_LISTED_STOPS, type KbInput } from '../../src/extension/browser/page/keyboardReport';
 
 /** Feeds observations to a tracker (a plain string = a key); returns the first verdict that is not "continue" (or the last). */
@@ -383,7 +383,7 @@ describe('formatKeyboard', () => {
   });
 });
 
-describe('pixel comparison (decodePng, changedPixels)', () => {
+describe('pixel comparison (changedPixels)', () => {
   /** Encodes an RGB(A) image as a PNG, filtering row y with filters[y % filters.length] (0 None … 4 Paeth). */
   function encode(width: number, height: number, channels: 3 | 4, pixel: (x: number, y: number) => number[], filters = [0, 1, 2, 3, 4], depth = 8): Uint8Array {
     const stride = width * channels;
@@ -419,30 +419,15 @@ describe('pixel comparison (decodePng, changedPixels)', () => {
   }
   const gradient = (x: number, y: number) => [(x * 37 + y * 11) & 255, (x * 5 + y * 71) & 255, (x * y * 13) & 255, 255];
 
-  it('decodes RGBA and RGB with all five filters', () => {
-    for (const channels of [3, 4] as const) {
-      const img = decodePng(encode(9, 10, channels, gradient), inflateSync)!;
-      expect(img).toMatchObject({ width: 9, height: 10, channels });
-      for (const [x, y] of [[0, 0], [8, 9], [4, 3], [7, 4]] as const) {
-        expect([...img.data.subarray((y * 9 + x) * channels, (y * 9 + x) * channels + 3)]).toEqual(gradient(x, y).slice(0, 3));
-      }
-    }
-  });
-
-  it('refuses what it cannot read', () => {
-    expect(decodePng(encode(4, 4, 4, gradient, [0], 16), inflateSync)).toBeUndefined();
-    expect(decodePng(new Uint8Array([1, 2, 3]), inflateSync)).toBeUndefined();
-  });
-
   it('a stray anti-aliased pixel is not a change; a focus ring is', () => {
     const white = () => [255, 255, 255, 255];
-    const base = decodePng(encode(40, 20, 4, white), inflateSync)!;
+    const base = decodePng(encode(40, 20, 4, white));
     // What a real capture showed: one pixel of the neighbouring link's text at (250,250,255) instead of white.
-    const noise = decodePng(encode(40, 20, 4, (x, y) => (x === 15 && y === 12 ? [250, 250, 255, 255] : white())), inflateSync)!;
+    const noise = decodePng(encode(40, 20, 4, (x, y) => (x === 15 && y === 12 ? [250, 250, 255, 255] : white())));
     expect(changedPixels(base, noise)).toBe(0);
-    const ring = decodePng(encode(40, 20, 4, (x, y) => (y === 2 && x >= 2 && x < 38 ? [0, 0, 255, 255] : white())), inflateSync)!;
+    const ring = decodePng(encode(40, 20, 4, (x, y) => (y === 2 && x >= 2 && x < 38 ? [0, 0, 255, 255] : white())));
     expect(changedPixels(base, ring)).toBe(36);
     expect(changedPixels(base, ring)! >= MIN_CHANGED_PIXELS).toBe(true);
-    expect(changedPixels(base, decodePng(encode(41, 20, 4, white), inflateSync)!)).toBeUndefined();
+    expect(changedPixels(base, decodePng(encode(41, 20, 4, white)))).toBeUndefined();
   });
 });

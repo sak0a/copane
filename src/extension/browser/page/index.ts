@@ -27,6 +27,7 @@ import { Recorder } from './recorder';
 import { RefStore } from './refs';
 import { scriptTools } from './scriptTools';
 import { snapshotTools } from './snapshotTools';
+import { originalLocation } from './source';
 import { testExportTools } from './testExportTool';
 import { waitTools } from './waitTools';
 
@@ -113,7 +114,7 @@ export function registerPageTools(services: BridgeServices, host: TabInfoHost, e
       ...inspectTools(env),
       ...testExportTools(env, recorder),
       ...auditTools(env),
-      ...changeTools(env),
+      ...changeTools(env, { locate: originalLocation }),
       ...debugCdpTools(services),
     ]),
   );

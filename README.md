@@ -94,7 +94,7 @@ Tools appear in Claude Code as `mcp__copane__<name>`.
 | Acting on a page | `browser_click`, `browser_type`, `browser_fill_form` (also selects options), `browser_press_key`, `browser_hover`, `browser_scroll`, `browser_drag`, `browser_upload_file`, `browser_handle_dialog`, `browser_evaluate` |
 | Debugging a page | `browser_console_messages`, `browser_network_requests` (with `id`: one request's headers and bodies; with `har`: a HAR file), `browser_route` (mock, fail or delay requests) |
 | Devices and files | `browser_emulate` (phone and tablet sizes, dark mode, locale, time zone, slow or offline network, slow CPU), `browser_downloads` |
-| Testing and audits | `browser_audit` (accessibility with WCAG criteria, performance), `browser_export_test` (the agent's actions as a Playwright test) |
+| Testing and audits | `browser_audit` (accessibility with WCAG criteria, keyboard walk, performance), `browser_inspect` (the component and file:line that render an element), `browser_check_change` (what a code change did to the page), `browser_export_test` (the agent's actions as a Playwright test) |
 | Terminals | `terminal_run`, `terminal_read`, `terminal_wait`, `terminal_send`, `terminal_interrupt`, `terminal_request_user_input` (hand a login or prompt to the user), `terminal_create`, `terminal_list`, `terminal_close` |
 
 The session indicator in a page can be dragged to any corner; it stays there for that tab and new
@@ -137,6 +137,16 @@ WCAG asks for (roughly a third to a half): a clean report is not a conformance s
 performance mode reports load timing, Web Vitals, the slowest and largest requests, long tasks and
 render-blocking resources. `browser_export_test` turns what the agent did in a tab into a
 Playwright test you can keep.
+
+**Keyboard, source, and checking a change.** `browser_audit` with `type: "keyboard"` presses Tab
+through the page like a keyboard user and reports the focus order, focus that is not visible,
+keyboard traps, controls Tab never reaches and a missing or broken skip link, each with its WCAG
+criterion; focus and scroll are put back afterwards. `browser_inspect` tells which component and
+file:line in your workspace render an element (React, Vue and Svelte in development builds,
+inspector plugin attributes; bundled locations go through source maps). `browser_check_change`
+takes a baseline before the agent edits code and afterwards waits for the hot update or reload and
+reports only what it changed: new errors with their source lines, failed requests, a navigation or
+crash, and the changed regions of the screenshot.
 
 **Network recording and throttling.** `browser_network_requests` with `har: "network.har"` writes
 the tab's requests, including those of iframes from other sites, as a HAR 1.2 file you can open in

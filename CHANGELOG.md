@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Keyboard walk** (`browser_audit` with `type: "keyboard"`): presses Tab through the page and
+  reports the focus order, focus that is not visible, keyboard traps, controls Tab never reaches, a
+  missing or broken skip link and focus jumps, each with its WCAG criterion, element ref and fix.
+  Follows focus into shadow DOM and frames; focus, scroll and selection are restored.
+- **Element to source** (`browser_inspect`): the components that render an element, innermost
+  first, with workspace file:line, for React, Vue 2/3 and Svelte development builds and inspector
+  plugin attributes; bundled locations are resolved through source maps.
+- **Check after a code change** (`browser_check_change`): a baseline before editing, then only what
+  changed once the hot update or reload settled: new errors with source locations, failed requests,
+  navigation or crash, changed screenshot regions with the after-screenshot. Works with Vite and
+  webpack hot updates and plain reloads.
 - While a tab was being replaced after a window reload, the tab list could briefly show the
   replacement as an extra tab with a new id.
 

@@ -1,6 +1,7 @@
 // The decisions of the keyboard walk (keyboard.ts), kept free of CDP: when the walk is over and how it
 // ended (back at the start, stuck, cycling, contained in a modal), whether focus showed, which steps
 // jump against the reading order, and whether the skip link is missing or broken. Pure, unit-tested.
+import type { RgbaImage } from './png';
 
 /** A box in page CSS px (document coordinates of the top page). */
 export interface Box {
@@ -233,88 +234,17 @@ export function focusShows(focused: Array<RawStyle | null>, unfocused: Array<Raw
   return false;
 }
 
-/** An 8-bit RGB or RGBA image: `channels` bytes per pixel, rows top to bottom. */
-export interface Pixels {
-  width: number;
-  height: number;
-  channels: 3 | 4;
-  data: Uint8Array;
-}
-
-/**
- * Decodes a PNG as the browser's screenshots are written: 8-bit RGB or RGBA, not interlaced (anything
- * else gives undefined). Inflating is passed in (`zlib.inflateSync`) so this stays free of Node.
- */
-export function decodePng(png: Uint8Array, inflate: (data: Uint8Array) => Uint8Array): Pixels | undefined {
-  const sig = [137, 80, 78, 71, 13, 10, 26, 10];
-  if (png.length < 33 || sig.some((b, i) => png[i] !== b)) return undefined;
-  const u32 = (i: number) => ((png[i]! << 24) | (png[i + 1]! << 16) | (png[i + 2]! << 8) | png[i + 3]!) >>> 0;
-  let width = 0;
-  let height = 0;
-  let channels: 3 | 4 = 4;
-  const parts: Uint8Array[] = [];
-  for (let pos = 8; pos + 8 <= png.length; ) {
-    const length = u32(pos);
-    const type = String.fromCharCode(png[pos + 4]!, png[pos + 5]!, png[pos + 6]!, png[pos + 7]!);
-    const body = png.subarray(pos + 8, pos + 8 + length);
-    if (type === 'IHDR') {
-      width = u32(pos + 8);
-      height = u32(pos + 12);
-      const depth = body[8];
-      const colour = body[9];
-      if (depth !== 8 || (colour !== 2 && colour !== 6) || body[12] !== 0) return undefined;
-      channels = colour === 6 ? 4 : 3;
-    } else if (type === 'IDAT') parts.push(body);
-    else if (type === 'IEND') break;
-    pos += 12 + length;
-  }
-  if (!width || !height || width * height > 4_000_000) return undefined;
-  const joined = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
-  let offset = 0;
-  for (const p of parts) {
-    joined.set(p, offset);
-    offset += p.length;
-  }
-  const raw = inflate(joined);
-  const stride = width * channels;
-  if (raw.length < height * (stride + 1)) return undefined;
-  const data = new Uint8Array(height * stride);
-  for (let y = 0; y < height; y++) {
-    const filter = raw[y * (stride + 1)]!;
-    const src = y * (stride + 1) + 1;
-    const row = y * stride;
-    for (let x = 0; x < stride; x++) {
-      const a = x >= channels ? data[row + x - channels]! : 0;
-      const b = y > 0 ? data[row - stride + x]! : 0;
-      const c = x >= channels && y > 0 ? data[row - stride + x - channels]! : 0;
-      let v = raw[src + x]!;
-      if (filter === 1) v += a;
-      else if (filter === 2) v += b;
-      else if (filter === 3) v += (a + b) >> 1;
-      else if (filter === 4) {
-        const p = a + b - c;
-        const pa = Math.abs(p - a);
-        const pb = Math.abs(p - b);
-        const pc = Math.abs(p - c);
-        v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
-      }
-      data[row + x] = v & 255;
-    }
-  }
-  return { width, height, channels, data };
-}
-
 /** A pixel counts as changed when a colour channel moved by more than this (anti-aliasing stays below). */
 export const PIXEL_DELTA = 32;
 /** Changed pixels needed before focus counts as shown in the picture (a stray anti-aliased pixel does not). */
 export const MIN_CHANGED_PIXELS = 4;
 
 /** Pixels whose colour changed noticeably between two images of the same size; undefined when the sizes differ. */
-export function changedPixels(a: Pixels, b: Pixels): number | undefined {
+export function changedPixels(a: RgbaImage, b: RgbaImage): number | undefined {
   if (a.width !== b.width || a.height !== b.height) return undefined;
   let changed = 0;
-  for (let i = 0, j = 0; i < a.data.length && j < b.data.length; i += a.channels, j += b.channels) {
-    if (Math.abs(a.data[i]! - b.data[j]!) > PIXEL_DELTA || Math.abs(a.data[i + 1]! - b.data[j + 1]!) > PIXEL_DELTA || Math.abs(a.data[i + 2]! - b.data[j + 2]!) > PIXEL_DELTA) changed++;
+  for (let i = 0; i + 2 < a.data.length && i + 2 < b.data.length; i += 4) {
+    if (Math.abs(a.data[i]! - b.data[i]!) > PIXEL_DELTA || Math.abs(a.data[i + 1]! - b.data[i + 1]!) > PIXEL_DELTA || Math.abs(a.data[i + 2]! - b.data[i + 2]!) > PIXEL_DELTA) changed++;
   }
   return changed;
 }

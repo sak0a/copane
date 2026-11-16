@@ -1,5 +1,11 @@
 # Agent browser checks: keyboard walk, element to source, check after a change
 
+> This is the design as approved before implementation. Verification changed several details
+> (how the walk finds its start and judges traps, the React owner chain and source-map limits,
+> how the change check tells an update from a page that changes on its own). The code and the
+> comments at the top of `page/keyboard.ts`, `page/source.ts` and `page/change.ts` are current;
+> `docs/ARCHITECTURE.md` has the summary.
+
 Design for three features of the browser page tools (`src/extension/browser/page/`). Three implementors
 work in parallel, one worktree per feature, and a mechanical merge follows. Each feature owns only new
 files plus the shared-file hooks quoted in section 4. **No change to `src/extension/core/` or

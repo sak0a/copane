@@ -11,15 +11,15 @@
 // on errors and cancellation, and the walk's own marks are removed. Nothing is left waiting in the
 // page between steps: a command still pending when a focus handler navigates would end the tab's
 // CDP connection (cdp.ts), so every wait happens here, not in the page.
-import { inflateSync } from 'node:zlib';
 import { ToolError } from '../../core/errors';
 import { ObjectArg, dialogMessage, exceptionText, pageUsesTouch, type PageCall } from './call';
 import { frameLabel, ownerOf } from './frameTargets';
 import { pressChord } from './input';
 import { keyDefinition, type Modifier } from './keys';
-import { MIN_CHANGED_PIXELS, OPAQUE_LIMIT, WalkTracker, changedPixels, decideEnd, decodePng, endNeeds, focusShows, judgeSkipLink, orderJumps, splitInside, type Box, type Outcome, type RawStyle, type StepVerdict } from './keyboardLogic';
+import { MIN_CHANGED_PIXELS, OPAQUE_LIMIT, WalkTracker, changedPixels, decideEnd, endNeeds, focusShows, judgeSkipLink, orderJumps, splitInside, type Box, type Outcome, type RawStyle, type StepVerdict } from './keyboardLogic';
 import { formatKeyboard, type KbEnd, type KbInput, type KbProblem, type KbStopLine } from './keyboardReport';
 import { DialogInterrupt } from './pageState';
+import { decodePng } from './png';
 import { clip } from './ringBuffer';
 import { DESCRIBE, TOGGLE_BRIDGE_UI } from './scripts';
 import { elementBox, viewport, type ElementTarget, type Viewport } from './targets';
@@ -602,9 +602,7 @@ function frameName(url: string): string {
 function samePicture(a: string, b: string): boolean {
   if (a === b) return true;
   try {
-    const pa = decodePng(Buffer.from(a, 'base64'), inflateSync);
-    const pb = decodePng(Buffer.from(b, 'base64'), inflateSync);
-    const changed = pa && pb ? changedPixels(pa, pb) : undefined;
+    const changed = changedPixels(decodePng(Buffer.from(a, 'base64')), decodePng(Buffer.from(b, 'base64')));
     if (changed !== undefined) return changed < MIN_CHANGED_PIXELS;
   } catch {
     // Not a PNG this can read: compare the bytes.

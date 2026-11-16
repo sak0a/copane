@@ -124,6 +124,23 @@ argv.json editor. Not verified for real: Windows paths (`/c:/Users/...`), WSL it
 - **Audits**: `browser_audit` runs axe-core (shipped unmodified as `dist/axe.min.js`, read when first
   used) in the bridge's isolated world of each document, and reads the performance timeline there
   too. A tab in the background is painted rarely, which delays paint-bound numbers (interactions).
+- **Keyboard walk** (`page/keyboard*.ts`, `browser_audit` type `keyboard`): trusted Tab presses,
+  focus followed into shadow roots (closed ones through CDP) and frames. Chromium keeps a Tab
+  starting point per document, so the walk resets it in every frame first. Nothing stays pending in
+  the page between steps (waits are host-side): a command pending across a navigation closes the
+  tab's CDP connection. Focus, scroll and selection are restored on every exit path.
+- **Element to source** (`page/source*.ts`, `stackFrames.ts`, `workspacePaths.ts`, `browser_inspect`):
+  framework data is read in the page's own world (expandos are invisible to the isolated world) and
+  treated as untrusted: typed, clipped, cleaned. Scripts and source maps are fetched through the
+  browser (`Network.loadNetworkResource`; http(s) only, cookies only same-origin), bounded in size
+  and time, cached per tab and document. A path is shown as a workspace file only when that file
+  exists inside a workspace folder.
+- **Check after a change** (`page/change*.ts`, `png.ts`, `imageDiff.ts`, `browser_check_change`):
+  per session and tab, a baseline (downscaled decoded screenshot, log positions) in memory, at most
+  10 per window. "check" waits for a hot-update message or request, a reload, an error or a DOM
+  change that is not the page changing on its own, then for quiet, and reports what is new since
+  the previous check; the screenshot is compared with the baseline. Error locations go through
+  `originalLocation` of `source.ts`. `png.ts` is also what the keyboard walk's pixel check decodes with.
 
 - **Login profiles** (`browser/profiles/`): a tab can be opened in a named profile, a separate
   in-memory login store (a CDP browser context created through a tab's CDP session; VS Code opens
