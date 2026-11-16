@@ -46,6 +46,7 @@ export const SUITES = {
   'browser-devtools': {},
   'browser-frame-requests': {},
   'browser-tab-ids': {},
+  'browser-source': {},
   'browser-prompts': {},
   codex: {},
   remote: {

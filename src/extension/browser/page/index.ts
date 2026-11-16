@@ -14,6 +14,7 @@ import { DownloadManager } from './downloads';
 import { downloadTools } from './downloadTools';
 import { EmulationManager, type TabInfoHost } from './emulation';
 import { emulationTools } from './emulationTools';
+import { inspectTools } from './inspectTool';
 import type { PageEnv } from './call';
 import { debugCdpTools } from './debugCdp';
 import { logTools } from './logTools';
@@ -108,6 +109,7 @@ export function registerPageTools(services: BridgeServices, host: TabInfoHost, e
         ...downloadTools(env, downloads),
         ...emulationTools(env, emulation),
       ]),
+      ...inspectTools(env),
       ...testExportTools(env, recorder),
       ...auditTools(env),
       ...debugCdpTools(services),

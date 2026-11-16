@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>React 18 fixture</title><script src="/common.js"></script></head>
+<body>
+  <div id="root">
+    <main>
+      <ul>
+        <li>
+          <section class="layout">
+            <h2>Tea</h2>
+            <button id="add">Add to cart</button>
+          </section>
+        </li>
+      </ul>
+    </main>
+  </div>
+  <script>
+    // What React 18 keeps in development: a fiber per element under __reactFiber$<random>, with
+    // _debugSource (where its JSX is written), _debugOwner (the component that wrote it) and return
+    // (the parent fiber). The button is written in Card but rendered inside Layout (children).
+    const source = (rel, line, col) => ({ fileName: projectPath(rel), lineNumber: line, columnNumber: col });
+    function App() {}
+    function List() {}
+    function Card() {}
+    function Layout() {}
+    const root = { tag: 3, return: null };
+    const app = { tag: 0, type: App, _debugOwner: null, _debugSource: null, return: root };
+    const main = { tag: 5, type: 'main', _debugOwner: app, _debugSource: source('src/App.jsx', 5, 5), return: app };
+    const list = { tag: 0, type: List, _debugOwner: app, _debugSource: source('src/App.jsx', 6, 7), return: main };
+    const ul = { tag: 5, type: 'ul', _debugOwner: list, _debugSource: source('src/components/List.jsx', 5, 5), return: list };
+    const li = { tag: 5, type: 'li', _debugOwner: list, _debugSource: source('src/components/List.jsx', 7, 9), return: ul };
+    const card = { tag: 0, type: Card, _debugOwner: list, _debugSource: source('src/components/List.jsx', 8, 11), return: li };
+    const layout = { tag: 0, type: Layout, _debugOwner: card, _debugSource: source('src/components/Card.jsx', 6, 5), return: card };
+    const section = { tag: 5, type: 'section', _debugOwner: layout, _debugSource: source('src/components/Layout.jsx', 4, 5), return: layout };
+    const button = { tag: 5, type: 'button', _debugOwner: card, _debugSource: source('src/components/Card.jsx', 7, 7), return: section };
+    const key = '__reactFiber$x7k2p9';
+    document.querySelector('main')[key] = main;
+    document.querySelector('ul')[key] = ul;
+    document.querySelector('li')[key] = li;
+    document.querySelector('section')[key] = section;
+    document.getElementById('add')[key] = button;
+  </script>
+</body>
+</html>

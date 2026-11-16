@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><title>React 19 fixture</title>
+  <script src="/common.js"></script>
+  <script src="/assets/bundle.js"></script>
+  <script src="/assets/bundle-nomap.js"></script>
+  <script src="/node_modules/fake-lib/index.js"></script>
+</head>
+<body>
+  <div id="root">
+    <main>
+      <ul>
+        <li>
+          <section class="layout">
+            <h2>Tea</h2>
+            <button id="add">Add to cart</button>
+            <button id="add-nomap">Add to wishlist</button>
+          </section>
+        </li>
+      </ul>
+    </main>
+  </div>
+  <script>
+    // What React 19 keeps in development: no _debugSource any more; _debugStack is the Error created
+    // where the JSX was called (bundle.js, mapped to src/**/*.jsx by bundle.js.map). App itself is
+    // rendered by a library component (Provider, in node_modules).
+    function Provider() {}
+    function App() {}
+    function List() {}
+    function Card() {}
+    function Layout() {}
+    function fibers(stacks) {
+      const provider = { tag: 0, type: Provider, _debugOwner: null, _debugStack: null, return: null };
+      const app = { tag: 0, type: App, _debugOwner: provider, _debugStack: window.__libStack, return: provider };
+      const list = { tag: 0, type: List, _debugOwner: app, _debugStack: stacks.list, return: app };
+      const card = { tag: 0, type: Card, _debugOwner: list, _debugStack: stacks.card, return: list };
+      const layout = { tag: 0, type: Layout, _debugOwner: card, _debugStack: null, return: card };
+      return { tag: 5, type: 'button', _debugOwner: card, _debugStack: stacks.button, return: layout };
+    }
+    document.getElementById('add').__reactFiber$q81 = fibers(window.__stacks);
+    document.getElementById('add-nomap').__reactFiber$q81 = fibers(window.__stacksNomap);
+  </script>
+</body>
+</html>
