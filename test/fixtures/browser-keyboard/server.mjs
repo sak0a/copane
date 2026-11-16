@@ -19,6 +19,10 @@
 //   bigtrap.html    a trap of 100 links
 //   nav.html        the second link's focus handler loads another page
 //   alert.html      the second button's focus handler opens an alert
+//   one.html        a single Tab stop
+//   onemodal.html   a native modal dialog with one button; ?aria: an aria-modal one whose script keeps Tab
+//   trap1.html      a button that takes focus back by script (no preventDefault), with another after it
+//   clip.html       a ring on a far ancestor, no ring, a button clipped away, a button on a hidden slide
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { dirname, extname, join, normalize } from 'node:path';

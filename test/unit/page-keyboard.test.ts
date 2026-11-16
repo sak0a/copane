@@ -55,7 +55,16 @@ describe('WalkTracker', () => {
 
   it('a captured Tab on the only stop is stuck, not a wrap (an editor that takes Tab)', () => {
     expect(walk(['ed', captured('ed')]).verdict).toEqual({ kind: 'stuck', index: 0 });
-    expect(walk(['ed', 'ed', 'ed']).verdict).toEqual({ kind: 'continue' });
+  });
+
+  it('the only stop focused again by a Tab the page did not take is a wrap (a page with one Tab stop)', () => {
+    const { verdict, tracker } = walk(['b1', 'b1']);
+    expect(verdict).toEqual({ kind: 'wrap' });
+    expect(tracker.stops).toEqual(['b1']);
+    // With more stops, focus that does not move is a dropped press, not a wrap.
+    expect(walk(['a', 'b', 'b']).verdict).toEqual({ kind: 'continue' });
+    // An opaque container as the only stop still counts stops inside it.
+    expect(walk(['F', opaque('F')]).tracker.stops).toEqual(['F', 'F~1']);
   });
 
   it('focus staying on an opaque container counts as stops inside it, and wraps and cycles as usual', () => {
@@ -120,6 +129,18 @@ describe('decideEnd', () => {
     expect(facts({ kind: 'outside' }, [], { region: true })).toEqual({ kind: 'empty' });
   });
 
+  it('one stop: a wrap goes through the same decisions as any wrap', () => {
+    expect(facts({ kind: 'wrap' }, [false])).toEqual({ kind: 'complete' });
+    expect(facts({ kind: 'wrap' }, [true])).toEqual({ kind: 'modal' });
+    // An element that takes focus back by script while another control is reachable: a one-stop cycle.
+    expect(facts({ kind: 'wrap' }, [false], { missedTabStop: true })).toEqual({ kind: 'cycle', start: 0, length: 1 });
+    expect(facts({ kind: 'wrap' }, [false], { region: true, regionHoldsPageStart: true })).toEqual({ kind: 'complete' });
+  });
+
+  it('a modal dialog script that keeps Tab on its only control contains focus', () => {
+    expect(facts({ kind: 'stuck', index: 0 }, [true])).toEqual({ kind: 'modal' });
+  });
+
   it('no stops at all, limits, stuck and opaque', () => {
     expect(facts({ kind: 'left' }, [])).toEqual({ kind: 'none' });
     expect(facts({ kind: 'wrap' }, [])).toEqual({ kind: 'none' });
@@ -167,6 +188,12 @@ describe('focus visibility', () => {
 
   it('the browser default ring (outline-style auto) is visible', () => {
     expect(focusShows(sig({ outlineStyle: 'auto', outlineWidth: '1px' }), sig({}))).toBe(true);
+  });
+
+  it('a ring on an ancestor far up counts (the signature holds every ancestor)', () => {
+    const chain = (n: number, ring: number | undefined) => [base, null, null, ...Array.from({ length: n }, (_, i) => [i === ring ? { ...base, boxShadow: 'rgb(51, 102, 255) 0px 0px 0px 3px' } : base, null, null]).flat()];
+    expect(focusShows(chain(6, 3), chain(6, undefined))).toBe(true);
+    expect(focusShows(chain(6, undefined), chain(6, undefined))).toBe(false);
   });
 
   it(':focus-within on an ancestor and a ::after underline count', () => {
@@ -319,8 +346,10 @@ describe('formatKeyboard', () => {
     expect(formatKeyboard(input({ stops: [], end: { kind: 'none' } })).split('\n')[0]).toBe(
       'Keyboard walk of tab-2 (whole page): no Tab stops: nothing on the page takes focus with Tab, 1.6 s; no problems found. Focus and scroll restored.',
     );
-    const head = formatKeyboard(input({ end: { kind: 'opaque', label: '<x-c> [ref=e3] (a closed shadow root)', presses: 50 } })).split('\n')[0];
+    const head = formatKeyboard(input({ end: { kind: 'opaque', label: '<x-c> [ref=e3]', inside: 'a closed shadow root', presses: 50 } })).split('\n')[0];
     expect(head).toContain('stopped after 50 Tab presses inside <x-c> [ref=e3] (a closed shadow root), whose inside cannot be inspected (Shift+Tab leaves it, so it is not a trap)');
+    const still = formatKeyboard(input({ end: { kind: 'opaque', label: 'button "B1" [ref=e1]', presses: 50 } })).split('\n')[0];
+    expect(still).toContain('stopped after 50 Tab presses that did not move focus from button "B1" [ref=e1] (the page did not take the key; Shift+Tab leaves it, so it is not a trap)');
   });
 
   it('stops inside an opaque container are folded into it and counted', () => {

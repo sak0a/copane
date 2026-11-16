@@ -276,6 +276,50 @@ test('reload is refused; a second session is refused while the first holds the t
   }
 });
 
+test('a page with one Tab stop: a complete walk of 1 stop (whole page and as a region)', async () => {
+  await open('/one.html');
+  const text = await a.ok('browser_audit', { type: 'keyboard' });
+  assert.match(text.split('\n')[0], /\(whole page\): 1 Tab stop, back to the start, [\d.]+ s; no problems found\./);
+  hasNot(text, 'Tab presses');
+  const region = await a.ok('browser_audit', { type: 'keyboard', selector: '#solo' });
+  assert.match(region.split('\n')[0], /: 1 Tab stop, back to the start/);
+  hasNot(region, 'keyboard-trap');
+});
+
+test('a modal dialog with one control contains focus, as it should (native and aria-modal, page and region)', async () => {
+  await open('/onemodal.html');
+  const text = await a.ok('browser_audit', { type: 'keyboard' });
+  has(text, '1 Tab stop; focus stays inside the modal dialog, as it should');
+  hasNot(text, 'keyboard-trap');
+  const region = await a.ok('browser_audit', { type: 'keyboard', selector: '#d' });
+  has(region, '1 Tab stop; focus stays inside the modal dialog, as it should');
+  hasNot(region, 'keyboard-trap');
+  await open('/onemodal.html?aria');
+  const aria = await a.ok('browser_audit', { type: 'keyboard' });
+  has(aria, '1 Tab stop; focus stays inside the modal dialog, as it should');
+  hasNot(aria, 'keyboard-trap');
+  hasNot(aria, 'not-focusable');
+});
+
+test('one element that takes focus back by script is still a trap (another control is reachable)', async () => {
+  await open('/trap1.html');
+  const text = await a.ok('browser_audit', { type: 'keyboard' });
+  has(text, 'stopped at a keyboard trap (stop 1)');
+  has(text, 'keyboard-trap');
+  has(text, 'button "Trap"');
+});
+
+test('focus on a far ancestor is seen; focus clipped away by an ancestor is hidden', async () => {
+  await open('/clip.html');
+  const text = await a.ok('browser_audit', { type: 'keyboard' });
+  const invisible = problemLine(text, 'focus-not-visible');
+  hasNot(invisible, 'Far ring');
+  has(invisible, 'button "No ring"');
+  assert.match(invisible, /button "Clipped away" \[ref=e\d+\] \(hidden or off-screen when focused\)/);
+  assert.match(invisible, /button "Off slide" \[ref=e\d+\] \(hidden or off-screen when focused\)/);
+  hasNot(invisible, 'Normal');
+});
+
 test('cleanup: close the tab', async () => {
   if (tab) await a.ok('browser_close_tab', { tab });
 });

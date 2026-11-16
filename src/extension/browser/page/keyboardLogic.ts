@@ -50,9 +50,10 @@ export function splitInside(key: string): { key: string; inside: number } {
 /**
  * Follows what each Tab press focused and says when the walk is over.
  * - Focus staying on the same element is "Tab is captured" only when the page took the key
- *   (preventDefault). Inside a container the walk cannot see into, each press is one stop inside it;
- *   otherwise a press that did not move focus is ignored (a dropped key press). Either way the walk
- *   gives up on that element after OPAQUE_LIMIT presses.
+ *   (preventDefault). Inside a container the walk cannot see into, each press is one stop inside it.
+ *   On the only stop so far it is a wrap (a page with one Tab stop). Otherwise a press that did not
+ *   move focus is ignored (a dropped key press). The walk gives up on an element after OPAQUE_LIMIT
+ *   presses that do not leave it.
  * - Back at stop 1 is a wrap.
  * - A key seen before (not stop 1) is a cycle only when the same stops follow again in the same
  *   order, so a page that merely sends focus back once (a roving tabindex, a script) keeps going.
@@ -72,6 +73,8 @@ export class WalkTracker {
     if (n > 0 && key === this.lastRaw) {
       if (o.captured) return { kind: 'stuck', index: n - 1 };
       if (!o.opaque) {
+        // The only stop so far, focused again by a Tab the page did not take: the browser went round to it.
+        if (n === 1) return { kind: 'wrap' };
         if (++this.still >= OPAQUE_LIMIT) return { kind: 'opaque', index: n - 1 };
         return { kind: 'continue' };
       }
@@ -150,6 +153,8 @@ export function decideEnd(f: EndFacts): Outcome {
     case 'continue':
       return f.limitReached ? { kind: 'limit' } : { kind: 'time' };
     case 'stuck':
+      // A modal dialog's script keeping Tab on its only control contains focus, as it should.
+      return f.inModal[v.index] ? { kind: 'modal' } : v;
     case 'opaque':
       return v;
     case 'left':

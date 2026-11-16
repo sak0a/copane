@@ -57,7 +57,13 @@ const STYLE = `const style = (n, pseudo) => {
     };
   };
   const parent = (n) => n && (n.parentElement || (n.getRootNode && n.getRootNode().host) || null);
-  const own = (el) => { const p1 = parent(el); return [style(el), style(el, '::before'), style(el, '::after'), style(p1), style(parent(p1))]; };
+  // The element, its ::before and ::after, and its ancestors up to the body (at most 12, across shadow
+  // hosts): a ring drawn by any of them through :focus-within shows focus too.
+  const own = (el) => {
+    const out = [style(el), style(el, '::before'), style(el, '::after')];
+    for (let n = parent(el), i = 0; n && i < 12 && n !== n.ownerDocument.body && n !== n.ownerDocument.documentElement; n = parent(n), i++) out.push(style(n), style(n, '::before'), style(n, '::after'));
+    return out;
+  };
   const related = (el) => {
     const out = [];
     if (el.labels) out.push(...el.labels);
@@ -252,8 +258,32 @@ const FOCUS_FACTS = `function (token) {
     if (n.tagName === 'MAIN' || n.getAttribute('role') === 'main') inMain = true;
     if ((n.tagName === 'DIALOG' && n.matches(':modal')) || n.getAttribute('aria-modal') === 'true') inModal = true;
   }
+  // What is left of its box once every ancestor that clips (overflow other than visible, clip-path,
+  // clip) has cut it, and the viewport. Ancestors an absolutely positioned box escapes (not positioned)
+  // do not clip it; nothing above a fixed box does.
   const r = el.getBoundingClientRect();
-  const hidden = r.width <= 1 || r.height <= 1 || transparent || r.right <= 0 || r.bottom <= 0 || r.left >= win.innerWidth || r.top >= win.innerHeight
+  let left = Math.max(r.left, 0), top = Math.max(r.top, 0), right = Math.min(r.right, win.innerWidth), bottom = Math.min(r.bottom, win.innerHeight);
+  let escaping = getComputedStyle(el).position === 'absolute';
+  for (let n = el.parentElement || (el.getRootNode && el.getRootNode().host) || null; n && n.nodeType === 1; n = n.parentElement || (n.getRootNode && n.getRootNode().host) || null) {
+    const s = getComputedStyle(n);
+    const positioned = s.position !== 'static' || s.transform !== 'none';
+    const clips = s.overflowX !== 'visible' || s.overflowY !== 'visible' || s.clipPath !== 'none' || (s.clip && s.clip !== 'auto' && s.position === 'absolute');
+    if (clips && (!escaping || positioned)) {
+      // Overflow clips at the padding box (inside the borders); clip-path and clip at the border box.
+      const c = n.getBoundingClientRect();
+      const overflow = s.overflowX !== 'visible' || s.overflowY !== 'visible';
+      const cl = overflow ? c.left + n.clientLeft : c.left;
+      const ct = overflow ? c.top + n.clientTop : c.top;
+      const cr = overflow ? cl + n.clientWidth : c.right;
+      const cb = overflow ? ct + n.clientHeight : c.bottom;
+      left = Math.max(left, cl); top = Math.max(top, ct); right = Math.min(right, cr); bottom = Math.min(bottom, cb);
+    }
+    if (positioned) escaping = s.position === 'absolute';
+    if (s.position === 'fixed') break;
+  }
+  // At most about a pixel left showing counts as hidden.
+  const clipped = right - left < 2 || bottom - top < 2;
+  const hidden = r.width <= 1 || r.height <= 1 || transparent || clipped
     || (el.checkVisibility ? !el.checkVisibility({ visibilityProperty: true }) : false);
   const tag = el.tagName;
   const formControl = ['INPUT', 'SELECT', 'TEXTAREA'].includes(tag) || ['checkbox', 'radio', 'switch'].includes(el.getAttribute('role') || '');
@@ -292,6 +322,13 @@ const INDICATOR = `function () {
   const shown = (n) => n && n.getClientRects().length > 0 && n.getBoundingClientRect().width > 1;
   for (const l of this.labels || []) if (shown(l)) return l;
   return this.parentElement;
+}`;
+
+/** Element (this). `(level)` → its ancestor that many levels up (across shadow hosts), or null at the body. */
+const ANCESTOR = `function (level) {
+  let n = this;
+  for (let i = 0; i < level && n; i++) n = n.parentElement || (n.getRootNode && n.getRootNode().host) || null;
+  return n && n !== n.ownerDocument.body && n !== n.ownerDocument.documentElement ? n : null;
 }`;
 
 /** Element (this), any world. `(other)` → whether other is this or inside it (shadow roots, same-origin frames). */
@@ -1149,12 +1186,11 @@ class Walk {
       case 'opaque': {
         const stop = base(keys[outcome.index]!);
         const leaves = await this.shiftTabLeaves(new Set([stop.key]), OPAQUE_LIMIT, stop);
-        const what = stop.opaque ?? 'an element whose inside the walk cannot see';
-        if (leaves) return { end: { kind: 'opaque', label: `${stop.label} (${what})`, presses: OPAQUE_LIMIT } };
-        return {
-          end: { kind: 'trap', stop: outcome.index + 1 },
-          problem: { id: 'keyboard-trap', count: 1, what: `Tab and Shift+Tab stay inside ${stop.label} (${what}: not inspected) for ${OPAQUE_LIMIT} presses each`, items: [stop.label] },
-        };
+        if (leaves) return { end: { kind: 'opaque', label: stop.label, presses: OPAQUE_LIMIT, inside: stop.opaque } };
+        const what = stop.opaque
+          ? `Tab and Shift+Tab stay inside ${stop.label} (${stop.opaque}: not inspected) for ${OPAQUE_LIMIT} presses each`
+          : `Tab does not move focus from ${stop.label} (${OPAQUE_LIMIT} presses) and Shift+Tab cannot leave it either`;
+        return { end: { kind: 'trap', stop: outcome.index + 1 }, problem: { id: 'keyboard-trap', count: 1, what, items: [stop.label] } };
       }
       case 'cycle': {
         const cycle = keys.slice(outcome.start, outcome.start + outcome.length).map(base);
@@ -1263,16 +1299,28 @@ class Walk {
   private async pixelSame(stop: Stop, related: boolean): Promise<boolean | undefined> {
     const { at } = stop;
     let target = stop.backendNodeId;
+    let targetObject = stop.objectId;
     if (related) {
       const handle = await at.callOn(stop.objectId, INDICATOR, [], { returnByValue: false });
       if (!handle?.objectId || handle.subtype === 'null') return undefined;
       target = (await at.send('DOM.describeNode', { objectId: handle.objectId })).node.backendNodeId;
+      targetObject = handle.objectId;
     }
     await at.callOn(stop.objectId, 'function () { this.focus(); }');
     await this.call.sleep(SETTLE_MS);
     const vp = await viewport(this.call);
-    const view = await elementBox(at, target);
+    let view = await elementBox(at, target);
     if (!view) return undefined;
+    // A ring may be drawn by an ancestor further out (padding between): take in the nearest ancestors' boxes, while small.
+    for (let level = 1; level <= 3; level++) {
+      const handle = await at.callOn(targetObject, ANCESTOR, [level], { returnByValue: false });
+      if (!handle?.objectId || handle.subtype === 'null') break;
+      const outer = await elementBox(at, (await at.send('DOM.describeNode', { objectId: handle.objectId })).node.backendNodeId);
+      if (!outer || outer.width > 600 || outer.height > 300) break;
+      const x0 = Math.min(view.x, outer.x);
+      const y0 = Math.min(view.y, outer.y);
+      view = { x: x0, y: y0, width: Math.max(view.x + view.width, outer.x + outer.width) - x0, height: Math.max(view.y + view.height, outer.y + outer.height) - y0 };
+    }
     const m = 8;
     const x = Math.max(0, view.x - m);
     const y = Math.max(0, view.y - m);

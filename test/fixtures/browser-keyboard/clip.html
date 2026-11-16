@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Clipping and far rings fixture</title>
+<style>
+  body { font: 15px/1.4 sans-serif; margin: 16px; }
+  .plain, .plain:focus, .plain:focus-visible { outline: none; border: 1px solid #888; background: #eee; }
+  /* A ring three levels up and 16 px away from the button. */
+  .pad { display: inline-block; padding: 16px; } .pad div { display: inline-block; }
+  .pad:focus-within { box-shadow: 0 0 0 3px #36f; }
+  .closed { width: 0; height: 0; overflow: hidden; }
+  .slides { width: 200px; overflow: clip; white-space: nowrap; border: 1px solid #999; }
+  .slide { display: inline-block; width: 200px; }
+</style>
+</head>
+<body>
+<main>
+  <p><button type="button">Normal</button></p>
+  <!-- Focus shows on an ancestor far out: not a problem. -->
+  <div class="pad"><div><div><button type="button" class="plain" id="far">Far ring</button></div></div></div>
+  <!-- No focus style at all: focus-not-visible. -->
+  <p><button type="button" class="plain" id="none">No ring</button></p>
+  <!-- Clipped away by an ancestor: hidden when focused. -->
+  <div class="closed"><button type="button" id="clipped">Clipped away</button></div>
+  <!-- On a slide outside a container that cannot scroll (overflow: clip): hidden when focused. -->
+  <div class="slides"><div class="slide">Slide one</div><div class="slide"><button type="button" id="offslide">Off slide</button></div></div>
+  <p><button type="button">Last</button></p>
+</main>
+</body>
+</html>

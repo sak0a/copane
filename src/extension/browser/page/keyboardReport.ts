@@ -102,7 +102,11 @@ export type KbEnd =
   /** Nothing in the page takes focus with Tab. */
   | { kind: 'none' }
   /** Tab stayed inside a container the walk cannot see into for many presses; Shift+Tab gets out. */
-  | { kind: 'opaque'; label: string; presses: number };
+  /**
+   * Tab stayed on one element for many presses without the page taking the key; Shift+Tab gets out.
+   * `inside`: what about it cannot be inspected (a closed shadow root, a frame), else focus just did not move.
+   */
+  | { kind: 'opaque'; label: string; presses: number; inside?: string };
 
 export interface KbInput {
   tabId: string;
@@ -167,7 +171,9 @@ function head(r: KbInput): string {
     case 'none':
       return `${what}: no Tab stops: nothing on the page takes focus with Tab, ${seconds}; ${text}. ${restored}`;
     case 'opaque':
-      return `${what}: ${plural(n, 'Tab stop')}, ${seconds}; stopped after ${r.end.presses} Tab presses inside ${r.end.label}, whose inside cannot be inspected (Shift+Tab leaves it, so it is not a trap). Later stops and unreachable elements are not checked. ${soFar} ${restored}`;
+      return r.end.inside
+        ? `${what}: ${plural(n, 'Tab stop')}, ${seconds}; stopped after ${r.end.presses} Tab presses inside ${r.end.label} (${r.end.inside}), whose inside cannot be inspected (Shift+Tab leaves it, so it is not a trap). Later stops and unreachable elements are not checked. ${soFar} ${restored}`
+        : `${what}: ${plural(n, 'Tab stop')}, ${seconds}; stopped after ${r.end.presses} Tab presses that did not move focus from ${r.end.label} (the page did not take the key; Shift+Tab leaves it, so it is not a trap). Later stops and unreachable elements are not checked. ${soFar} ${restored}`;
   }
 }
 

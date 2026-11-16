@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>One-control modal fixture</title>
+<style>
+  body { font: 15px/1.4 sans-serif; margin: 16px; }
+  .dialog { position: fixed; top: 60px; left: 60px; background: #fff; border: 1px solid #333; padding: 16px; z-index: 1; }
+</style>
+</head>
+<body>
+<!-- Without a query: a native modal <dialog> with one button over a link and a button.
+     With ?aria: an aria-modal dialog with one button, whose script keeps Tab on it (preventDefault). -->
+<div id="aria" class="dialog" role="dialog" aria-modal="true" aria-label="Notice" hidden>
+  <button type="button" id="ariaok">Got it</button>
+</div>
+<div id="page">
+  <a href="/x">A link</a>
+  <button type="button">A button</button>
+</div>
+<dialog id="d" aria-label="Confirm"><button type="button">OK</button></dialog>
+<script>
+  if (location.search.includes('aria')) {
+    const box = document.getElementById('aria');
+    box.hidden = false;
+    document.getElementById('page').setAttribute('aria-hidden', 'true');
+    const ok = document.getElementById('ariaok');
+    ok.addEventListener('keydown', e => { if (e.key === 'Tab') { e.preventDefault(); ok.focus(); } });
+  } else {
+    document.getElementById('d').showModal();
+  }
+</script>
+</body>
+</html>
