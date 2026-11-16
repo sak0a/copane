@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Keyboard walk fixture</title>
+<style>
+  body { font: 15px/1.4 sans-serif; margin: 0; min-height: 3000px; }
+  header { display: flex; gap: 12px; align-items: center; padding: 8px 16px; }
+  nav a { margin-right: 8px; }
+  /* No focus style at all: focus-not-visible. */
+  #search, #search:focus, #search:focus-visible { outline: none; border: 1px solid #888; background: #eee; }
+  #ok:focus-visible { outline: 3px solid #c00; outline-offset: 2px; }
+  main { padding: 16px; }
+  #add, #filters { display: inline-block; padding: 4px 8px; background: #ddd; margin: 4px; }
+  #filters { cursor: pointer; }
+  iframe { display: block; margin: 8px 0; border: 1px solid #999; }
+  .spacer { height: 2000px; }
+  footer { padding: 16px; }
+</style>
+</head>
+<body>
+<header>
+  <nav aria-label="Main">
+    <a href="/products">Products</a>
+    <a href="/pricing">Pricing</a>
+    <a href="/docs">Docs</a>
+    <a href="/blog">Blog</a>
+    <a href="/about">About</a>
+    <a href="/contact">Contact</a>
+  </nav>
+  <button id="search" type="button">Search</button>
+  <x-search></x-search>
+</header>
+<main>
+  <h1>Shop</h1>
+  <p id="out">Searched 0 times</p>
+  <button id="start" type="button">Start here</button>
+  <a id="ok" href="#details">Details</a>
+  <div role="button" id="add">Add to cart</div>
+  <span id="filters">Filters</span>
+  <iframe title="Same-origin frame" src="frame.html?same" width="320" height="70"></iframe>
+  <iframe title="Cross-origin frame" src="%OTHER%/frame.html?cross" width="320" height="70"></iframe>
+  <div class="spacer"></div>
+  <p id="details">Details of the shop.</p>
+</main>
+<footer>
+  <label>Email <input id="email" tabindex="3"></label>
+</footer>
+<script>
+  let searched = 0;
+  document.getElementById('search').addEventListener('click', () => {
+    document.getElementById('out').textContent = `Searched ${++searched} times`;
+  });
+  document.getElementById('filters').addEventListener('click', () => {});
+  customElements.define('x-search', class extends HTMLElement {
+    constructor() {
+      super();
+      this.attachShadow({ mode: 'open' }).innerHTML = '<button type="button">Voice search</button> <button type="button">Image search</button>';
+    }
+  });
+</script>
+</body>
+</html>

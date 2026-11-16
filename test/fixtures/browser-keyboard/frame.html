@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Frame</title>
+<style>
+  body { font: 14px sans-serif; margin: 8px; }
+  /* The cross-origin frame's button shows no focus at all: focus-not-visible. */
+  #chat, #chat:focus, #chat:focus-visible { outline: none; border: 1px solid #888; background: #eee; }
+</style>
+</head>
+<body>
+<div id="content"></div>
+<script>
+  const content = document.getElementById('content');
+  if (location.search.includes('cross')) content.innerHTML = '<button id="chat" type="button">Open chat</button>';
+  else content.innerHTML = '<a id="framelink" href="#here">Frame link</a>';
+</script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Keyboard trap fixture</title>
+<style>
+  body { font: 15px/1.4 sans-serif; margin: 16px; }
+  #chat { border: 1px solid #999; padding: 8px; margin: 8px 0; }
+</style>
+</head>
+<body>
+<button id="before" type="button">Before</button>
+<div id="chat" role="group" aria-label="Chat">
+  <input id="message" aria-label="Message">
+  <button id="send" type="button">Send</button>
+  <button id="close" type="button">Close</button>
+</div>
+<button id="after" type="button">After</button>
+<dialog id="confirm" aria-label="Delete project?">
+  <p>Delete the project?</p>
+  <button type="button" id="cancel">Cancel</button>
+  <button type="button" id="delete">Delete</button>
+</dialog>
+<script>
+  // The widget keeps focus: Tab on its last control and Shift+Tab on its first wrap around inside it.
+  const first = document.getElementById('message');
+  const last = document.getElementById('close');
+  last.addEventListener('keydown', e => { if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); first.focus(); } });
+  first.addEventListener('keydown', e => { if (e.key === 'Tab' && e.shiftKey) { e.preventDefault(); last.focus(); } });
+  if (location.search.includes('dialog')) document.getElementById('confirm').showModal();
+</script>
+</body>
+</html>
