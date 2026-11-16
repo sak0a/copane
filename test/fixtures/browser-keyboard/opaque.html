@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Opaque focus fixture</title>
+<style>
+  body { font: 15px/1.4 sans-serif; margin: 16px; }
+  iframe { display: block; margin: 8px 0; border: 1px solid #999; }
+</style>
+</head>
+<body>
+<!-- Served from localhost: the frame comes from another localhost port, so it is cross-origin but the
+     same site: in the page's own process, not a frame target, and its document is not readable. -->
+<button id="first" type="button">First</button>
+<x-c></x-c>
+<iframe title="Same-site frame" src="%OTHER%/frame.html?cross" width="320" height="60"></iframe>
+<button id="last" type="button">Last</button>
+<script>
+  customElements.define('x-c', class extends HTMLElement {
+    constructor() {
+      super();
+      // A closed shadow root: the page's scripts cannot see which of its buttons has focus.
+      this.attachShadow({ mode: 'closed' }).innerHTML = '<button type="button">One</button> <button type="button">Two</button> <button type="button">Three</button>';
+    }
+  });
+</script>
+</body>
+</html>

@@ -44,6 +44,7 @@ export const SUITES = {
   'browser-handoff': {},
   'browser-profiles': {},
   'browser-devtools': {},
+  'browser-keyboard': {},
   'browser-frame-requests': {},
   'browser-tab-ids': {},
   'browser-prompts': {},

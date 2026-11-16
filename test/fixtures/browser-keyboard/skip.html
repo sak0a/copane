@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Broken skip link fixture</title>
+<style>
+  body { font: 15px/1.4 sans-serif; margin: 16px; }
+  .skip { position: absolute; left: -9999px; }
+  .skip:focus { left: 8px; top: 8px; background: #ff0; }
+</style>
+</head>
+<body>
+<!-- The skip link points at #content, which does not exist. -->
+<a class="skip" href="#content">Skip to content</a>
+<nav aria-label="Main">
+  <a href="/one">One</a> <a href="/two">Two</a> <a href="/three">Three</a> <a href="/four">Four</a> <a href="/five">Five</a> <a href="/six">Six</a>
+</nav>
+<main id="main">
+  <h1>Article</h1>
+  <button type="button">Like</button>
+</main>
+</body>
+</html>

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Forms fixture</title>
+<style>
+  body { font: 15px/1.4 sans-serif; margin: 16px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+  .switch { display: inline-block; padding: 4px 8px; border: 1px solid #888; }
+  #good:focus-visible + .switch { box-shadow: 0 0 0 3px #36f; }
+  iframe { display: block; border: 1px solid #999; margin: 8px 0; }
+  /* Focus shown only by a great-grandparent, beyond what the style check reads: only the pixel check sees it. */
+  .card, .card div { display: inline-block; padding: 0; }
+  #deep, #deep:focus, #deep:focus-visible { outline: none; border: 1px solid #888; background: #eee; }
+  .card:focus-within { outline: 3px solid #c00; outline-offset: 1px; }
+</style>
+</head>
+<body>
+<main>
+  <input id="text" aria-label="Note" value="abcdefgh">
+  <fieldset disabled>
+    <legend>Disabled group</legend>
+    <button type="button">Disabled inside</button>
+    <input aria-label="Disabled field">
+  </fieldset>
+  <label><input type="checkbox" id="good" class="sr-only"><span class="switch">Good switch</span></label>
+  <label><input type="checkbox" id="bad" class="sr-only"><span class="switch">Bad switch</span></label>
+  <iframe title="Pair frame" src="frame.html?pair" width="320" height="60"></iframe>
+  <div class="card"><div><div><button type="button" id="deep">Deep ring</button></div></div></div>
+  <button type="button" id="end">End</button>
+</main>
+<script>
+  const t = document.getElementById('text');
+  t.setSelectionRange(2, 5);
+</script>
+</body>
+</html>
