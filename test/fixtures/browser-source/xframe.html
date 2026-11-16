@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Cross-origin frame fixture</title><script src="/common.js"></script></head>
+<body>
+  <h1>Host page</h1>
+  <iframe id="frame" title="Editor frame" width="600" height="300"></iframe>
+  <script>
+    // ?other=<origin> serves ?page= (default the Vue 3 page) as a cross-origin frame (a separate frame target).
+    const other = fixtureParams.get('other') || location.origin;
+    const query = new URLSearchParams({ root: fixtureParams.get('root') || '/workspace' });
+    document.getElementById('frame').src = `${other}/${fixtureParams.get('page') || 'vue3.html'}?${query}`;
+  </script>
+</body>
+</html>

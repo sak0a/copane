@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Vue production fixture</title></head>
+<body>
+  <div id="app" data-v-app><div class="offer"><button id="buy">Buy now</button></div></div>
+  <script>
+    // A production build: the app container has __vue_app__ and data-v-app; elements carry no __vueParentComponent.
+    document.getElementById('app').__vue_app__ = { version: '3.5.0' };
+  </script>
+</body>
+</html>

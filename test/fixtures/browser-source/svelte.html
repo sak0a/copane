@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Svelte fixture</title><script src="/common.js"></script></head>
+<body>
+  <main>
+    <h1>Svelte</h1>
+    <section>
+      <div class="child"><p>Child</p><button id="s4">Save (Svelte 4)</button></div>
+      <div class="child"><p>Child</p><button id="s5">Save (Svelte 5)</button></div>
+    </section>
+    <div class="card svelte-1x9q2ab"><button id="sprod">Buy (production)</button></div>
+    <div class="child"><p>Child</p><button id="s5old">Save (Svelte 5.0)</button></div>
+    <div id="host"></div>
+  </main>
+  <script>
+    // Svelte 4 (add_location): file relative to the project, line and column 0-based, plus char.
+    document.getElementById('s4').__svelte_meta = { loc: { file: 'src/Child.svelte', line: 6, column: 2, char: 80 } };
+    // Svelte 5 (add_locations / add_svelte_meta): line 1-based, column 0-based; parent is the dev stack,
+    // whose component entries say where each component tag is written.
+    document.getElementById('s5').__svelte_meta = {
+      parent: { type: 'component', file: projectPath('src/App.svelte'), line: 8, column: 4, componentTag: 'Child', parent: { type: 'if', file: projectPath('src/App.svelte'), line: 7, column: 2, parent: null } },
+      loc: { file: projectPath('src/Child.svelte'), line: 7, column: 2 },
+    };
+    // Svelte 5.0-5.35: the same 1-based location, without a parent chain (and without Svelte 4's char).
+    document.getElementById('s5old').__svelte_meta = { loc: { file: projectPath('src/Child.svelte'), line: 7, column: 2 } };
+    // Mixed: a Vue 3 component (App.vue) on a shadow host, a Svelte element inside its shadow root.
+    const hostEl = document.getElementById('host');
+    hostEl.__vueParentComponent = { type: { __name: 'App', __file: projectPath('src/App.vue') }, parent: null };
+    const shadow = hostEl.attachShadow({ mode: 'open' });
+    shadow.innerHTML = '<div class="child"><button id="mixed">Save (mixed)</button></div>';
+    shadow.getElementById('mixed').__svelte_meta = { loc: { file: projectPath('src/Child.svelte'), line: 7, column: 2 } };
+  </script>
+</body>
+</html>
