@@ -10,6 +10,7 @@ import type { BridgeServices, CdpPage } from '../../core/services';
 import type { ToolContext } from '../../core/tools';
 import { actionTools } from './actionTools';
 import { auditTools } from './auditTool';
+import { changeTools } from './changeTool';
 import { DownloadManager } from './downloads';
 import { downloadTools } from './downloadTools';
 import { EmulationManager, type TabInfoHost } from './emulation';
@@ -110,6 +111,7 @@ export function registerPageTools(services: BridgeServices, host: TabInfoHost, e
       ]),
       ...testExportTools(env, recorder),
       ...auditTools(env),
+      ...changeTools(env),
       ...debugCdpTools(services),
     ]),
   );
