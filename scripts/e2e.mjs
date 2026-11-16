@@ -49,6 +49,7 @@ export const SUITES = {
   'browser-tab-ids': {},
   'browser-source': {},
   'browser-prompts': {},
+  'browser-change': {},
   codex: {},
   remote: {
     notInCi: {
