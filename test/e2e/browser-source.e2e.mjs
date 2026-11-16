@@ -13,7 +13,10 @@ import { join } from 'node:path';
 import { startSourceServer } from '../fixtures/browser-source/server.mjs';
 import { agent, assert, hostDir, root, run, test } from './harness.mjs';
 
-const workspace = join(hostDir, 'ws');
+const a = await agent({ session: `browser-source-${Date.now()}` });
+// The window's own workspace folder: /tmp/copane-dev/<name>/ws in a local dev host, /ws in a remote one
+// (where this test runs inside the container, next to the files).
+const workspace = JSON.parse(await a.ok('debug_extension_eval', { code: 'return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? null;' })) ?? join(hostDir, 'ws');
 mkdirSync(join(workspace, 'source-app'), { recursive: true });
 cpSync(join(root, 'test', 'fixtures', 'browser-source', 'project', 'src'), join(workspace, 'source-app', 'src'), { recursive: true });
 
@@ -21,7 +24,6 @@ const site = await startSourceServer();
 const other = await startSourceServer({ host: 'localhost' });
 const page = (name, extra = {}) => `${site.url}/${name}?${new URLSearchParams({ root: workspace, ...extra })}`;
 
-const a = await agent({ session: `browser-source-${Date.now()}` });
 /** Result sizes, printed at the end (they are read by a model). */
 const sizes = [];
 
