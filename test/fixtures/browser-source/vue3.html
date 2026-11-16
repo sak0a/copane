@@ -13,6 +13,7 @@
       </div>
     </nav>
     <p id="lone">Gone component</p>
+    <p id="cycle">Cyclic parent</p>
   </div>
   <script>
     // What Vue 3 sets in development: el.__vueParentComponent (the instance whose render made it),
@@ -31,6 +32,10 @@
     set('.hint', SaveButton);
     set('#save', SaveButton);
     set('#lone', Gone);
+    // An instance that is its own parent must not loop or repeat.
+    const Loop = { type: { __name: 'Loop', __file: projectPath('src/App.vue') } };
+    Loop.parent = Loop;
+    set('#cycle', Loop);
     document.getElementById('app').__vue_app__ = { version: '3.5.0' };
   </script>
 </body>

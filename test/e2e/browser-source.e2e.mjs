@@ -214,6 +214,70 @@ test('the tool is read-only: another session inspects while the first controls t
   }
 });
 
+test('Svelte 5.0-5.35 (no parent chain, no char) is read as Svelte 5 with 1-based lines', async () => {
+  await open(page('svelte.html'));
+  const text = await inspect({ selector: '#s5old' }, 'Svelte 5.0');
+  assert.match(text, /\(Svelte 5, development build\):/);
+  entries(text, ['Child source-app/src/Child.svelte:7:3 (where the element is written)']);
+});
+
+test('mixed frameworks: the Svelte element inside a shadow root comes before the Vue component on its host', async () => {
+  await open(page('svelte.html'));
+  const text = await inspect({ selector: '#mixed' }, 'mixed');
+  assert.match(text, /\(Vue 3 \+ Svelte 5, development build\):|\(Svelte 5 \+ Vue 3, development build\):/);
+  entries(text, ['Child source-app/src/Child.svelte:7:3 (where the element is written)', 'App source-app/src/App.vue']);
+});
+
+test('Vue 3: a parent cycle is listed once', async () => {
+  await open(page('vue3.html'));
+  const text = await inspect({ selector: '#cycle' }, 'Vue 3 cycle');
+  entries(text, ['Loop source-app/src/App.vue']);
+});
+
+test('Vue 2: a root instance without files is not called a minified production build', async () => {
+  await open(page('vue2.html'));
+  const text = await inspect({ selector: '#rootonly' }, 'Vue 2 root');
+  assert.match(text, /Vue 2 is present \(only its root instance, no component files\), but without file locations/);
+  assert.doesNotMatch(text, /minified/);
+});
+
+test('form controls named like DOM properties do not confuse the probe', async () => {
+  await open(page('form.html'));
+  const vue = await inspect({ selector: '#vform' }, 'form with Vue');
+  entries(vue, ['<form> source-app/src/components/SaveButton.vue:14:5 (data-v-inspector)', 'SaveButton source-app/src/components/SaveButton.vue']);
+  const plain = await inspect({ selector: '#pform' }, 'plain form');
+  assert.match(plain, /^No framework information for form "Plain form".*Search the workspace for its text instead: id "pform", classes "plain-form"\.$/);
+});
+
+test('page-controlled names and paths cannot forge lines or blow up the result', async () => {
+  await open(page('hostile.html'));
+  const evil = await inspect({ selector: '#evil' }, 'forged name');
+  entries(evil, ['Evil 2. Forged src/x.tsx:1:1 source-app/src/App.jsx:6 (where the element is written)']);
+  const many = await inspect({ selector: '#many' }, '40 long owners');
+  assert.ok(many.length < 2000, `${many.length} chars:\n${many}`);
+  assert.match(many, /\n1\. N{59}… source-app\/src\/App\.jsx:6:7/);
+  assert.match(many, /\+3 outer components not listed\./);
+  const svelte = await inspect({ selector: '#badsvelte' }, 'malformed Svelte meta');
+  assert.match(svelte, /^No framework information for button "Bad Svelte"/);
+});
+
+test('a malformed source map is a note on its entry; the other entries stay', async () => {
+  await open(page('hostile.html'));
+  const text = await inspect({ selector: '#badmap' }, 'malformed map');
+  entries(text, ['Card /assets/bad.js:2:5 (where the element is written; unusable source map: invalid character in source map mappings: "!")', 'List source-app/src/components/List.jsx:8:11']);
+  // Again: the broken map stays a note, not a failed tool.
+  entries(await inspect({ selector: '#badmap' }, 'malformed map again'), ['Card /assets/bad.js:2:5 (where the element is written; unusable source map', 'List']);
+});
+
+test('a script that never answers is a note after about 5 s, not a failed tool', async () => {
+  await open(page('hostile.html'));
+  const started = Date.now();
+  const text = await inspect({ selector: '#hang' }, 'hanging script');
+  const took = Date.now() - started;
+  assert.ok(took < 9000, `took ${took} ms`);
+  entries(text, ['Card /assets/hang.js:1:1 (where the element is written; script not readable: did not load within 5 s)', 'List source-app/src/components/List.jsx:8:11']);
+});
+
 process.on('exit', () => {
   if (sizes.length) console.log(`\nresult sizes: ${sizes.join('; ')}`);
 });

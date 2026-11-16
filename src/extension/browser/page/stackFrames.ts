@@ -45,12 +45,25 @@ export function parseStack(stack: string): StackFrame[] {
   return frames;
 }
 
-/** URLs of React's own code (the JSX runtime, the renderer, the scheduler). */
-const REACT_URL = /react-dom|react\.development|react\.production|jsx-dev-runtime|jsx-runtime|react_jsx|scheduler|\/react\/cjs\/|\/react\/index\.js/;
-/** Functions of React's own that create elements or fake call sites. */
-const REACT_FN = /(^|\.)(jsxDEV|jsxDEVImpl|jsxs|jsx|jsxProd|createElement|cloneElement|fakeJSXCallSite)$|^react-stack-top-frame$/;
-/** Functions of the renderer below the component that created the element (the stack's bottom). */
-const RENDERER_FN = /^(react-stack-bottom-frame|renderWithHooks|renderWithHooksAgain|mountIndeterminateComponent|updateFunctionComponent|beginWork|performUnitOfWork|callComponentInDEV|Object\.react-stack-bottom-frame)$/;
+/**
+ * URLs of React's own code (the JSX runtime, the renderer, the scheduler): its packages in
+ * node_modules, Vite's pre-bundled copies, Next's compiled copies, and the UMD/CJS file names. Only as
+ * package folders or file names, so an app's own `src/scheduler/` is not taken for React.
+ */
+const REACT_URL = [
+  /\/node_modules\/(?:react|react-dom|scheduler|react-server-dom-[\w-]+)\//,
+  /\/node_modules\/\.vite\/deps\/(?:react|react-dom|react-dom_client|react-dom_server|react_jsx-dev-runtime|react_jsx-runtime|scheduler)\.js(?:[?#]|$)/,
+  /\/next\/dist\/compiled\/(?:react|react-dom|scheduler)(?:-experimental)?\//,
+  /(?:^|\/)(?:react|react-dom|react-dom-client|react-jsx-dev-runtime|react-jsx-runtime|scheduler)\.(?:development|production|profiling)(?:\.min)?\.js(?:[?#]|$)/,
+];
+const isReactUrl = (url: string) => REACT_URL.some(re => re.test(url));
+/** Names only React uses: skipped wherever they are (React may be bundled into the app's own script). */
+const REACT_ONLY_FN = /(^|\.)(jsxDEV|jsxDEVImpl|fakeJSXCallSite)$|^react-stack-top-frame$/;
+/** Common names that are React's only when the code is React's or a library's (an app may have its own `createElement`). */
+const REACT_COMMON_FN = /(^|\.)(jsxs|jsx|jsxProd|createElement|cloneElement)$/;
+/** The renderer below the component that created the element (the stack's bottom). */
+const RENDERER_ONLY_FN = /^(Object\.)?(react-stack-bottom-frame|renderWithHooks|renderWithHooksAgain|mountIndeterminateComponent|callComponentInDEV)$/;
+const RENDERER_COMMON_FN = /^(updateFunctionComponent|beginWork|performUnitOfWork)$/;
 
 /** True for a frame in a library (node_modules, Vite's pre-bundled dependencies). */
 export function isLibraryUrl(url: string): boolean {
@@ -64,10 +77,12 @@ export function isLibraryUrl(url: string): boolean {
  */
 export function elementCreationFrame(stack: string): StackFrame | undefined {
   for (const frame of parseStack(stack)) {
-    if (frame.fn && REACT_FN.test(frame.fn)) continue;
+    const fn = frame.fn ?? '';
+    const libraryCode = isReactUrl(frame.url) || isLibraryUrl(frame.url);
+    if (REACT_ONLY_FN.test(fn) || (libraryCode && REACT_COMMON_FN.test(fn))) continue;
     // Past React's leading frames into the renderer: nothing of the user's code created this element.
-    if (frame.fn && RENDERER_FN.test(frame.fn)) return undefined;
-    if (REACT_URL.test(frame.url)) continue;
+    if (RENDERER_ONLY_FN.test(fn) || (libraryCode && RENDERER_COMMON_FN.test(fn))) return undefined;
+    if (isReactUrl(frame.url)) continue;
     return frame;
   }
   return undefined;

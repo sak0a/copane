@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Form fixture</title><script src="/common.js"></script></head>
+<body>
+  <!-- Controls named like DOM properties shadow them on the form: form.id is the input named "id". -->
+  <div id="app" data-v-app>
+    <form id="vform" class="save-form" aria-label="Save form" data-v-inspector="src/components/SaveButton.vue:14:5">
+      <input name="id" aria-label="id"><input name="tagName" aria-label="tagName"><input name="parentElement" aria-label="parentElement">
+      <input name="parentNode" aria-label="parentNode"><input name="getAttribute" aria-label="getAttribute"><input name="className" aria-label="className">
+      <input name="nodeType" aria-label="nodeType"><input name="attributes" aria-label="attributes"><input name="innerText" aria-label="innerText">
+    </form>
+  </div>
+  <form id="pform" class="plain-form" aria-label="Plain form">
+    <input name="id" aria-label="id"><input name="tagName" aria-label="tagName"><input name="getAttribute" aria-label="getAttribute"><input name="className" aria-label="className">
+    <input name="parentElement" aria-label="parentElement"><input name="textContent" aria-label="textContent"><input name="innerText" aria-label="innerText">
+  </form>
+  <script>
+    const SaveButton = { type: { __name: 'SaveButton', __file: projectPath('src/components/SaveButton.vue') }, parent: null };
+    Object.defineProperty(document.getElementById('vform'), '__vueParentComponent', { value: SaveButton });
+  </script>
+</body>
+</html>

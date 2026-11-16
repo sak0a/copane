@@ -5,151 +5,181 @@
 //
 // Framework data are expando properties set by page JavaScript, invisible in the bridge's isolated
 // world; the element handle of an ElementTarget is in the page's own world, so the probe runs there.
-// It only reads.
+// It only reads. Everything it returns is page-controlled and is checked by `sanitizeProbe`.
 import { readdirSync, statSync } from 'node:fs';
+import { ToolError } from '../../core/errors';
 import type { PageCall } from './call';
-import { isLibraryUrl, elementCreationFrame, parseInspectorPath, splitLocation, svelteLocation, type FileLocation } from './stackFrames';
-import { scriptMap } from './sourceFetch';
-import { formatSource, type GrepHints, type SourceEntry, type SourceResult } from './sourceReport';
+import { scriptMap, type MapResult } from './sourceFetch';
+import { SourceMapError } from './sourceMap';
+import { formatSource, sanitizeProbe, type SourceEntry, type SourceResult } from './sourceReport';
+import { elementCreationFrame, isLibraryUrl, parseInspectorPath, splitLocation, svelteLocation, type FileLocation } from './stackFrames';
 import type { ElementTarget } from './targets';
 import { displayPath, mapToWorkspace, rootName, type PathPlatform, type WorkspaceFs } from './workspacePaths';
 
-/** What SOURCE_PROBE returns. */
-interface Probe {
-  tag: string;
-  attr?: { kind: string; value: string; line?: string; column?: string; tag: string; self: boolean };
-  react?: { dev: boolean; self: boolean; chain: Array<{ name: string; source?: { fileName?: string; lineNumber?: number; columnNumber?: number }; stack?: string }> };
-  vue3?: { dev: boolean; chain: Array<{ name: string; file?: string }> };
-  vue2?: { dev: boolean; chain: Array<{ name: string; file?: string }> };
-  svelte?: { version: 4 | 5; loc?: { file?: string; line?: number; column?: number }; parents: Array<{ file?: string; line?: number; column?: number; tag?: string }> };
-  svelteProd?: boolean;
-  vueProd?: string;
-  angular?: boolean;
-  grep: GrepHints;
-}
-
 /**
  * Element (this), page's own world. Walks from the element up (across shadow hosts) and collects
- * inspector attributes and React, Vue 3, Vue 2 and Svelte development data. Every step is guarded.
+ * inspector attributes and React, Vue 3, Vue 2 and Svelte development data, each with the depth it
+ * was found at. DOM properties are read through the prototypes' own accessors, because a form's
+ * controls shadow them (`<input name="id">` makes `form.id` that input). Every step is guarded.
  */
 export const SOURCE_PROBE = `function () {
   const out = { tag: '', grep: {} };
-  const el0 = this.nodeType === 1 ? this : this.parentElement;
+  const getter = (proto, name) => { try { const d = Object.getOwnPropertyDescriptor(proto, name); return d && d.get; } catch (e) { return undefined; } };
+  const call = (fn, self, ...args) => { try { return fn ? fn.apply(self, args) : undefined; } catch (e) { return undefined; } };
+  const NODE_TYPE = getter(Node.prototype, 'nodeType');
+  const PARENT_ELEMENT = getter(Node.prototype, 'parentElement');
+  const PARENT_NODE = getter(Node.prototype, 'parentNode');
+  const TAG_NAME = getter(Element.prototype, 'tagName');
+  const ATTRIBUTES = getter(Element.prototype, 'attributes');
+  const HOST = getter(ShadowRoot.prototype, 'host');
+  const INNER_TEXT = getter(HTMLElement.prototype, 'innerText');
+  const TEXT_CONTENT = getter(Node.prototype, 'textContent');
+  const GET_ATTRIBUTE = Element.prototype.getAttribute;
+  const attr = (el, name) => { const v = call(GET_ATTRIBUTE, el, name); return typeof v === 'string' ? v : null; };
+  const tagOf = el => { const t = call(TAG_NAME, el); return typeof t === 'string' ? t.toLowerCase().slice(0, 30) : 'element'; };
+  const up = el => {
+    const p = call(PARENT_ELEMENT, el);
+    if (p) return p;
+    const n = call(PARENT_NODE, el);
+    return n && call(NODE_TYPE, n) === 11 ? call(HOST, n) || null : null;
+  };
+  const str = (v, max) => typeof v === 'string' ? v.slice(0, max) : undefined;
+  const num = v => typeof v === 'number' && isFinite(v) ? v : undefined;
+  const isObj = v => v !== null && typeof v === 'object' && !(v instanceof Node);
+  const own = (el, key) => { try { const v = el[key]; return isObj(v) ? v : undefined; } catch (e) { return undefined; } };
+  const el0 = call(NODE_TYPE, this) === 1 ? this : call(PARENT_ELEMENT, this);
   if (!el0) return out;
-  out.tag = el0.tagName.toLowerCase();
-  const up = el => el.parentElement || (el.parentNode && el.parentNode.host) || null;
-  const chainOf = () => { const list = []; for (let el = el0, i = 0; el && i < 50; el = up(el), i++) list.push(el); return list; };
-  const els = chainOf();
+  out.tag = tagOf(el0);
+  const els = [];
+  for (let el = el0; el && els.length < 50; el = up(el)) els.push(el);
   const base = f => typeof f === 'string' ? f.split(/[\\\\/]/).pop().replace(/\\.[^.]*$/, '') : undefined;
   try {
-    for (const el of els) {
-      const self = el === el0;
-      const tag = el.tagName.toLowerCase();
-      const insp = el.getAttribute('data-insp-path');
-      if (insp) { out.attr = { kind: 'data-insp-path', value: insp, tag, self }; break; }
-      const vi = el.getAttribute('data-v-inspector');
-      if (vi) { out.attr = { kind: 'data-v-inspector', value: vi, tag, self }; break; }
-      const rp = el.getAttribute('data-inspector-relative-path');
-      if (rp) { out.attr = { kind: 'react-dev-inspector', value: rp, line: el.getAttribute('data-inspector-line') || undefined, column: el.getAttribute('data-inspector-column') || undefined, tag, self }; break; }
+    for (let depth = 0; depth < els.length; depth++) {
+      const el = els[depth];
+      const tag = tagOf(el);
+      const insp = attr(el, 'data-insp-path');
+      if (insp) { out.attr = { kind: 'data-insp-path', value: insp.slice(0, 400), tag, depth }; break; }
+      const vi = attr(el, 'data-v-inspector');
+      if (vi) { out.attr = { kind: 'data-v-inspector', value: vi.slice(0, 400), tag, depth }; break; }
+      const rp = attr(el, 'data-inspector-relative-path');
+      if (rp) { out.attr = { kind: 'react-dev-inspector', value: rp.slice(0, 400), line: attr(el, 'data-inspector-line'), column: attr(el, 'data-inspector-column'), tag, depth }; break; }
     }
   } catch (e) {}
   try {
-    let host, key;
-    for (const el of els) {
-      key = Object.keys(el).find(k => k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$'));
-      if (key) { host = el; break; }
+    let fiber, depth = 0;
+    for (; depth < els.length; depth++) {
+      let keys = [];
+      try { keys = Object.keys(els[depth]); } catch (e) {}
+      const key = keys.find(k => k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$'));
+      if (key) { fiber = own(els[depth], key); break; }
     }
-    if (host) {
-      const fiber = host[key];
+    if (fiber) {
+      const name = v => { try { return typeof v === 'string' && v ? v.slice(0, 200) : undefined; } catch (e) { return undefined; } };
       const nameOfType = t => {
-        if (!t) return undefined;
-        if (typeof t === 'string') return t;
-        return t.displayName || t.name || (t.render && (t.render.displayName || t.render.name)) || (t.type && (t.type.displayName || t.type.name)) || undefined;
+        try {
+          if (typeof t === 'string') return name(t);
+          if (!t || (typeof t !== 'function' && typeof t !== 'object')) return undefined;
+          return name(t.displayName) || name(t.name) || (t.render && (name(t.render.displayName) || name(t.render.name))) || (t.type && (name(t.type.displayName) || name(t.type.name))) || undefined;
+        } catch (e) { return undefined; }
       };
-      const nameOf = f => nameOfType(f && f.type) || (f && typeof f.name === 'string' ? f.name : undefined) || 'Anonymous';
+      const nameOf = f => { try { return nameOfType(f.type) || name(f.name) || 'Anonymous'; } catch (e) { return 'Anonymous'; } };
       const locOf = f => {
         try {
-          const s = f && f._debugSource;
-          if (s && s.fileName) return { source: { fileName: String(s.fileName), lineNumber: s.lineNumber, columnNumber: s.columnNumber } };
-          const st = f && f._debugStack;
-          const text = st && (typeof st === 'string' ? st : st.stack);
-          if (text) return { stack: String(text).slice(0, 4000) };
+          const s = f._debugSource;
+          if (s && typeof s.fileName === 'string') return { source: { fileName: s.fileName.slice(0, 1000), lineNumber: num(s.lineNumber), columnNumber: num(s.columnNumber) } };
+          const st = f._debugStack;
+          const text = typeof st === 'string' ? st : st && typeof st === 'object' ? st.stack : undefined;
+          if (typeof text === 'string') return { stack: text.slice(0, 4000) };
         } catch (e) {}
         return {};
       };
-      const dev = '_debugOwner' in fiber;
+      let dev = false;
+      try { dev = '_debugOwner' in fiber; } catch (e) {}
       const chain = [];
       // Owners: who created each element (the component whose JSX it is), which is what renders it.
       const seen = new Set();
-      for (let cur = fiber; cur && chain.length < 15; ) {
-        const owner = cur._debugOwner;
-        if (!owner || seen.has(owner)) break;
-        seen.add(owner);
-        chain.push({ name: nameOf(owner), ...locOf(cur) });
-        cur = owner;
-      }
-      if (!chain.length) {
-        let pending = locOf(fiber);
-        for (let f = fiber.return; f && chain.length < 15; f = f.return) {
-          if ([0, 1, 11, 14, 15].includes(f.tag)) { chain.push({ name: nameOf(f), ...pending }); pending = locOf(f); }
+      try {
+        for (let cur = fiber; cur && chain.length < 15; ) {
+          const owner = cur._debugOwner;
+          if (!isObj(owner) || seen.has(owner)) break;
+          seen.add(owner);
+          chain.push({ name: nameOf(owner), ...locOf(cur) });
+          cur = owner;
         }
+      } catch (e) {}
+      if (!chain.length) {
+        try {
+          let pending = locOf(fiber);
+          const seenReturn = new Set();
+          for (let f = fiber.return; isObj(f) && !seenReturn.has(f) && chain.length < 15; f = f.return) {
+            seenReturn.add(f);
+            if ([0, 1, 11, 14, 15].includes(f.tag)) { chain.push({ name: nameOf(f), ...pending }); pending = locOf(f); }
+          }
+        } catch (e) {}
       }
-      out.react = { dev, self: host === el0, chain };
+      out.react = { dev, depth, chain };
     }
   } catch (e) {}
   try {
-    const el = els.find(e => e.__vueParentComponent);
-    if (el) {
+    const depth = els.findIndex(e => own(e, '__vueParentComponent'));
+    if (depth >= 0) {
       const chain = [];
-      for (let c = el.__vueParentComponent; c && chain.length < 15; c = c.parent) {
-        const t = c.type || {};
-        chain.push({ name: t.name || t.__name || t.displayName || base(t.__file) || 'Anonymous', file: typeof t.__file === 'string' ? t.__file : undefined });
+      const seen = new Set();
+      for (let c = own(els[depth], '__vueParentComponent'); isObj(c) && !seen.has(c) && chain.length < 15; c = c.parent) {
+        seen.add(c);
+        const t = isObj(c.type) || typeof c.type === 'function' ? c.type : {};
+        const file = str(t.__file, 1000);
+        chain.push({ name: str(t.name, 200) || str(t.__name, 200) || str(t.displayName, 200) || base(file) || 'Anonymous', file });
       }
-      out.vue3 = { dev: true, chain };
+      out.vue3 = { depth, chain };
     } else {
-      const app = els.find(e => e.__vue_app__ || e.hasAttribute('data-v-app'));
-      const scoped = els.some(e => Array.from(e.attributes).some(a => /^data-v-[0-9a-f]{8}$/.test(a.name)));
-      if (app) out.vueProd = 'Vue 3 is present (data-v-app)';
-      else if (scoped) out.vueProd = 'Vue is present (scoped-style data-v-… attributes)';
+      const app = els.some(e => own(e, '__vue_app__') || attr(e, 'data-v-app') !== null);
+      const scoped = els.some(e => { const a = call(ATTRIBUTES, e); for (let i = 0; a && i < a.length && i < 50; i++) if (/^data-v-[0-9a-f]{8}$/.test(a[i].name)) return true; return false; });
+      if (app) out.vueProd = 'app';
+      else if (scoped) out.vueProd = 'scoped';
     }
   } catch (e) {}
   try {
-    const el = els.find(e => e.__vue__);
-    if (el) {
+    const depth = els.findIndex(e => own(e, '__vue__'));
+    if (depth >= 0) {
       const chain = [];
-      let anyFile = false;
-      for (let vm = el.__vue__; vm && chain.length < 15; vm = vm.$parent) {
-        const o = vm.$options || {};
-        const file = typeof o.__file === 'string' ? o.__file : undefined;
-        if (file) anyFile = true;
-        chain.push({ name: o.name || o._componentTag || base(file) || (vm.$parent ? 'Anonymous' : 'Root'), file });
+      const seen = new Set();
+      for (let vm = own(els[depth], '__vue__'); isObj(vm) && !seen.has(vm) && chain.length < 15; vm = vm.$parent) {
+        seen.add(vm);
+        const o = isObj(vm.$options) ? vm.$options : {};
+        const file = str(o.__file, 1000);
+        const root = !isObj(vm.$parent);
+        chain.push({ name: str(o.name, 200) || str(o._componentTag, 200) || base(file) || (root ? 'Root' : 'Anonymous'), file, root });
       }
-      let devtools = false;
-      try { devtools = Boolean(el.__vue__.$options._base.config.devtools); } catch (e) {}
-      out.vue2 = { dev: anyFile || devtools, chain };
+      out.vue2 = { depth, chain };
     }
   } catch (e) {}
   try {
-    const el = els.find(e => e.__svelte_meta);
-    if (el) {
-      const meta = el.__svelte_meta;
-      const loc = meta.loc || {};
-      const version = 'char' in loc || !('parent' in meta) ? 4 : 5;
+    const depth = els.findIndex(e => own(e, '__svelte_meta'));
+    if (depth >= 0) {
+      const meta = own(els[depth], '__svelte_meta');
+      const loc = isObj(meta.loc) ? meta.loc : {};
+      // Svelte 4 always writes char; Svelte 5 never (5.0-5.35 without parent, later with it).
+      const version = 'char' in loc ? 4 : 5;
       const parents = [];
-      for (let p = meta.parent; p && parents.length < 15; p = p.parent) {
-        if (p.type === 'component') parents.push({ file: p.file, line: p.line, column: p.column, tag: p.componentTag });
+      const seen = new Set();
+      for (let p = meta.parent; isObj(p) && !seen.has(p) && parents.length < 15; p = p.parent) {
+        seen.add(p);
+        if (p.type === 'component') parents.push({ file: str(p.file, 1000), line: num(p.line), column: num(p.column), tag: str(p.componentTag, 200) });
       }
-      out.svelte = { version, loc: { file: loc.file, line: loc.line, column: loc.column }, parents };
-    } else if (els.some(e => typeof e.className === 'string' && /(^|\\s)svelte-[a-z0-9]{6,}(\\s|$)/.test(e.className))) out.svelteProd = true;
+      out.svelte = { depth, version, loc: { file: str(loc.file, 1000), line: num(loc.line), column: num(loc.column) }, parents };
+    } else if (els.some(e => /(^|\\s)svelte-[a-z0-9]{6,}(\\s|$)/.test(attr(e, 'class') || ''))) out.svelteProd = true;
   } catch (e) {}
-  try { out.angular = Boolean(document.querySelector('[ng-version]')); } catch (e) {}
+  try { out.angular = Boolean(call(Document.prototype.querySelector, document, '[ng-version]')); } catch (e) {}
   try {
-    const text = (el0.innerText || el0.textContent || '').replace(/\\s+/g, ' ').trim();
-    if (text) out.grep.text = text.length > 60 ? text.slice(0, 60) : text;
-    if (el0.id) out.grep.id = el0.id;
-    const testId = el0.getAttribute('data-testid');
-    if (testId) out.grep.testId = testId;
-    const classes = typeof el0.className === 'string' ? el0.className.split(/\\s+/).filter(c => /^[a-zA-Z][a-zA-Z_-]*$/.test(c) && !/^svelte-/.test(c)).slice(0, 3) : [];
+    const raw = call(INNER_TEXT, el0);
+    const text = (typeof raw === 'string' ? raw : String(call(TEXT_CONTENT, el0) || '')).slice(0, 2000).replace(/\\s+/g, ' ').trim();
+    if (text) out.grep.text = text.slice(0, 60);
+    const id = attr(el0, 'id');
+    if (id) out.grep.id = id.slice(0, 100);
+    const testId = attr(el0, 'data-testid');
+    if (testId) out.grep.testId = testId.slice(0, 100);
+    const classes = (attr(el0, 'class') || '').split(/\\s+/).filter(c => /^[a-zA-Z][a-zA-Z_-]*$/.test(c) && !/^svelte-/.test(c)).slice(0, 3);
     if (classes.length) out.grep.classes = classes;
   } catch (e) {}
   return out;
@@ -168,13 +198,19 @@ interface Resolved {
   fromMap?: boolean;
 }
 
-/** Per-call view of the workspace: its roots and cached file checks. */
+/** How long one browser_inspect call waits for scripts and maps in total. */
+const CALL_DEADLINE_MS = 8000;
+/** How long a workspace view (file checks, folder listing) is reused. */
+const WORKSPACE_TTL_MS = 5000;
+
+/** A view of the workspace: its roots and cached file checks and folder listings, shared for a few seconds. */
 class Workspace {
   readonly roots: string[];
   readonly platform: PathPlatform;
   private readonly stats = new Map<string, boolean>();
   private readonly folderCache = new Map<string, string[]>();
   readonly fs: WorkspaceFs;
+  readonly created = Date.now();
 
   constructor(roots: readonly string[]) {
     this.roots = [...roots];
@@ -188,6 +224,7 @@ class Workspace {
           } catch {
             known = false;
           }
+          if (this.stats.size > 5000) this.stats.clear();
           this.stats.set(p, known);
         }
         return known;
@@ -208,6 +245,16 @@ class Workspace {
     const also = !outside && mapped.alsoIn ? ` (also in ${mapped.alsoIn} other folder${mapped.alsoIn === 1 ? '' : 's'})` : '';
     return { display: display + also, outside, library: mapped.library };
   }
+}
+
+let sharedWorkspace: Workspace | undefined;
+
+/** The workspace view for these roots, reused for WORKSPACE_TTL_MS (originalLocation is called for several locations in a row). */
+function workspaceFor(call: PageCall): Workspace {
+  const roots = [...(call.env.services.window.workspaceFolders ?? [])];
+  const ws = sharedWorkspace;
+  if (ws && Date.now() - ws.created < WORKSPACE_TTL_MS && ws.roots.length === roots.length && ws.roots.every((r, i) => r === roots[i])) return ws;
+  return (sharedWorkspace = new Workspace(roots));
 }
 
 /** Folders under a root, up to 3 levels, root-relative; not node_modules or dot folders. At most 400. */
@@ -248,14 +295,31 @@ function shortUrl(url: string, pageUrl: string): string {
   }
 }
 
+class CallTimeout extends Error {}
+
 /** Resolves locations for one call: through source maps (cached per tab) and the workspace. */
 class Resolver {
   readonly notes = new Set<string>();
+  private readonly deadline = Date.now() + CALL_DEADLINE_MS;
+  private readonly loaderId: string | undefined;
 
   constructor(
     private readonly call: PageCall,
     readonly ws: Workspace,
-  ) {}
+  ) {
+    this.loaderId = this.currentLoader();
+  }
+
+  private currentLoader(): string | undefined {
+    return this.call.frame ? this.call.frame.loaderId : this.call.state.loaderId;
+  }
+
+  /** Throws when the page (or the element's frame) navigated since the call started: the data are gone. */
+  checkDocument(): void {
+    if (this.currentLoader() !== this.loaderId) {
+      throw new ToolError('failed', `The page in ${this.call.tab.id} navigated while its source maps were loading, so the element is gone. Take a snapshot and inspect again.`);
+    }
+  }
 
   file(loc: FileLocation | undefined): Resolved {
     if (!loc) return {};
@@ -263,14 +327,40 @@ class Resolver {
     return { location: withLine(m.display, loc.line, loc.column), outside: m.outside, library: m.library };
   }
 
+  /** The script's map, within the call's deadline and honouring cancellation. */
+  private mapOf(url: string): Promise<MapResult> {
+    const signal = this.call.signal;
+    return new Promise((resolve, reject) => {
+      if (signal.aborted) return reject(new ToolError('cancelled', 'Cancelled.'));
+      const onAbort = () => finish(() => reject(new ToolError('cancelled', 'Cancelled.')));
+      const timer = setTimeout(() => finish(() => reject(new CallTimeout())), Math.max(0, this.deadline - Date.now()));
+      let done = false;
+      const finish = (fn: () => void) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        signal.removeEventListener('abort', onAbort);
+        fn();
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+      scriptMap(this.call, url).then(r => finish(() => resolve(r)));
+    });
+  }
+
   /** A generated position (1-based) in a script: through its source map when it has one. */
   async generated(url: string, line: number, column: number): Promise<Resolved> {
     if (/^webpack-internal:/i.test(url)) return this.file({ file: url, line, column });
-    if (!/^(https?|file):/i.test(url)) return { location: withLine(url, line, column), outside: true };
-    if (isLibraryUrl(url)) return { library: true };
     const pageUrl = this.call.frame?.url ?? this.call.state.url;
-    const bundled = withLine(shortUrl(url, pageUrl), line, column);
-    const result = await scriptMap(this.call, url);
+    const bundled = withLine(shortUrl(url, pageUrl).slice(0, 300), line, column);
+    if (!/^https?:/i.test(url)) return { location: bundled, bundled: true, problem: 'not loaded: only http and https scripts are read' };
+    if (isLibraryUrl(url)) return { library: true };
+    let result: MapResult;
+    try {
+      result = await this.mapOf(url);
+    } catch (err) {
+      if (err instanceof CallTimeout) return { location: bundled, bundled: true, problem: `script and source map not loaded within ${CALL_DEADLINE_MS / 1000} s` };
+      throw err;
+    }
     if ('error' in result) {
       if (result.missing) {
         // A script served as written (no bundler): its URL path may be the file itself.
@@ -280,7 +370,13 @@ class Resolver {
       }
       return { location: bundled, bundled: true, problem: result.error };
     }
-    const pos = result.map.lookup(line - 1, column - 1);
+    let pos;
+    try {
+      pos = result.map.lookup(line - 1, column - 1);
+    } catch (err) {
+      if (err instanceof SourceMapError) return { location: bundled, bundled: true, problem: `unusable source map: ${err.message}` };
+      throw err;
+    }
     if (!pos) return { location: bundled, bundled: true, problem: 'position not in its source map' };
     const m = this.ws.map(pos.source, { ignored: pos.ignored });
     if (result.scriptModified && !this.call.frame) {
@@ -298,56 +394,76 @@ class Resolver {
   }
 }
 
-function roots(call: PageCall): string[] {
-  return [...(call.env.services.window.workspaceFolders ?? [])];
-}
-
 /** The text of browser_inspect for an element. */
 export async function elementSource(call: PageCall, target: ElementTarget): Promise<string> {
   const at = target.call;
-  const probe = await at.callOn<Probe>(target.objectId, SOURCE_PROBE, [], { returnByValue: true, timeoutMs: 5000 });
-  const ws = new Workspace(roots(call));
+  const probe = sanitizeProbe(await at.callOn<unknown>(target.objectId, SOURCE_PROBE, [], { returnByValue: true, timeoutMs: 5000 }));
+  const ws = workspaceFor(call);
   const resolver = new Resolver(at, ws);
-  const entries: Array<SourceEntry & { fromMap?: boolean }> = [];
+  type Entry = SourceEntry & { fromMap?: boolean };
+  /** Entries per source of data, with the depth it was found at: listed innermost first. */
+  const groups: Array<{ depth: number; entries: Entry[] }> = [];
+  const group = (depth: number) => {
+    const g = { depth, entries: [] as Entry[] };
+    groups.push(g);
+    return (entry: Pick<SourceEntry, 'name' | 'tag' | 'note'>, resolved: Resolved) => g.entries.push({ ...entry, ...resolved });
+  };
   const frameworks: string[] = [];
-  const add = (entry: Pick<SourceEntry, 'name' | 'tag' | 'note'>, resolved: Resolved) => entries.push({ ...entry, ...resolved });
   let names: string[] = [];
   let namesWhy = '';
+  let uncertain: string | undefined;
 
   if (probe.attr) {
     const a = probe.attr;
-    const loc: FileLocation | undefined =
-      a.kind === 'react-dev-inspector' ? { file: a.value, line: Number(a.line) || undefined, column: Number(a.column) || undefined } : parseInspectorPath(a.value);
-    add({ tag: a.tag, note: a.self ? a.kind : `${a.kind}, on an ancestor` }, resolver.file(loc));
+    const loc: FileLocation | undefined = a.kind === 'react-dev-inspector' ? { file: a.value, line: a.line || undefined, column: a.column || undefined } : parseInspectorPath(a.value);
+    group(a.depth)({ tag: a.tag, note: a.depth === 0 ? a.kind : `${a.kind}, on an ancestor` }, resolver.file(loc));
   }
 
   if (probe.react?.dev && probe.react.chain.length) {
-    const chain = probe.react.chain;
-    const usesStacks = chain.some(c => c.stack) && !chain.some(c => c.source);
+    const react = probe.react;
+    const usesStacks = react.chain.some(c => c.stack) && !react.chain.some(c => c.source);
     const resolved = await Promise.all(
-      chain.map(c =>
-        c.source?.fileName ? Promise.resolve(resolver.file({ file: c.source.fileName, line: c.source.lineNumber, column: c.source.columnNumber })) : resolver.stack(c.stack),
-      ),
+      react.chain.map(c => (c.source ? Promise.resolve(resolver.file({ file: c.source.fileName, line: c.source.lineNumber, column: c.source.columnNumber })) : resolver.stack(c.stack))),
     );
+    resolver.checkDocument();
     if (resolved.some(r => r.location || r.library)) {
       frameworks.push(usesStacks ? 'React 19' : 'React');
-      chain.forEach((c, i) => add({ name: c.name, note: i === 0 && resolved[i]!.location ? (probe.react!.self ? 'where the element is written' : 'where its ancestor is written') : undefined }, resolved[i]!));
+      const add = group(react.depth);
+      react.chain.forEach((c, i) => add({ name: c.name, note: i === 0 && resolved[i]!.location ? (react.depth === 0 ? 'where the element is written' : 'where its ancestor is written') : undefined }, resolved[i]!));
     } else {
-      names = chain.map(c => c.name);
+      names = react.chain.map(c => c.name);
       namesWhy = 'React development build without JSX source info';
     }
   }
 
-  for (const [key, label] of [['vue3', 'Vue 3'], ['vue2', 'Vue 2']] as const) {
-    const vue = probe[key];
-    if (!vue?.dev || !vue.chain.length) continue;
+  if (probe.vue3?.chain.length) {
+    const vue = probe.vue3;
     if (vue.chain.some(c => c.file)) {
-      frameworks.push(label);
+      frameworks.push('Vue 3');
+      const add = group(vue.depth);
       for (const c of vue.chain) add({ name: c.name }, c.file ? resolver.file({ file: c.file }) : {});
       resolver.notes.add('Vue gives files, not lines, for components.');
     } else if (!names.length) {
       names = vue.chain.map(c => c.name);
-      namesWhy = `${label} development build without component files (__file)`;
+      namesWhy = 'Vue 3 development build without component files (__file)';
+    }
+  }
+
+  if (probe.vue2?.chain.length) {
+    const vue = probe.vue2;
+    if (vue.chain.some(c => c.file)) {
+      frameworks.push('Vue 2');
+      const add = group(vue.depth);
+      for (const c of vue.chain) add({ name: c.name }, c.file ? resolver.file({ file: c.file }) : {});
+      resolver.notes.add('Vue gives files, not lines, for components.');
+    } else if (!names.length) {
+      // No __file anywhere: a production build, or a development build without vue-loader. The root
+      // instance (new Vue()) has no name worth listing.
+      const named = vue.chain.filter(c => !c.root).map(c => c.name);
+      if (named.length) {
+        names = named;
+        namesWhy = 'Vue 2 without component files (__file): a production build, or no vue-loader';
+      } else uncertain = 'Vue 2 is present (only its root instance, no component files)';
     }
   }
 
@@ -356,6 +472,7 @@ export async function elementSource(call: PageCall, target: ElementTarget): Prom
     const own = svelteLocation(s.loc, s.version);
     if (own) {
       frameworks.push(`Svelte ${s.version}`);
+      const add = group(s.depth);
       add({ name: baseName(own.file), note: 'where the element is written' }, resolver.file(own));
       for (const p of s.parents) {
         const loc = svelteLocation(p, s.version);
@@ -364,26 +481,19 @@ export async function elementSource(call: PageCall, target: ElementTarget): Prom
     }
   }
 
-  const grep = probe.grep ?? {};
+  // Innermost first across frameworks too: data found nearer the element come first (stable for ties).
+  const entries = groups.sort((a, b) => a.depth - b.depth).flatMap(g => g.entries);
+  const grep = probe.grep;
   const label = target.label;
   let result: SourceResult;
   if (entries.some(e => e.location || e.library)) {
     if (!ws.roots.length) resolver.notes.add('No workspace folder is open, so paths are shown as the page reports them.');
-    result = {
-      kind: 'found',
-      label,
-      frameworks,
-      attribute: probe.attr?.kind,
-      linesFromMaps: entries.some(e => e.fromMap),
-      entries,
-      roots: ws.roots.map(rootName),
-      notes: [...resolver.notes],
-    };
+    result = { kind: 'found', label, frameworks, attribute: probe.attr?.kind, linesFromMaps: entries.some(e => e.fromMap), entries, roots: ws.roots.map(rootName), notes: [...resolver.notes] };
   } else if (names.length) result = { kind: 'names-only', label, why: namesWhy, names, grep };
   else if (probe.angular) result = { kind: 'unsupported', label, framework: 'Angular', grep };
   else if (probe.react && !probe.react.dev) result = { kind: 'production', label, evidence: 'React is present', grep };
-  else if (probe.vue2 && !probe.vue2.dev) result = { kind: 'production', label, evidence: 'Vue 2 is present (__vue__ without __file)', grep };
-  else if (probe.vueProd) result = { kind: 'production', label, evidence: probe.vueProd, grep };
+  else if (uncertain) result = { kind: 'production', label, evidence: uncertain, certain: false, grep };
+  else if (probe.vueProd) result = { kind: 'production', label, evidence: probe.vueProd === 'app' ? 'Vue 3 is present (data-v-app)' : 'Vue is present (scoped-style data-v-… attributes)', grep };
   else if (probe.svelteProd) result = { kind: 'production', label, evidence: 'Svelte is present (svelte-xxxx classes, no __svelte_meta)', grep };
   else result = { kind: 'none', label, grep };
   return formatSource(result);
@@ -397,13 +507,13 @@ function baseName(file: string): string {
  * The workspace location of a script position "url:line:col" (1-based, as consoleLog.ts writes it):
  * "file:line:col" relative to the workspace (prefixed by the folder name with several folders), or
  * undefined when it cannot be resolved to a workspace file. For other tools' locations (check after a
- * change); uses the same per-tab source map cache.
+ * change); uses the same per-tab source map cache and a workspace view shared for a few seconds.
  */
 export async function originalLocation(call: PageCall, location: string): Promise<string | undefined> {
   const loc = splitLocation(location);
   if (!loc) return undefined;
   try {
-    const resolved = await new Resolver(call, new Workspace(roots(call))).generated(loc.url, loc.line, loc.column);
+    const resolved = await new Resolver(call, workspaceFor(call)).generated(loc.url, loc.line, loc.column);
     if (!resolved.location || resolved.outside || resolved.library || resolved.bundled) return undefined;
     return resolved.location;
   } catch {

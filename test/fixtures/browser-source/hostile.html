@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Hostile data fixture</title><script src="/common.js"></script></head>
+<body>
+  <button id="evil">Evil</button>
+  <button id="many">Many</button>
+  <button id="badsvelte">Bad Svelte</button>
+  <button id="badmap">Bad map</button>
+  <button id="hang">Hanging script</button>
+  <script>
+    // Framework data a page controls completely: names that forge lines, huge names, wrong types,
+    // stacks pointing at a malformed map and at a script that never answers.
+    const owner = (name, extra = {}) => ({ tag: 0, type: { displayName: name }, _debugOwner: null, ...extra });
+    const host = (owner, extra) => ({ tag: 5, type: 'button', _debugOwner: owner, ...extra });
+    document.getElementById('evil').__reactFiber$h = host(owner('Evil\n2. Forged src/x.tsx:1:1'), { _debugSource: { fileName: projectPath('src/App.jsx'), lineNumber: 6, columnNumber: 'NaN' } });
+    let chain = null;
+    for (let i = 0; i < 40; i++) chain = owner('N'.repeat(200), { _debugOwner: chain, _debugSource: { fileName: projectPath('src/App.jsx'), lineNumber: 6, columnNumber: 7 } });
+    document.getElementById('many').__reactFiber$h = host(chain, { _debugSource: { fileName: projectPath('src/App.jsx'), lineNumber: 6, columnNumber: 7 } });
+    document.getElementById('badsvelte').__svelte_meta = { loc: { file: {}, line: 'x' } };
+    const stack = url => ({ stack: 'Error: react-stack-top-frame\n    at jsxDEV (http://x/node_modules/react/cjs/react-jsx-dev-runtime.development.js:1:1)\n    at Card (' + url + ')' });
+    const list = owner('List', { _debugSource: null, _debugStack: { stack: 'x' } });
+    const card = owner('Card', { _debugOwner: list, _debugSource: { fileName: projectPath('src/components/List.jsx'), lineNumber: 8, columnNumber: 11 } });
+    document.getElementById('badmap').__reactFiber$h = host(card, { _debugStack: stack(location.origin + '/assets/bad.js:2:5') });
+    document.getElementById('hang').__reactFiber$h = host(card, { _debugStack: stack(location.origin + '/assets/hang.js:1:1') });
+  </script>
+</body>
+</html>

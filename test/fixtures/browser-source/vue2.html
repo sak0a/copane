@@ -7,6 +7,7 @@
       <span id="hint">Legacy hint</span>
     </div>
   </div>
+  <div id="root2"><span id="rootonly">Only a root instance</span></div>
   <script>
     // What Vue 2 sets: el.__vue__ on each component's root element, vm.$parent, and $options.__file
     // (vue-loader in development, relative to the project).
@@ -15,6 +16,8 @@
     const panel = { $options: { name: 'LegacyPanel', __file: 'src/components/LegacyPanel.vue' }, $parent: app };
     document.getElementById('root').__vue__ = root;
     document.getElementById('legacy').__vue__ = panel;
+    // A development root (new Vue({ el })) without components or __file.
+    document.getElementById('root2').__vue__ = { $options: {}, $parent: undefined };
   </script>
 </body>
 </html>

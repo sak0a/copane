@@ -6,6 +6,8 @@
 //                                 errors; the map points them at project/src/**/*.jsx
 //   /assets/bundle-nomap.js       the same code; its map reference answers 404
 //   /node_modules/fake-lib/index.js   a library component's stack (counted as library code)
+//   /assets/bad.js (+ .map)       a map whose mappings are malformed on line 2
+//   /assets/hang.js               never answers (until the server stops)
 //
 // The pages take ?root=<workspace folder> for absolute component paths (__file, _debugSource,
 // data-insp-path) and ?other=<origin> for the cross-origin frame. Usable standalone:
@@ -98,6 +100,7 @@ const fakeLib = [
 ].join('\n');
 
 export async function startSourceServer({ port = 0, host = '127.0.0.1' } = {}) {
+  const hanging = new Set();
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
     const send = (status, body, type) => {
@@ -109,6 +112,10 @@ export async function startSourceServer({ port = 0, host = '127.0.0.1' } = {}) {
       if (url.pathname === '/assets/bundle.js.map') return send(200, bundle.map, types['.map']);
       if (url.pathname === '/assets/bundle-nomap.js') return send(200, bundleNomap.code, types['.js']);
       if (url.pathname === '/node_modules/fake-lib/index.js') return send(200, fakeLib, types['.js']);
+      // A map whose mappings break on line 2, and a script that never answers (hostile.html points stacks at them).
+      if (url.pathname === '/assets/bad.js') return send(200, 'void 0;\nfunction Card() {}\n//# sourceMappingURL=bad.js.map\n', types['.js']);
+      if (url.pathname === '/assets/bad.js.map') return send(200, '{"version":3,"sources":["../src/a.jsx"],"mappings":"AAAA;!!!!"}', types['.map']);
+      if (url.pathname === '/assets/hang.js') return void hanging.add(res);
       if (url.pathname.startsWith('/project/')) return send(404, 'not found', 'text/plain');
       const file = normalize(join(here, url.pathname === '/' ? 'plain.html' : url.pathname));
       if (!file.startsWith(here)) return send(403, 'forbidden', 'text/plain');

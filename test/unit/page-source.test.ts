@@ -1,8 +1,20 @@
-import { describe, expect, it } from 'vitest';
-import { decodeDataUrl, decodeVlq, findSourceMapUrl, MAX_MAPPINGS_CHARS, parseSourceMap, resolveUrl, SourceMapError } from '../../src/extension/browser/page/sourceMap';
+import * as nodeFs from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { elementSource, originalLocation } from '../../src/extension/browser/page/source';
+import { cacheStats, scriptMap } from '../../src/extension/browser/page/sourceFetch';
+import { decodeDataUrl, decodeVlq, findSourceMapUrl, MAX_LINES, MAX_MAPPINGS_CHARS, parseSourceMap, resolveUrl, SourceMapError } from '../../src/extension/browser/page/sourceMap';
 import { elementCreationFrame, parseInspectorPath, parseStack, splitLocation, svelteLocation } from '../../src/extension/browser/page/stackFrames';
 import { displayPath, mapToWorkspace, MAX_STATS_PER_PATH, normalizeSourcePath, type WorkspaceFs } from '../../src/extension/browser/page/workspacePaths';
-import { formatSource, grepPhrase, type SourceEntry } from '../../src/extension/browser/page/sourceReport';
+import { clean, formatSource, grepPhrase, MAX_RESULT, sanitizeProbe, type SourceEntry } from '../../src/extension/browser/page/sourceReport';
+
+// Counts directory listings (item: the workspace view is shared for a few seconds).
+vi.mock('node:fs', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return { ...actual, readdirSync: vi.fn(actual.readdirSync) };
+});
 
 // ---------------------------------------------------------------- a small encoder for test maps
 
@@ -236,10 +248,20 @@ describe('mapToWorkspace', () => {
   const roots = ['/home/me/shop'];
   const fs = () => fakeFs(['/home/me/shop/src/components/Card.tsx', '/home/me/shop/src/App.vue', '/home/me/shop/README.md', '/home/me/shop/apps/web/src/main.ts']);
 
-  it('maps an absolute path inside a root without touching the disk', () => {
+  it('maps an absolute path inside a root with one file check', () => {
     const f = fs();
     expect(mapToWorkspace('/home/me/shop/src/App.vue', roots, f, 'linux')).toEqual({ root: '/home/me/shop', rel: 'src/App.vue', library: false });
-    expect(f.stats).toBe(0);
+    expect(f.stats).toBe(1);
+  });
+
+  it('claims nothing under a root that does not exist there, and nothing that escapes it', () => {
+    expect(mapToWorkspace('/home/me/shop/does/not/exist.tsx', roots, fs(), 'linux')).toEqual({ unmapped: '/home/me/shop/does/not/exist.tsx', library: false });
+    // A folder is not a file.
+    expect(mapToWorkspace('/home/me/shop/src', roots, fs(), 'linux')).toHaveProperty('unmapped');
+    expect(mapToWorkspace('/home/me/shop/../../../../etc/passwd', roots, fs(), 'linux')).toEqual({ unmapped: '/etc/passwd', library: false });
+    expect(mapToWorkspace('/home/me/shop/src/../src/App.vue', roots, fs(), 'linux')).toMatchObject({ rel: 'src/App.vue' });
+    expect(normalizeSourcePath('C:/a/../../b.ts')).toBe('C:/b.ts');
+    expect(normalizeSourcePath('../x/../y.ts')).toBe('../y.ts');
   });
 
   it('maps container, Vite, webpack, /@fs/ and file:// paths by suffix', () => {
@@ -429,5 +451,315 @@ describe('formatSource', () => {
     expect(grepPhrase({})).toBeUndefined();
     expect(grepPhrase({ id: 'a' })).toBe('id "a"');
     expect(grepPhrase({ text: 'Hi "there"' })).toBe('"Hi \\"there\\""');
+  });
+});
+
+// ---------------------------------------------------------------- bounded and hostile input
+
+describe('source maps from pages are bounded', () => {
+  it('a malformed mappings string fails the lookup with SourceMapError, every time', () => {
+    const map = parseSourceMap('{"version":3,"sources":["a.jsx"],"mappings":"AAAA;!!!!"}', 'http://h/a.js.map');
+    expect(map.lookup(0, 0)).toMatchObject({ line: 1 });
+    expect(() => map.lookup(1, 0)).toThrow(SourceMapError);
+    expect(() => map.lookup(0, 0)).toThrow(/invalid character/);
+    expect(() => parseSourceMap('{"version":3,"sources":["a"],"mappings":"AA"}', 'http://h/a.map').lookup(0, 0)).toThrow(/2 or 3 fields/);
+  });
+
+  it('refuses deeply nested or malformed index maps without overflowing the stack', () => {
+    const open = '{"version":3,"sections":[{"offset":{"line":0,"column":0},"map":';
+    const leaf = '{"version":3,"sources":["a"],"mappings":"AAAA"}';
+    for (const depth of [4, 3000, 100_000]) {
+      const text = open.repeat(depth) + leaf + '}]}'.repeat(depth);
+      expect(() => parseSourceMap(text, 'http://h/a.map'), `depth ${depth}`).toThrow(SourceMapError);
+      expect(() => parseSourceMap(text, 'http://h/a.map')).toThrow(/nested too deeply/);
+    }
+    const badOffset = { version: 3, sections: [{ offset: { line: '1', column: 0 }, map: { version: 3, sources: ['a'], mappings: 'AAAA' } }] };
+    expect(() => parseSourceMap(JSON.stringify(badOffset), 'http://h/a.map')).toThrow(/valid offset/);
+  });
+
+  it('refuses a map of millions of empty lines quickly, before allocating, and says the limits', () => {
+    const started = Date.now();
+    expect(() => parseSourceMap(JSON.stringify({ version: 3, sources: ['a'], mappings: ';'.repeat(MAX_LINES + 1) }), 'http://h/a.map')).toThrow(/too large \(limits: .*lines/);
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it('decodes only as far as the line looked up; out-of-order segments are still found', () => {
+    // Line 0 has segments at columns 10 and 0 (out of order); line 2 is malformed but never reached.
+    const map = parseSourceMap(JSON.stringify({ version: 3, sources: ['a.ts'], mappings: 'UAAE,VAAC;AACA;!' }), 'http://h/a.js.map');
+    // Segments: column 10 → original column 3, column 0 → original column 4 (1-based).
+    expect(map.lookup(0, 5)).toMatchObject({ line: 1, column: 4 });
+    expect(map.lookup(0, 12)).toMatchObject({ line: 1, column: 3 });
+    expect(map.lookup(1, 0)).toMatchObject({ line: 2 });
+    expect(() => map.lookup(2, 0)).toThrow(SourceMapError);
+  });
+
+  it('keeps only what lookups need: sourcesContent does not count', () => {
+    const big = 'x'.repeat(2_000_000);
+    const map = parseSourceMap(JSON.stringify({ version: 3, sources: ['a.ts'], sourcesContent: [big], names: ['n'], mappings: 'AAAA' }), 'http://h/a.js.map');
+    expect(map.size).toBeLessThan(1000);
+  });
+});
+
+describe('page strings are checked and bounded', () => {
+  it('clean collapses newlines and control characters, clips, and drops non-strings', () => {
+    expect(clean('Card\n2. Forged src/x.ts', 60)).toBe('Card 2. Forged src/x.ts');
+    expect(clean('a‮b\u0000c', 60)).toBe('a b c');
+    expect(clean('x'.repeat(100), 60)).toHaveLength(60);
+    expect(clean({}, 60)).toBeUndefined();
+    expect(clean('   ', 60)).toBeUndefined();
+  });
+
+  it('sanitizeProbe keeps only well-typed fields', () => {
+    const p = sanitizeProbe({
+      tag: 'button',
+      react: { dev: true, depth: 0, chain: [{ name: 'A\nB', source: { fileName: '/x.tsx', lineNumber: 'NaN', columnNumber: Infinity } }, { name: { evil: 1 } }, 'junk'] },
+      svelte: { depth: 'x', version: 4, loc: { file: {}, line: 1 }, parents: [{ file: 3 }] },
+      vue3: { depth: 1, chain: [{ name: 'X'.repeat(500), file: 7 }] },
+      grep: { text: 'ok', id: {}, classes: ['a', {}, 'b\nc'] },
+    });
+    expect(p.react!.chain).toEqual([{ name: 'A B', source: { fileName: '/x.tsx', lineNumber: undefined, columnNumber: undefined } }, { name: 'Anonymous' }]);
+    expect(p.svelte).toEqual({ depth: 0, version: 4, parents: [] });
+    expect(p.vue3!.chain[0]!.name).toHaveLength(60);
+    expect(p.vue3!.chain[0]!.file).toBeUndefined();
+    expect(p.grep).toEqual({ text: 'ok', classes: ['a', 'b c'] });
+    expect(sanitizeProbe(null)).toEqual({ tag: 'element', grep: {} });
+  });
+
+  it('a forged name cannot add numbered entries, and the result is capped', () => {
+    const entries = Array.from({ length: 40 }, () => ({ name: `N\n1. fake ${'y'.repeat(200)}`, location: `src/${'z'.repeat(400)}.tsx:1` }));
+    const text = formatSource({ kind: 'found', label: 'x', frameworks: ['React'], linesFromMaps: false, entries, roots: ['p'], notes: [] });
+    const numbered = text.split('\n').filter(l => /^\d+\. /.test(l));
+    expect(numbered.length).toBeGreaterThan(5);
+    expect(numbered.length).toBeLessThanOrEqual(12);
+    expect(numbered.every((l, i) => l.startsWith(`${i + 1}. N 1. fake`))).toBe(true);
+    expect(text.length).toBeLessThanOrEqual(MAX_RESULT);
+  });
+
+  it('Svelte 5 without a parent chain (5.0-5.35) reads 1-based lines', () => {
+    expect(svelteLocation({ file: 'src/Child.svelte', line: 7, column: 2 }, 5)).toEqual({ file: 'src/Child.svelte', line: 7, column: 3 });
+    expect(sanitizeProbe({ svelte: { version: 5, depth: 0, loc: { file: 'src/Child.svelte', line: 7, column: 2 } } }).svelte).toEqual({
+      depth: 0,
+      version: 5,
+      loc: { file: 'src/Child.svelte', line: 7, column: 2 },
+      parents: [],
+    });
+  });
+});
+
+describe('React frame filter', () => {
+  it('does not take an app folder named scheduler for React, nor an app function named createElement', () => {
+    const stack = `Error: react-stack-top-frame
+    at exports.jsxDEV (http://localhost:5173/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=1:250:30)
+    at CalendarGrid (http://localhost:5173/src/features/scheduler/CalendarGrid.tsx:42:9)
+    at Object.react-stack-bottom-frame (http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=1:1:1)`;
+    expect(elementCreationFrame(stack)?.fn).toBe('CalendarGrid');
+    const own = `Error: react-stack-top-frame
+    at jsxDEV (http://h/node_modules/react/cjs/react-jsx-dev-runtime.development.js:1:1)
+    at createElement (http://h/src/dom/createElement.ts:5:3)`;
+    expect(elementCreationFrame(own)).toMatchObject({ fn: 'createElement', line: 5 });
+    const lib = `Error: x
+    at createElement (http://h/node_modules/react/cjs/react.development.js:1:1)
+    at Card (http://h/src/Card.tsx:3:4)`;
+    expect(elementCreationFrame(lib)?.fn).toBe('Card');
+  });
+});
+
+// ---------------------------------------------------------------- fetching, caching, resolving (a fake CDP)
+
+interface FakeResource {
+  status?: number;
+  body?: string;
+  headers?: Record<string, string>;
+  hang?: boolean;
+}
+
+/** A PageCall stand-in: CDP answers from `resources`; the workspace is real files. */
+function fakeCall(options: { resources: Record<string, FakeResource>; roots: string[]; url?: string; probe?: unknown; sendError?: (method: string) => string | undefined }) {
+  const sent: Array<{ method: string; params: any }> = [];
+  const streams = new Map<string, string>();
+  let next = 1;
+  const state: any = { loaderId: 'L1', url: options.url ?? 'http://localhost:5173/', mainFrameId: 'F1', seq: 0, navigations: { all: () => [] }, network: { entries: { after: () => [] }, annotate() {} } };
+  const cdp = {
+    send: async (method: string, params: any) => {
+      sent.push({ method, params });
+      const error = options.sendError?.(method);
+      if (error) throw new Error(error);
+      if (method === 'Network.loadNetworkResource') {
+        const r = options.resources[params.url];
+        if (r?.hang) return new Promise(() => {});
+        if (!r || (r.status ?? 200) >= 400) return { resource: { success: false, httpStatusCode: r?.status ?? 404 } };
+        const id = String(next++);
+        streams.set(id, r.body ?? '');
+        return { resource: { success: true, httpStatusCode: 200, stream: id, headers: r.headers ?? {} } };
+      }
+      if (method === 'IO.read') {
+        const data = streams.get(params.handle) ?? '';
+        streams.set(params.handle, '');
+        return { data, eof: data === '' };
+      }
+      return {};
+    },
+  };
+  const controller = new AbortController();
+  const call: any = {
+    state,
+    frame: undefined,
+    cdp,
+    signal: controller.signal,
+    tab: { id: 'tab-1' },
+    env: { services: { window: { workspaceFolders: options.roots } } },
+    callOn: async () => options.probe,
+    evaluate: async () => ({ ok: false, why: 'fallback used' }),
+  };
+  return { call, sent, state, controller };
+}
+
+/** A workspace folder with files (relative path → content). */
+function workspace(files: Record<string, string>): string {
+  const root = mkdtempSync(join(tmpdir(), 'copane-source-'));
+  for (const [rel, text] of Object.entries(files)) {
+    mkdirSync(join(root, rel, '..'), { recursive: true });
+    writeFileSync(join(root, rel), text);
+  }
+  return root;
+}
+
+const MAP = JSON.stringify({ version: 3, sources: ['../src/components/Card.jsx'], mappings: 'AAAA,QAMM' });
+const SCRIPT = 'function Card() { return jsxDEV("b"); }\n//# sourceMappingURL=bundle.js.map\n';
+
+describe('fetching scripts and maps', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('originalLocation resolves a console location through the source map to a workspace file', async () => {
+    const root = workspace({ 'src/components/Card.jsx': 'x' });
+    const { call } = fakeCall({ roots: [root], resources: { 'http://localhost:5173/assets/bundle.js': { body: SCRIPT }, 'http://localhost:5173/assets/bundle.js.map': { body: MAP } } });
+    expect(await originalLocation(call, 'http://localhost:5173/assets/bundle.js:1:10')).toBe('src/components/Card.jsx:7:7');
+    // Not resolvable to a workspace file: undefined (the caller keeps its own text).
+    expect(await originalLocation(call, 'http://localhost:5173/assets/other.js:1:1')).toBeUndefined();
+    expect(await originalLocation(call, 'not a location')).toBeUndefined();
+  });
+
+  it("caches per document, drops a frame's earlier documents, and does not cache failures", async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const resources: Record<string, FakeResource> = { 'http://localhost:5173/a.js': { body: SCRIPT.replace('bundle.js.map', 'a.js.map') } };
+    const { call, state, sent } = fakeCall({ roots: [], resources });
+    const loads = () => sent.filter(s => s.method === 'Network.loadNetworkResource').length;
+    expect(await scriptMap(call, 'http://localhost:5173/a.js')).toEqual({ error: 'source map not found: /a.js.map answered 404' });
+    await scriptMap(call, 'http://localhost:5173/a.js');
+    expect(loads()).toBe(2); // a failure is reused only briefly: no new load within 3 s
+    resources['http://localhost:5173/a.js.map'] = { body: MAP };
+    vi.setSystemTime(Date.now() + 4000);
+    expect(await scriptMap(call, 'http://localhost:5173/a.js')).toHaveProperty('map');
+    const loaded = loads();
+    expect(loaded).toBe(4);
+    await scriptMap(call, 'http://localhost:5173/a.js');
+    expect(loads()).toBe(loaded); // a map is cached
+    expect(cacheStats(state).bytes).toBeGreaterThan(0);
+    state.loaderId = 'L2';
+    await scriptMap(call, 'http://localhost:5173/a.js');
+    expect(cacheStats(state).entries).toBe(1); // L1's entry is gone
+  });
+
+  it('a hanging script is a per-load note after 5 s, not a failed tool', async () => {
+    vi.useFakeTimers();
+    const { call } = fakeCall({ roots: [], resources: { 'http://localhost:5173/hang.js': { hang: true } } });
+    const pending = scriptMap(call, 'http://localhost:5173/hang.js');
+    await vi.advanceTimersByTimeAsync(5100);
+    expect(await pending).toEqual({ error: 'script not readable: did not load within 5 s' });
+  });
+
+  it('only "method wasn\'t found" switches to the fallback; other errors stay per load', async () => {
+    const stale = fakeCall({ roots: [], resources: {}, sendError: m => (m === 'Network.loadNetworkResource' ? 'Frame not found' : undefined) });
+    expect(await scriptMap(stale.call, 'http://localhost:5173/x.js')).toEqual({ error: 'script not readable: could not be loaded (Frame not found)' });
+    await scriptMap(stale.call, 'http://localhost:5173/y.js');
+    expect(stale.sent.filter(s => s.method === 'Network.loadNetworkResource')).toHaveLength(2);
+    const missing = fakeCall({ roots: [], resources: {}, sendError: m => (m === 'Network.loadNetworkResource' ? "'Network.loadNetworkResource' wasn't found" : undefined) });
+    expect(await scriptMap(missing.call, 'http://localhost:5173/x.js')).toEqual({ error: 'script not readable: fallback used' });
+    await scriptMap(missing.call, 'http://localhost:5173/y.js');
+    expect(missing.sent.filter(s => s.method === 'Network.loadNetworkResource')).toHaveLength(1);
+  });
+
+  it("loads only http(s), and sends cookies only to the page's own origin", async () => {
+    const { call, sent } = fakeCall({ roots: [], resources: { 'http://cdn.example/a.js': { status: 403 } } });
+    expect(await scriptMap(call, 'file:///etc/passwd')).toEqual({ error: 'script not readable: was not loaded (only http and https URLs are; this is file:)' });
+    expect(await scriptMap(call, 'http://cdn.example/a.js')).toEqual({ error: 'script not readable: answered 403 (loaded without cookies: another origin than the page)' });
+    await scriptMap(call, 'http://localhost:5173/own.js');
+    const credentials = sent.filter(s => s.method === 'Network.loadNetworkResource').map(s => [s.params.url, s.params.options.includeCredentials]);
+    expect(credentials).toEqual([
+      ['http://cdn.example/a.js', false],
+      ['http://localhost:5173/own.js', true],
+    ]);
+  });
+});
+
+describe('elementSource', () => {
+  const label = 'button "Add" [ref=e1]';
+  const target = (call: any) => ({ kind: 'element', backendNodeId: 1, objectId: 'o', label, ref: 'e1', call }) as any;
+  const stack = (url: string) => `Error: react-stack-top-frame\n    at jsxDEV (http://localhost:5173/node_modules/react/cjs/react-jsx-dev-runtime.development.js:1:1)\n    at Card (${url}:1:10)`;
+
+  it('a malformed map becomes a note on its entries; names and other entries stay', async () => {
+    const root = workspace({ 'src/List.jsx': 'x' });
+    const probe = {
+      tag: 'button',
+      react: { dev: true, depth: 0, chain: [{ name: 'Card', stack: stack('http://localhost:5173/bad.js') }, { name: 'List', source: { fileName: '/build/src/List.jsx', lineNumber: 3, columnNumber: 5 } }] },
+      grep: {},
+    };
+    const { call } = fakeCall({
+      roots: [root],
+      probe,
+      resources: { 'http://localhost:5173/bad.js': { body: '//# sourceMappingURL=bad.js.map' }, 'http://localhost:5173/bad.js.map': { body: '{"version":3,"sources":["a.jsx"],"mappings":"!!!!"}' } },
+    });
+    const text = await elementSource(call, target(call));
+    expect(text).toContain('1. Card /bad.js:1:10 (where the element is written; unusable source map: invalid character in source map mappings: "!")');
+    expect(text).toContain('2. List src/List.jsx:3:5');
+  });
+
+  it('stops with a clear message when the page navigates while maps load', async () => {
+    const probe = { tag: 'button', react: { dev: true, depth: 0, chain: [{ name: 'Card', stack: stack('http://localhost:5173/slow.js') }] }, grep: {} };
+    const fake = fakeCall({
+      roots: [],
+      probe,
+      resources: {},
+      sendError: m => {
+        if (m === 'Network.loadNetworkResource') fake.state.loaderId = 'L2';
+        return undefined;
+      },
+    });
+    await expect(elementSource(fake.call, target(fake.call))).rejects.toThrow(/navigated while its source maps were loading.*inspect again/);
+  });
+
+  it('lists data found nearer the element first (Svelte on the element, Vue on a shadow host)', async () => {
+    const root = workspace({ 'src/Child.svelte': 'x', 'src/Host.vue': 'x' });
+    const probe = {
+      tag: 'button',
+      vue3: { depth: 3, chain: [{ name: 'Host', file: `${root}/src/Host.vue` }] },
+      svelte: { depth: 0, version: 5, loc: { file: `${root}/src/Child.svelte`, line: 7, column: 2 }, parents: [] },
+      grep: {},
+    };
+    const { call } = fakeCall({ roots: [root], probe, resources: {} });
+    const text = await elementSource(call, target(call));
+    expect(text.split('\n').slice(1, 3)).toEqual(['1. Child src/Child.svelte:7:3 (where the element is written)', '2. Host src/Host.vue']);
+  });
+
+  it('Vue 2 without any __file: named components only, never "minified"; a lone root is not called a production build', async () => {
+    const named = fakeCall({ roots: [], resources: {}, probe: { tag: 'span', vue2: { depth: 0, chain: [{ name: 'Panel' }, { name: 'Root', root: true }] }, grep: { text: 'Hi' } } });
+    expect(await elementSource(named.call, target(named.call))).toMatch(/^Components of .*\(Vue 2 without component files \(__file\): a production build, or no vue-loader; no file locations\):\n1\. Panel\nSearch/);
+    const root = fakeCall({ roots: [], resources: {}, probe: { tag: 'span', vue2: { depth: 0, chain: [{ name: 'Root', root: true }] }, grep: { text: 'Hi' } } });
+    const text = await elementSource(root.call, target(root.call));
+    expect(text).toMatch(/Vue 2 is present \(only its root instance, no component files\), but without file locations \(a production build, or a development build/);
+    expect(text).not.toMatch(/minified/);
+  });
+
+  it('shares the workspace folder listing between calls for a few seconds', async () => {
+    const root = workspace({ 'app/src/x.ts': 'x' });
+    const { call } = fakeCall({ roots: [root], resources: { 'http://localhost:5173/src/x.ts': { body: 'x' } } });
+    const readdir = vi.mocked(nodeFs.readdirSync);
+    readdir.mockClear();
+    expect(await originalLocation(call, 'http://localhost:5173/src/x.ts:1:1')).toBe('app/src/x.ts:1:1');
+    const listings = readdir.mock.calls.length;
+    expect(listings).toBeGreaterThan(0);
+    await originalLocation(call, 'http://localhost:5173/src/x.ts:2:1');
+    await originalLocation(call, 'http://localhost:5173/src/y.ts:3:1');
+    expect(readdir.mock.calls.length).toBe(listings);
   });
 });

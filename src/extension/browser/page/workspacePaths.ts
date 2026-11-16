@@ -60,7 +60,25 @@ export function normalizeSourcePath(raw: string): string {
   if (p.startsWith('/@fs/')) p = p.slice(4);
   if (/^\/[a-zA-Z]:\//.test(p)) p = p.slice(1);
   while (p.startsWith('./')) p = p.slice(2);
-  return p;
+  return resolveDots(p);
+}
+
+/** Resolves "." and ".." segments; ".." never climbs above an absolute path's root (a relative path keeps its leading ones). */
+function resolveDots(p: string): string {
+  if (!/(^|\/)\.\.?(\/|$)/.test(p)) return p;
+  const m = /^([a-zA-Z]:\/|\/\/[^/]+\/[^/]+\/|\/)?(.*)$/s.exec(p)!;
+  const prefix = m[1] ?? '';
+  const out: string[] = [];
+  for (const s of m[2]!.split('/')) {
+    if (s === '.' || s === '') continue;
+    if (s === '..') {
+      if (out.length && out[out.length - 1] !== '..') out.pop();
+      else if (!prefix) out.push('..');
+      continue;
+    }
+    out.push(s);
+  }
+  return prefix + out.join('/');
 }
 
 /** True for library code: a path through node_modules (or Vite's pre-bundled dependencies). */
@@ -88,22 +106,27 @@ export function mapToWorkspace(raw: string, roots: readonly string[], fs: Worksp
   if (library || !path) return { unmapped: path || raw, library };
   const fold = platform === 'linux' ? (s: string) => s : (s: string) => s.toLowerCase();
 
-  // Absolute and inside a root.
+  let stats = 0;
+  const exists = (p: string) => {
+    stats++;
+    return fs.exists(p);
+  };
+
+  // Absolute and inside a root: that file, if it exists; nothing else is claimed for it.
   for (const root of roots) {
     const key = rootKey(root);
     if (!key) continue;
-    if (fold(path).startsWith(fold(key) + '/')) return { root, rel: path.slice(key.length + 1), library };
+    if (!fold(path).startsWith(fold(key) + '/')) continue;
+    const rel = path.slice(key.length + 1);
+    if (rel.split('/').some(s => s === '..' || s === '.' || s === '')) continue;
+    if (exists(joinPath(root, rel, platform))) return { root, rel, library };
+    return { unmapped: path, library };
   }
 
   const segments = path.split('/').filter(s => s && s !== '.' && s !== '..');
   const n = segments.length;
   if (n === 0) return { unmapped: path, library };
   const minimum = n === 1 ? 1 : 2;
-  let stats = 0;
-  const exists = (p: string) => {
-    stats++;
-    return fs.exists(p);
-  };
   // Folders per root, looked up once, and only when the root itself has no match for a suffix.
   const folderSets = new Map<string, Set<string>>();
   const foldersOf = (root: string): Set<string> => {
