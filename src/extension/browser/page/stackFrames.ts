@@ -52,7 +52,7 @@ export function parseStack(stack: string): StackFrame[] {
  */
 const REACT_URL = [
   /\/node_modules\/(?:react|react-dom|scheduler|react-server-dom-[\w-]+)\//,
-  /\/node_modules\/\.vite\/deps\/(?:react|react-dom|react-dom_client|react-dom_server|react_jsx-dev-runtime|react_jsx-runtime|scheduler)\.js(?:[?#]|$)/,
+  /(?:\/node_modules)?\/\.vite\/deps\/(?:react|react-dom|react-dom_client|react-dom_server|react_jsx-dev-runtime|react_jsx-runtime|scheduler)\.js(?:[?#]|$)/,
   /\/next\/dist\/compiled\/(?:react|react-dom|scheduler)(?:-experimental)?\//,
   /(?:^|\/)(?:react|react-dom|react-dom-client|react-jsx-dev-runtime|react-jsx-runtime|scheduler)\.(?:development|production|profiling)(?:\.min)?\.js(?:[?#]|$)/,
 ];
@@ -65,27 +65,42 @@ const REACT_COMMON_FN = /(^|\.)(jsxs|jsx|jsxProd|createElement|cloneElement)$/;
 const RENDERER_ONLY_FN = /^(Object\.)?(react-stack-bottom-frame|renderWithHooks|renderWithHooksAgain|mountIndeterminateComponent|callComponentInDEV)$/;
 const RENDERER_COMMON_FN = /^(updateFunctionComponent|beginWork|performUnitOfWork)$/;
 
-/** True for a frame in a library (node_modules, Vite's pre-bundled dependencies). */
+/** True for a frame in a library (node_modules, Vite's pre-bundled dependencies, chunks named after node_modules paths as Turbopack writes them). */
 export function isLibraryUrl(url: string): boolean {
-  return /[\\/]node_modules[\\/]|\/\.vite\/deps\//.test(url);
+  return /[\\/]node_modules[\\/]|\/\.vite\/deps\/|\/[^/?#]*node_modules_[^/?#]*\.js(?:[?#]|$)/.test(url);
+}
+
+/** True when the frame's function has a name React's element creation also has (`createElement`, `jsx`, ...). */
+export function hasCommonReactName(frame: StackFrame): boolean {
+  return REACT_COMMON_FN.test(frame.fn ?? '');
 }
 
 /**
- * The frame of a React 19 `_debugStack` where the element was written: the first frame after React's
- * own leading frames. The stack holds the call that created the element, so that frame is in the
- * component that wrote the JSX. A library frame there is returned too (the caller marks it as such).
+ * The frames of a React 19 `_debugStack` that may be where the element was written, in order: those
+ * after React's own leading frames, up to the renderer. The stack holds the call that created the
+ * element, so the first is normally in the component that wrote the JSX. When React is bundled into
+ * the app's own script, its `createElement`/`jsx` frames cannot be told apart by URL: the caller
+ * resolves such a frame (`hasCommonReactName`) through the source map and moves on to the next one if
+ * it is library code. A library frame is returned too (the caller marks it as such).
  */
-export function elementCreationFrame(stack: string): StackFrame | undefined {
+export function elementCreationFrames(stack: string, max = 5): StackFrame[] {
+  const out: StackFrame[] = [];
   for (const frame of parseStack(stack)) {
     const fn = frame.fn ?? '';
     const libraryCode = isReactUrl(frame.url) || isLibraryUrl(frame.url);
     if (REACT_ONLY_FN.test(fn) || (libraryCode && REACT_COMMON_FN.test(fn))) continue;
-    // Past React's leading frames into the renderer: nothing of the user's code created this element.
-    if (RENDERER_ONLY_FN.test(fn) || (libraryCode && RENDERER_COMMON_FN.test(fn))) return undefined;
+    // Past React's leading frames into the renderer: nothing below created this element.
+    if (RENDERER_ONLY_FN.test(fn) || (libraryCode && RENDERER_COMMON_FN.test(fn))) break;
     if (isReactUrl(frame.url)) continue;
-    return frame;
+    out.push(frame);
+    if (out.length >= max) break;
   }
-  return undefined;
+  return out;
+}
+
+/** The first of `elementCreationFrames`. */
+export function elementCreationFrame(stack: string): StackFrame | undefined {
+  return elementCreationFrames(stack, 1)[0];
 }
 
 /** A location in a source file as a framework reports it: 1-based line and column when known. */

@@ -116,6 +116,9 @@ export async function startSourceServer({ port = 0, host = '127.0.0.1' } = {}) {
       if (url.pathname === '/assets/bad.js') return send(200, 'void 0;\nfunction Card() {}\n//# sourceMappingURL=bad.js.map\n', types['.js']);
       if (url.pathname === '/assets/bad.js.map') return send(200, '{"version":3,"sources":["../src/a.jsx"],"mappings":"AAAA;!!!!"}', types['.map']);
       if (url.pathname === '/assets/hang.js') return void hanging.add(res);
+      // React bundled into the app's script: line 1 is React's createElement, line 2 the app's App.jsx.
+      if (url.pathname === '/assets/mixed.js') return send(200, 'function createElement() {}\nfunction App() {}\n//# sourceMappingURL=mixed.js.map\n', types['.js']);
+      if (url.pathname === '/assets/mixed.js.map') return send(200, JSON.stringify({ version: 3, sources: ['../node_modules/react/cjs/react.development.js', '../src/App.jsx'], mappings: 'AAAA;ACKM' }), types['.map']);
       if (url.pathname.startsWith('/project/')) return send(404, 'not found', 'text/plain');
       const file = normalize(join(here, url.pathname === '/' ? 'plain.html' : url.pathname));
       if (!file.startsWith(here)) return send(403, 'forbidden', 'text/plain');

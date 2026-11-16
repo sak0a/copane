@@ -278,6 +278,24 @@ test('a script that never answers is a note after about 5 s, not a failed tool',
   entries(text, ['Card /assets/hang.js:1:1 (where the element is written; script not readable: did not load within 5 s)', 'List source-app/src/components/List.jsx:8:11']);
 });
 
+test('a navigation while a script is still loading ends the call at once with a clear message', async () => {
+  await open(page('hostile.html', { nav: '1500' }));
+  const started = Date.now();
+  const result = await a.call('browser_inspect', { selector: '#hang' });
+  const took = Date.now() - started;
+  sizes.push(`navigation during the call: answered after ${took} ms`);
+  assert.ok(result.isError, result.text);
+  assert.match(result.text, /navigated while its source maps were loading, so the element is gone\. Take a snapshot and inspect again\./);
+  assert.ok(took < 2500, `took ${took} ms (the page navigates 1.5 s after loading)`);
+});
+
+test('React bundled into the app: createElement mapping to node_modules gives way to the component', async () => {
+  await open(page('hostile.html'));
+  const text = await inspect({ selector: '#bundled' }, 'React bundled');
+  entries(text, ['App source-app/src/App.jsx:6:7 (where the element is written)']);
+  assert.doesNotMatch(text, /library component/);
+});
+
 process.on('exit', () => {
   if (sizes.length) console.log(`\nresult sizes: ${sizes.join('; ')}`);
 });

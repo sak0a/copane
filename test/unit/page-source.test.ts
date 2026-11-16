@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { elementSource, originalLocation } from '../../src/extension/browser/page/source';
 import { cacheStats, scriptMap } from '../../src/extension/browser/page/sourceFetch';
 import { decodeDataUrl, decodeVlq, findSourceMapUrl, MAX_LINES, MAX_MAPPINGS_CHARS, parseSourceMap, resolveUrl, SourceMapError } from '../../src/extension/browser/page/sourceMap';
-import { elementCreationFrame, parseInspectorPath, parseStack, splitLocation, svelteLocation } from '../../src/extension/browser/page/stackFrames';
+import { elementCreationFrame, elementCreationFrames, parseInspectorPath, parseStack, splitLocation, svelteLocation } from '../../src/extension/browser/page/stackFrames';
 import { displayPath, mapToWorkspace, MAX_STATS_PER_PATH, normalizeSourcePath, type WorkspaceFs } from '../../src/extension/browser/page/workspacePaths';
 import { clean, formatSource, grepPhrase, MAX_RESULT, sanitizeProbe, type SourceEntry } from '../../src/extension/browser/page/sourceReport';
 
@@ -503,7 +503,7 @@ describe('source maps from pages are bounded', () => {
 describe('page strings are checked and bounded', () => {
   it('clean collapses newlines and control characters, clips, and drops non-strings', () => {
     expect(clean('Card\n2. Forged src/x.ts', 60)).toBe('Card 2. Forged src/x.ts');
-    expect(clean('a‮b\u0000c', 60)).toBe('a b c');
+    expect(clean('a\u202eb\u0000c\u061cd', 60)).toBe('a b c d');
     expect(clean('x'.repeat(100), 60)).toHaveLength(60);
     expect(clean({}, 60)).toBeUndefined();
     expect(clean('   ', 60)).toBeUndefined();
@@ -561,6 +561,20 @@ describe('React frame filter', () => {
     at createElement (http://h/node_modules/react/cjs/react.development.js:1:1)
     at Card (http://h/src/Card.tsx:3:4)`;
     expect(elementCreationFrame(lib)?.fn).toBe('Card');
+    // Turbopack chunks named after node_modules paths, and Vite deps without the node_modules prefix.
+    const next = `Error: x
+    at jsx (http://h/_next/static/chunks/node_modules_next_dist_compiled_react_1.js:1:1)
+    at Page (http://h/_next/static/chunks/app_page_tsx_1.js:3:4)`;
+    expect(elementCreationFrame(next)?.fn).toBe('Page');
+    const vite = `Error: x
+    at Object.helper (http://h/.vite/deps/react_jsx-dev-runtime.js?v=1:1:1)
+    at Card (http://h/src/Card.tsx:3:4)`;
+    expect(elementCreationFrame(vite)?.fn).toBe('Card');
+    // React bundled into the app's own script: both frames are candidates; the caller resolves the first.
+    const bundled = `Error: x
+    at exports.createElement (http://h/s/mixed.js:1:1)
+    at App (http://h/s/mixed.js:2:1)`;
+    expect(elementCreationFrames(bundled).map(f => f.fn)).toEqual(['exports.createElement', 'App']);
   });
 });
 
@@ -726,6 +740,25 @@ describe('elementSource', () => {
       },
     });
     await expect(elementSource(fake.call, target(fake.call))).rejects.toThrow(/navigated while its source maps were loading.*inspect again/);
+  });
+
+  it('ends at once when the page navigates while a map is still loading', async () => {
+    const probe = { tag: 'button', react: { dev: true, depth: 0, chain: [{ name: 'Card', stack: stack('http://localhost:5173/hang.js') }] }, grep: {} };
+    const fake = fakeCall({ roots: [], probe, resources: { 'http://localhost:5173/hang.js': { hang: true } } });
+    setTimeout(() => (fake.state.loaderId = 'L2'), 300);
+    const started = Date.now();
+    await expect(elementSource(fake.call, target(fake.call))).rejects.toThrow(/navigated while its source maps were loading/);
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it('React bundled into the app: a createElement frame that maps to node_modules gives way to the next frame', async () => {
+    const root = workspace({ 'src/Good.tsx': 'x' });
+    const map = JSON.stringify({ version: 3, sources: ['../node_modules/react/cjs/react.development.js', '../src/Good.tsx'], mappings: 'AAAA;ACAA' });
+    const mixed = 'http://localhost:5173/s/mixed.js';
+    const probe = { tag: 'button', react: { dev: true, depth: 0, chain: [{ name: 'App', stack: `Error: x\n    at exports.createElement (${mixed}:1:1)\n    at App (${mixed}:2:1)` }] }, grep: {} };
+    const { call } = fakeCall({ roots: [root], probe, resources: { [mixed]: { body: 'a\nb\n//# sourceMappingURL=mixed.js.map' }, [`${mixed}.map`]: { body: map } } });
+    const text = await elementSource(call, target(call));
+    expect(text.split('\n').slice(1)).toEqual(['1. App src/Good.tsx:1:1 (where the element is written)', 'Paths are relative to the workspace folder ' + JSON.stringify(root.split('/').pop()) + '.']);
   });
 
   it('lists data found nearer the element first (Svelte on the element, Vue on a shadow host)', async () => {

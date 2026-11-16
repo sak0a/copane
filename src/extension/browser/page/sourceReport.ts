@@ -15,7 +15,7 @@ export const MAX_RESULT = 4000;
  */
 export function clean(value: unknown, max: number): string | undefined {
   if (typeof value !== 'string') return undefined;
-  const s = value.replace(/[\s\p{Cc}\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]+/gu, ' ').trim();
+  const s = value.replace(/[\s\p{Cc}\u200b-\u200f\u2028-\u202e\u061c\u2060-\u2069\ufeff]+/gu, ' ').trim();
   if (!s) return undefined;
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }

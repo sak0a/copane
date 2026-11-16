@@ -7,6 +7,7 @@
   <button id="badsvelte">Bad Svelte</button>
   <button id="badmap">Bad map</button>
   <button id="hang">Hanging script</button>
+  <button id="bundled">React bundled into the app</button>
   <script>
     // Framework data a page controls completely: names that forge lines, huge names, wrong types,
     // stacks pointing at a malformed map and at a script that never answers.
@@ -22,6 +23,12 @@
     const card = owner('Card', { _debugOwner: list, _debugSource: { fileName: projectPath('src/components/List.jsx'), lineNumber: 8, columnNumber: 11 } });
     document.getElementById('badmap').__reactFiber$h = host(card, { _debugStack: stack(location.origin + '/assets/bad.js:2:5') });
     document.getElementById('hang').__reactFiber$h = host(card, { _debugStack: stack(location.origin + '/assets/hang.js:1:1') });
+    // React's createElement and the app in one script (mixed.js): only the source map tells them apart.
+    const mixed = location.origin + '/assets/mixed.js';
+    document.getElementById('bundled').__reactFiber$h = host(owner('App'), { _debugStack: { stack: `Error: x\n    at exports.createElement (${mixed}:1:1)\n    at App (${mixed}:2:1)` } });
+    // ?nav=<ms>: the page navigates away by itself after that long (a navigation during an inspect).
+    const nav = Number(fixtureParams.get('nav'));
+    if (nav) setTimeout(() => (location.href = '/plain.html'), nav);
   </script>
 </body>
 </html>

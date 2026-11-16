@@ -12,7 +12,7 @@ import type { PageCall } from './call';
 import { scriptMap, type MapResult } from './sourceFetch';
 import { SourceMapError } from './sourceMap';
 import { formatSource, sanitizeProbe, type SourceEntry, type SourceResult } from './sourceReport';
-import { elementCreationFrame, isLibraryUrl, parseInspectorPath, splitLocation, svelteLocation, type FileLocation } from './stackFrames';
+import { elementCreationFrames, hasCommonReactName, isLibraryUrl, parseInspectorPath, splitLocation, svelteLocation, type FileLocation } from './stackFrames';
 import type { ElementTarget } from './targets';
 import { displayPath, mapToWorkspace, rootName, type PathPlatform, type WorkspaceFs } from './workspacePaths';
 
@@ -314,11 +314,15 @@ class Resolver {
     return this.call.frame ? this.call.frame.loaderId : this.call.state.loaderId;
   }
 
+  private navigated(): ToolError | undefined {
+    if (this.currentLoader() === this.loaderId) return undefined;
+    return new ToolError('failed', `The page in ${this.call.tab.id} navigated while its source maps were loading, so the element is gone. Take a snapshot and inspect again.`);
+  }
+
   /** Throws when the page (or the element's frame) navigated since the call started: the data are gone. */
   checkDocument(): void {
-    if (this.currentLoader() !== this.loaderId) {
-      throw new ToolError('failed', `The page in ${this.call.tab.id} navigated while its source maps were loading, so the element is gone. Take a snapshot and inspect again.`);
-    }
+    const err = this.navigated();
+    if (err) throw err;
   }
 
   file(loc: FileLocation | undefined): Resolved {
@@ -327,23 +331,39 @@ class Resolver {
     return { location: withLine(m.display, loc.line, loc.column), outside: m.outside, library: m.library };
   }
 
-  /** The script's map, within the call's deadline and honouring cancellation. */
+  /**
+   * The script's map, within the call's deadline, honouring cancellation, and ending at once when the
+   * document changes (page events, and a poll for a frame's own navigation).
+   */
   private mapOf(url: string): Promise<MapResult> {
     const signal = this.call.signal;
     return new Promise((resolve, reject) => {
       if (signal.aborted) return reject(new ToolError('cancelled', 'Cancelled.'));
+      const gone = this.navigated();
+      if (gone) return reject(gone);
       const onAbort = () => finish(() => reject(new ToolError('cancelled', 'Cancelled.')));
+      const onChange = () => {
+        const err = this.navigated();
+        if (err) finish(() => reject(err));
+      };
       const timer = setTimeout(() => finish(() => reject(new CallTimeout())), Math.max(0, this.deadline - Date.now()));
+      const poll = setInterval(onChange, 100);
+      const sub = this.call.state.onDidChange?.(onChange);
       let done = false;
       const finish = (fn: () => void) => {
         if (done) return;
         done = true;
         clearTimeout(timer);
+        clearInterval(poll);
+        sub?.dispose();
         signal.removeEventListener('abort', onAbort);
         fn();
       };
       signal.addEventListener('abort', onAbort, { once: true });
-      scriptMap(this.call, url).then(r => finish(() => resolve(r)));
+      scriptMap(this.call, url).then(r => {
+        const err = this.navigated();
+        finish(() => (err ? reject(err) : resolve(r)));
+      });
     });
   }
 
@@ -388,9 +408,16 @@ class Resolver {
 
   async stack(stack: string | undefined): Promise<Resolved> {
     if (!stack) return {};
-    const frame = elementCreationFrame(stack);
-    if (!frame) return {};
-    return this.generated(frame.url, frame.line, frame.column);
+    const frames = elementCreationFrames(stack);
+    for (let i = 0; i < frames.length; i++) {
+      const frame = frames[i]!;
+      const resolved = await this.generated(frame.url, frame.line, frame.column);
+      // React bundled into the app's script: its createElement/jsx resolves to library code; the
+      // element was written in the next frame.
+      if (resolved.library && hasCommonReactName(frame) && i + 1 < frames.length) continue;
+      return resolved;
+    }
+    return {};
   }
 }
 
