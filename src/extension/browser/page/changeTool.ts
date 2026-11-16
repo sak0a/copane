@@ -33,6 +33,9 @@ export function changeTools(env: PageEnv, options: { locate?: (call: PageCall, l
         return withPage(env, ctx, args.tab, { access: check && args.reload ? 'control' : 'read', skipReady: check }, async call => {
           if (!check) return takeBaseline(call, baselines);
           const base = baselines.get(call.sessionTabKey);
+          if (!base && baselines.wasEvicted(call.sessionTabKey)) {
+            throw new ToolError('invalid_input', `The baseline for ${call.tab.id} was dropped: this window keeps at most 10, and 10 newer ones were taken since. Take a new one with action "baseline" (it reflects the page as it is now).`);
+          }
           if (!base) throw new ToolError('invalid_input', `No baseline for ${call.tab.id} in this session. Call browser_check_change with action "baseline" before editing, then "check" after.`);
           return checkChange(call, base, { reload: Boolean(args.reload), timeoutMs: (args.timeout ?? 15) * 1000, locate: options.locate });
         });

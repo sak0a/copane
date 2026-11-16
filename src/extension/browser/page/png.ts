@@ -19,6 +19,16 @@ export const MAX_PNG_PIXELS = 4_000_000;
 const SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 export function decodePng(bytes: Uint8Array): RgbaImage {
+  try {
+    return decode(bytes);
+  } catch (err) {
+    // Whatever is wrong with the input (short chunks, bad data), the caller learns only that it is unusable.
+    if (err instanceof UnsupportedPng) throw err;
+    throw new UnsupportedPng(`damaged image (${err instanceof Error ? err.message : String(err)})`);
+  }
+}
+
+function decode(bytes: Uint8Array): RgbaImage {
   if (bytes.length < 8 || SIGNATURE.some((b, i) => bytes[i] !== b)) throw new UnsupportedPng('not a PNG');
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let width = 0;
@@ -33,6 +43,7 @@ export function decodePng(bytes: Uint8Array): RgbaImage {
     const start = pos + 8;
     if (start + length > bytes.length) throw new UnsupportedPng('truncated chunk');
     if (type === 'IHDR') {
+      if (length !== 13) throw new UnsupportedPng('bad header');
       width = view.getUint32(start);
       height = view.getUint32(start + 4);
       const depth = bytes[start + 8];
@@ -55,14 +66,16 @@ export function decodePng(bytes: Uint8Array): RgbaImage {
   }
   if (!sawHeader) throw new UnsupportedPng('no header');
   if (idat.length === 0) throw new UnsupportedPng('no image data');
+  const stride = width * channels;
+  const expected = (stride + 1) * height;
   let raw: Uint8Array;
   try {
-    raw = inflateSync(Buffer.concat(idat));
+    // Never more than the header promises: a small file can declare a tiny image and inflate to gigabytes.
+    raw = inflateSync(Buffer.concat(idat), { maxOutputLength: expected });
   } catch {
     throw new UnsupportedPng('damaged image data');
   }
-  const stride = width * channels;
-  if (raw.length < (stride + 1) * height) throw new UnsupportedPng('image data too short');
+  if (raw.length < expected) throw new UnsupportedPng('image data too short');
 
   const out = new Uint8Array(width * height * 4);
   let prev = new Uint8Array(stride);
@@ -118,13 +131,13 @@ function paeth(a: number, b: number, c: number): number {
 }
 
 /**
- * Shrinks the image by a whole factor so it is at most `maxWidth` wide, averaging each factor × factor
- * box (boxes at the right and bottom edge average the pixels they have). Returns the image itself when
- * it is narrow enough.
+ * Shrinks the image by a whole factor so it is at most `maxWidth` wide and has at most `maxPixels`
+ * pixels, averaging each factor × factor box (boxes at the right and bottom edge average the pixels
+ * they have). Returns the image itself when it is small enough.
  */
-export function downscale(img: RgbaImage, maxWidth: number): RgbaImage {
-  if (img.width <= maxWidth) return img;
-  const f = Math.ceil(img.width / maxWidth);
+export function downscale(img: RgbaImage, maxWidth: number, maxPixels = Infinity): RgbaImage {
+  const f = Math.max(Math.ceil(img.width / maxWidth), Math.ceil(Math.sqrt((img.width * img.height) / maxPixels)), 1);
+  if (f === 1) return img;
   const w = Math.ceil(img.width / f);
   const h = Math.ceil(img.height / f);
   const out = new Uint8Array(w * h * 4);
@@ -152,5 +165,15 @@ export function downscale(img: RgbaImage, maxWidth: number): RgbaImage {
       out[o + 3] = Math.round(a / n);
     }
   }
+  return { width: w, height: h, data: out };
+}
+
+/** The top-left `width` × `height` pixels of the image (clamped to its size). */
+export function crop(img: RgbaImage, width: number, height: number): RgbaImage {
+  const w = Math.max(1, Math.min(img.width, Math.floor(width)));
+  const h = Math.max(1, Math.min(img.height, Math.floor(height)));
+  if (w === img.width && h === img.height) return img;
+  const out = new Uint8Array(w * h * 4);
+  for (let y = 0; y < h; y++) out.set(img.data.subarray(y * img.width * 4, (y * img.width + w) * 4), y * w * 4);
   return { width: w, height: h, data: out };
 }

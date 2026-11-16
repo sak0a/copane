@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Story v{{version}}</title>
+</head>
+<body>
+  <p>Story version {{version}}</p>
+  <script>
+    // The frame's own dev-server client: an edit reloads the frame (as a preview iframe does).
+    const events = new EventSource('/events');
+    events.onmessage = event => {
+      if (JSON.parse(event.data).mode === 'frame') location.reload();
+    };
+  </script>
+</body>
+</html>

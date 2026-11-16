@@ -1,6 +1,23 @@
 // A stand-in for a dev server's client (see server.mjs): listens for edits on /events and applies
 // them the way Vite's client would, printing the same console lines.
+//
+// Query parameters make the page change on its own, as real pages do:
+//   clock=<ms>  a clock in #clock, updated every <ms>
+//   poll=<ms>   fetches /api/status?t=<now> every <ms> and writes the answer into #status
 const panel = document.getElementById('panel');
+const params = new URLSearchParams(location.search);
+
+if (params.get('clock')) {
+  const clock = document.getElementById('clock');
+  setInterval(() => (clock.textContent = new Date().toISOString()), Number(params.get('clock')));
+}
+if (params.get('poll')) {
+  const status = document.getElementById('status');
+  setInterval(async () => {
+    const r = await fetch(`/api/status?t=${Date.now()}`);
+    status.textContent = `status ${(await r.json()).n}`;
+  }, Number(params.get('poll')));
+}
 
 console.log('[vite] connecting...');
 const events = new EventSource('/events');
@@ -19,19 +36,42 @@ class ErrorOverlay extends HTMLElement {
 }
 customElements.define('vite-error-overlay', ErrorOverlay);
 
+async function hotUpdate(version) {
+  // An update that compiles clears the error overlay, as Vite's client does.
+  for (const overlay of document.querySelectorAll('vite-error-overlay')) overlay.remove();
+  const mod = await import(`/src/app.js?t=${Date.now()}`);
+  mod.render(panel, version);
+  console.debug('[vite] hot updated: /src/app.js');
+}
+
 events.onmessage = async event => {
   const { mode, version } = JSON.parse(event.data);
   switch (mode) {
     case 'hmr':
-    case '404': {
-      // An update that compiles clears the error overlay, as Vite's client does.
-      for (const overlay of document.querySelectorAll('vite-error-overlay')) overlay.remove();
-      const mod = await import(`/src/app.js?t=${Date.now()}`);
-      mod.render(panel, version);
-      console.debug('[vite] hot updated: /src/app.js');
-      if (mode === '404') fetch('/api/missing').catch(() => {});
+      await hotUpdate(version);
       break;
-    }
+    case '404':
+      await hotUpdate(version);
+      fetch('/api/missing').catch(() => {});
+      break;
+    case 'late':
+      // An error that comes a moment after the update, while a check may be taking its screenshot.
+      await hotUpdate(version);
+      setTimeout(() => console.error('late error after the update'), 900);
+      break;
+    case 'slowfail':
+      // A request that fails only after the check has returned.
+      await hotUpdate(version);
+      fetch('/api/slow?ms=5000').catch(() => {});
+      break;
+    case 'hang':
+      // An update that blocks the page for 20 s.
+      console.debug('[vite] hot updated: /src/app.js');
+      setTimeout(() => {
+        const end = Date.now() + 20_000;
+        while (Date.now() < end);
+      });
+      break;
     case 'css':
       document.getElementById('theme').textContent = `#box { background: hsl(${(version * 67) % 360}, 70%, 45%); }`;
       break;

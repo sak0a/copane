@@ -6,7 +6,7 @@
 // The fixture (test/fixtures/browser-change) is a fake dev server: POST /edit?mode=… pushes an
 // "edit" to app.html over an event stream, which applies it the way Vite's client does.
 import { startChangeServer } from '../fixtures/browser-change/server.mjs';
-import { agent, assert, run, test } from './harness.mjs';
+import { agent, assert, run, sleep, test, until } from './harness.mjs';
 
 const site = await startChangeServer();
 const a = await agent({ session: `browser-change-${Date.now()}` });
@@ -26,7 +26,7 @@ async function open(path = '/app.html') {
 /** Takes a baseline, applies the edit, checks; returns the check's result. */
 async function change(mode, checkArgs = {}, who = a) {
   const baseline = await who.ok('browser_check_change', { action: 'baseline' });
-  assert.match(baseline, /^Baseline of tab-\d+ taken: http:\/\/127\.0\.0\.1:\d+\/\w+\.html, viewport \d+×\d+ at scroll 0,0; /);
+  assert.match(baseline, /^Baseline of tab-\d+ taken: http:\/\/127\.0\.0\.1:\d+\/\S+, viewport \d+×\d+ at scroll 0,0; /);
   const edited = await site.edit(mode);
   if (mode !== 'none') assert.ok(edited.clients >= 1, `no page listens for edits: ${JSON.stringify(edited)}`);
   const started = Date.now();
@@ -97,8 +97,8 @@ test('a navigation: the navigated line', async () => {
 test('a build error overlay: its text, found without a console line', async () => {
   await open();
   const { text } = await change('overlay');
-  assert.match(text, /- Build error shown in the page \(Vite error overlay\): \[plugin:vite:vue\] src\/components\/Cart\.vue: Unexpected token \(31:18\)/);
-  assert.match(text, /Fix the file; the page updates by itself once it compiles\./);
+  assert.match(text, /- Error shown in the page by the dev server \(Vite error overlay\): \[plugin:vite:vue\] src\/components\/Cart\.vue: Unexpected token \(31:18\)/);
+  assert.match(text, /Fix the cause; the overlay goes away with the next update that works\./);
 });
 
 test('a baseline with a build error showing: the check waits for the fix and says the error is gone', async () => {
@@ -106,13 +106,13 @@ test('a baseline with a build error showing: the check waits for the fix and say
   await site.edit('overlay');
   await a.ok('browser_wait_for', { selector: 'vite-error-overlay', state: 'attached' });
   const baseline = await a.ok('browser_check_change', { action: 'baseline' });
-  assert.match(baseline, /The page shows a build error \(Vite error overlay\): \[plugin:vite:vue\]/);
+  assert.match(baseline, /The page shows an error from the dev server \(Vite error overlay\): \[plugin:vite:vue\]/);
   const waiting = await a.ok('browser_check_change', { action: 'check', timeout: 1 });
   assert.match(waiting, /^No update reached/, 'an overlay already there is not an update');
   await site.edit('hmr');
   const fixed = await a.ok('browser_check_change', { action: 'check' });
   assert.match(fixed, /after a hot update \(Vite: \/src\/app\.js\)/);
-  assert.match(fixed, /- The build error shown at the baseline is gone\./);
+  assert.match(fixed, /- The error overlay shown at the baseline is gone\./);
 });
 
 test('a CSS-only change: a region from DOM changes alone', async () => {
@@ -200,6 +200,176 @@ test(
   },
   { skip: hasDebugCdp ? undefined : 'debug_cdp is only available in a development host' },
 );
+
+// ---------------------------------------------------------------- pages that change on their own
+
+test('a clock ticking every second: three checks without an edit all reach the timeout', async () => {
+  await open('/app.html?clock=1000');
+  await a.ok('browser_check_change', { action: 'baseline' });
+  for (let i = 0; i < 3; i++) {
+    const text = await a.ok('browser_check_change', { action: 'check', timeout: 4 });
+    assert.match(text, /^No update reached/, `check ${i + 1}:\n${text}`);
+  }
+});
+
+test('a clock ticking every 5 s: no false update either', async () => {
+  await open('/app.html?clock=5000');
+  await a.ok('browser_check_change', { action: 'baseline' });
+  for (let i = 0; i < 2; i++) {
+    const text = await a.ok('browser_check_change', { action: 'check', timeout: 6 });
+    assert.match(text, /^No update reached/, `check ${i + 1}:\n${text}`);
+  }
+});
+
+test('on a clock page, a hot update and a CSS-only change still count, and the note says the page changes on its own', async () => {
+  await open('/app.html?clock=1000');
+  // The watch starts with the baseline and knows the clock after two of its ticks.
+  await a.ok('browser_check_change', { action: 'baseline' });
+  await sleep(2500);
+  await site.edit('hmr');
+  const hot = await a.ok('browser_check_change', { action: 'check' });
+  assert.match(hot, /after a hot update \(Vite: \/src\/app\.js\)/);
+  assert.match(hot, /The page changes on its own \(1 element keeps changing/);
+  await a.ok('browser_check_change', { action: 'baseline' });
+  await site.edit('css');
+  const css = await a.ok('browser_check_change', { action: 'check' });
+  assert.match(css, /after DOM changes \(no hot-update message seen\)/);
+  assert.ok(regionsOf(css).some(r => Math.abs(r[0] - 400) <= 2 && Math.abs(r[2] - 120) <= 2), css);
+});
+
+test('a page that polls with a timestamp: no false update, and a real update settles without waiting for the polling', async () => {
+  await open('/app.html?poll=700');
+  await sleep(1600);
+  await a.ok('browser_check_change', { action: 'baseline' });
+  const idle = await a.ok('browser_check_change', { action: 'check', timeout: 3 });
+  assert.match(idle, /^No update reached/, idle);
+  assert.doesNotMatch(idle, /api\/status/);
+  await site.edit('hmr');
+  const hot = await a.ok('browser_check_change', { action: 'check' });
+  assert.match(hot, /after a hot update \(Vite: \/src\/app\.js\), settled after ([\d.]+) (m?s)/);
+  const [, n, unit] = /settled after ([\d.]+) (m?s)/.exec(hot);
+  assert.ok((unit === 'ms' ? Number(n) : Number(n) * 1000) < 3000, hot);
+  assert.doesNotMatch(hot, /requests were still running/);
+});
+
+// ---------------------------------------------------------------- what a check reports, exactly once
+
+test('an error that lands while a check is finishing is listed by the next check, not lost', async () => {
+  await open();
+  await a.ok('browser_check_change', { action: 'baseline' });
+  await site.edit('late');
+  const first = await a.ok('browser_check_change', { action: 'check' });
+  await sleep(1500);
+  const second = await a.ok('browser_check_change', { action: 'check', timeout: 3 });
+  const listed = [first, second].filter(t => /\[error\] late error after the update/.test(t)).length;
+  assert.equal(listed, 1, `the late error must be listed exactly once:\n--- first\n${first}\n--- second\n${second}`);
+  if (/late error/.test(second)) assert.doesNotMatch(second, /Reported by an earlier check/);
+  else assert.match(second, /^No update reached/);
+});
+
+test('a request that fails after the check returned is listed by the next check', async () => {
+  await open();
+  await a.ok('browser_check_change', { action: 'baseline' });
+  await site.edit('slowfail');
+  const first = await a.ok('browser_check_change', { action: 'check', timeout: 3 });
+  assert.doesNotMatch(first, /api\/slow/, first);
+  await sleep(5000);
+  const second = await a.ok('browser_check_change', { action: 'check', timeout: 3 });
+  assert.match(second, /- 1 new failed request: r\d+ {2}GET 500 fetch {2}http:\/\/127\.0\.0\.1:\d+\/api\/slow\?ms=5000/, second);
+});
+
+test('a failed request from before the baseline is "still there" after a reload, not new', async () => {
+  await open('/missing.html');
+  const baseline = await a.ok('browser_check_change', { action: 'baseline' });
+  assert.match(baseline, /0 console errors and 1 failed request/, baseline);
+  const text = await a.ok('browser_check_change', { action: 'check', reload: true });
+  assert.doesNotMatch(text, /- \d+ new (error|failed request)/, text);
+  assert.match(text, /- No new errors or failed requests\./, text);
+  assert.match(text, /- Still there from before the change: 1 failed request\./, text);
+  // A later check does not count it as reported by an earlier one either.
+  const again = await a.ok('browser_check_change', { action: 'check', reload: true });
+  assert.doesNotMatch(again, /Reported by an earlier check/, again);
+});
+
+// ---------------------------------------------------------------- geometry, frames, a stuck tab, the user taking over
+
+test('an emulated device in a background tab: regions in CSS px of the device', async () => {
+  const tab = await open('/plain.html');
+  await a.ok('browser_emulate', { width: 400, height: 4000, deviceScaleFactor: 3 });
+  try {
+    const { text } = await change('none', { reload: true });
+    const regions = regionsOf(text);
+    assert.equal(regions.length, 1, text);
+    // The version number sits at CSS x 20, y 100 (16 px monospace, about 10 px per digit; only the
+    // digits that changed show). The image may be as coarse as 0.36 px per CSS px.
+    const [x0, x1, y0, y1] = regions[0];
+    assert.ok(x0 >= 17 && x1 <= 55 && x1 > x0 && y0 >= 96 && y0 <= 106 && y1 >= 110 && y1 <= 124, `the version number: ${JSON.stringify(regions[0])}\n${text}`);
+    assert.match(text, /About the after-screenshot: Screenshot of the viewport in tab-\d+/);
+  } finally {
+    await a.call('browser_emulate', { reset: true, tab });
+  }
+});
+
+test('a reload inside a cross-origin frame counts as an update', async () => {
+  const story = await startChangeServer({ host: 'localhost' });
+  try {
+    await open(`/frame.html?story=${encodeURIComponent(`${story.url}/story.html`)}`);
+    await sleep(500);
+    await a.ok('browser_check_change', { action: 'baseline' });
+    await story.edit('frame');
+    const text = await a.ok('browser_check_change', { action: 'check', timeout: 8 });
+    assert.match(text, /after a reload of the frame http:\/\/localhost:\d+\/story\.html/, text);
+    assert.match(text, /- The frame http:\/\/localhost:\d+\/story\.html loaded a new document\./);
+  } finally {
+    await story.close();
+  }
+});
+
+test('a tab that stops answering: the check returns on time and says so', async () => {
+  const tab = await open();
+  await a.ok('browser_check_change', { action: 'baseline' });
+  await site.edit('hang');
+  const started = Date.now();
+  const text = await a.ok('browser_check_change', { action: 'check', timeout: 3 });
+  const ms = Date.now() - started;
+  assert.match(text, new RegExp(`^${tab} did not respond while`), text);
+  assert.ok(ms < 15_000, `took ${ms} ms`);
+});
+
+test('the user takes the tab over during a check: the check stops without reading on', async () => {
+  const tab = await open();
+  await a.ok('browser_check_change', { action: 'baseline' });
+  const checking = a.call('browser_check_change', { action: 'check', timeout: 10 });
+  await sleep(1500);
+  const b = await agent({ session: `browser-change-user-${Date.now()}` });
+  try {
+    await b.ok('debug_vscode_command', { command: 'copane.browser.pauseTab', args: [tab] });
+    await site.edit('error'); // what the user does now must not reach the agent
+    const result = await checking;
+    assert.ok(result.isError, result.text);
+    assert.match(result.text, new RegExp(`The user has paused agent access to ${tab}`));
+    assert.doesNotMatch(result.text, /price/);
+    assert.equal(result.images.length, 0);
+  } finally {
+    await b.call('debug_vscode_command', { command: 'copane.browser.resumeTab', args: [tab] });
+    await b.close();
+  }
+});
+
+test('the page indicator is shown again after a check is cancelled while it captures', async () => {
+  await open();
+  const indicator = () => a.ok('browser_evaluate', { function: "() => [...document.querySelectorAll('[data-copane-ui]')].map(e => e.style.getPropertyValue('visibility') || 'shown').join(',')" });
+  const before = await indicator();
+  if (!before) return console.log('      (no page indicator on this tab; nothing to check)');
+  for (const delay of [50, 150, 300, 600]) {
+    const controller = new AbortController();
+    const pending = a.mcp.callTool({ name: 'browser_check_change', arguments: { action: 'baseline' } }, undefined, { signal: controller.signal }).catch(() => undefined);
+    await sleep(delay);
+    controller.abort();
+    await pending;
+    await until(async () => !(await indicator()).includes('hidden'), `the indicator to be shown again (cancelled after ${delay} ms)`, { timeoutMs: 5000 });
+  }
+});
 
 test('cleanup: close the last tab', async () => {
   if (previous) await a.ok('browser_close_tab', { tab: previous });

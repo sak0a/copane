@@ -9,9 +9,15 @@
 //   overlay  shows a <vite-error-overlay> with a shadow root, as Vite does for a build error
 //   reload   logs "[vite] page reload /app.html" and reloads; the page shows the new version
 //   navigate goes to /app.html?page=2
+//   late     a hot update, then a console error 900 ms later
+//   slowfail a hot update that starts /api/slow?ms=5000, which answers 500 after 5 s
+//   hang     logs a hot update, then blocks the page's main thread for 20 s
+//   frame    story.html (in a frame of frame.html) reloads itself
 //   none     nothing reaches the page
 //
-// Every edit bumps the version that app.html and plain.html (a page without hot reload) show.
+// Every edit bumps the version that app.html, plain.html (a page without hot reload) and story.html
+// show. app.html?clock=<ms>&poll=<ms> also changes on its own (see app.js); missing.html has an image
+// that is not there; frame.html?story=<url> shows story.html from another origin in a frame.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -21,6 +27,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 
 export async function startChangeServer({ port = 0, host = '127.0.0.1' } = {}) {
   let version = 1;
+  let polls = 0;
   const clients = new Set();
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
@@ -43,9 +50,15 @@ export async function startChangeServer({ port = 0, host = '127.0.0.1' } = {}) {
         return;
       }
       if (url.pathname === '/favicon.ico') return send(204, '', 'image/x-icon');
-      if (url.pathname === '/api/missing') return send(404, JSON.stringify({ error: 'not found' }), 'application/json');
-      if (url.pathname === '/' || url.pathname === '/app.html' || url.pathname === '/plain.html') {
-        const file = url.pathname === '/plain.html' ? 'plain.html' : 'app.html';
+      if (url.pathname === '/api/missing' || url.pathname === '/missing.png') return send(404, JSON.stringify({ error: 'not found' }), 'application/json');
+      if (url.pathname === '/api/status') return send(200, JSON.stringify({ n: ++polls }), 'application/json');
+      if (url.pathname === '/api/slow') {
+        await new Promise(resolve => setTimeout(resolve, Number(url.searchParams.get('ms') ?? 5000)));
+        return send(500, JSON.stringify({ error: 'slow and failing' }), 'application/json');
+      }
+      const pages = { '/': 'app.html', '/app.html': 'app.html', '/plain.html': 'plain.html', '/missing.html': 'missing.html', '/frame.html': 'frame.html', '/story.html': 'story.html' };
+      if (pages[url.pathname]) {
+        const file = pages[url.pathname];
         const html = (await readFile(join(here, file), 'utf8')).replaceAll('{{version}}', String(version));
         return send(200, html, 'text/html; charset=utf-8');
       }
