@@ -19,6 +19,12 @@ export interface DiscoveryInput {
    * reports workspace folders as opened (`/tmp/x`): both forms are compared.
    */
   realpath?: (p: string) => string;
+  /**
+   * Reads a text file (`fs.readFileSync(p, 'utf8')`); throws for a missing file or a directory. Used
+   * to recognise a git worktree (its `.git` is a file) and find its main checkout. Without it, the
+   * worktree rule is skipped.
+   */
+  readFile?: (p: string) => string;
 }
 
 export interface DiscoveryResult {
@@ -40,7 +46,10 @@ export interface DiscoveryResult {
  *    window was reloaded (its extension host, and so its id, changes) while the agent kept running.
  * 5. The working directory is inside a window's workspace folder (deepest folder wins, then the most
  *    recently focused window).
- * 6. Exactly one window is open.
+ * 6. The working directory is in a git worktree outside every workspace folder (agents often work in
+ *    one) and the same place in the worktree's main checkout is inside a window's workspace folder,
+ *    chosen as in 5.
+ * 7. Exactly one window is open.
  * Several windows and none of the above: no match. Guessing would put the agent in the wrong project.
  */
 export function selectInstance(input: DiscoveryInput): DiscoveryResult | undefined {
@@ -79,22 +88,75 @@ export function selectInstance(input: DiscoveryInput): DiscoveryResult | undefin
     if (same[0]) return { instance: same[0], matchedBy: 'reconnect' };
   }
 
-  // Deepest workspace folder containing the cwd, per window.
-  const depths = new Map<InstanceInfo, number>();
-  for (const instance of instances) {
-    for (const folder of instance.workspaceFolders) {
-      if (isInside(cwd, folder) || isInside(real(cwd), real(folder))) depths.set(instance, Math.max(depths.get(instance) ?? 0, path.resolve(real(folder)).length));
+  const byCwd = deepestContaining(instances, cwd, real);
+  if (byCwd) return { ...byCwd, matchedBy: 'cwd' };
+
+  const worktree = input.readFile ? worktreeOf(cwd, input.readFile) : undefined;
+  if (worktree) {
+    const mapped = path.join(worktree.mainCheckout, path.relative(worktree.root, cwd));
+    const byMain = deepestContaining(instances, mapped, real);
+    if (byMain) {
+      const about = `The worktree's main checkout is ${worktree.mainCheckout}.`;
+      return { instance: byMain.instance, matchedBy: 'worktree', note: byMain.note ? `${about} ${byMain.note}` : about };
     }
-  }
-  if (depths.size > 0) {
-    const deepest = Math.max(...depths.values());
-    const tied = [...depths].filter(([, d]) => d === deepest).map(([i]) => i);
-    tied.sort((a, b) => b.lastFocusedAt - a.lastFocusedAt);
-    const note = tied.length > 1 ? `${tied.length} windows have this folder open; chose the one focused most recently.` : undefined;
-    return { instance: tied[0]!, matchedBy: 'cwd', ...(note ? { note } : {}) };
   }
 
   if (instances.length === 1) return { instance: instances[0]!, matchedBy: 'single' };
+  return undefined;
+}
+
+/** The window whose workspace folder most deeply contains `dir` (then the most recently focused one). */
+function deepestContaining(instances: InstanceInfo[], dir: string, real: (p: string) => string): { instance: InstanceInfo; note?: string } | undefined {
+  const depths = new Map<InstanceInfo, number>();
+  for (const instance of instances) {
+    for (const folder of instance.workspaceFolders) {
+      if (isInside(dir, folder) || isInside(real(dir), real(folder))) depths.set(instance, Math.max(depths.get(instance) ?? 0, path.resolve(real(folder)).length));
+    }
+  }
+  if (depths.size === 0) return undefined;
+  const deepest = Math.max(...depths.values());
+  const tied = [...depths].filter(([, d]) => d === deepest).map(([i]) => i);
+  tied.sort((a, b) => b.lastFocusedAt - a.lastFocusedAt);
+  const note = tied.length > 1 ? `${tied.length} windows have this folder open; chose the one focused most recently.` : undefined;
+  return { instance: tied[0]!, ...(note ? { note } : {}) };
+}
+
+/**
+ * The git worktree `dir` is in, and its main checkout: a worktree's `.git` is a file
+ * `gitdir: <repo>/.git/worktrees/<name>`, whose `commondir` names the main repository's `.git`
+ * directory; its parent is the main checkout. Undefined for a main checkout (`.git` is a directory),
+ * a submodule (no `commondir`), a bare repository, no repository, or anything unreadable.
+ */
+export function worktreeOf(dir: string, readFile: (p: string) => string): { root: string; mainCheckout: string } | undefined {
+  let current = path.resolve(dir);
+  for (let depth = 0; depth < 64; depth++) {
+    let content: string | undefined;
+    try {
+      content = readFile(path.join(current, '.git'));
+    } catch (err) {
+      // A `.git` directory: the nearest repository is a main checkout, not a worktree.
+      if ((err as NodeJS.ErrnoException)?.code === 'EISDIR') return undefined;
+    }
+    if (content !== undefined) {
+      try {
+        const match = /^gitdir:\s*(.+?)\s*$/m.exec(content);
+        if (!match) return undefined;
+        const gitdir = path.resolve(current, match[1]!);
+        const common = readFile(path.join(gitdir, 'commondir')).trim();
+        if (!common) return undefined;
+        const commonDir = path.resolve(gitdir, common);
+        if (path.basename(commonDir) !== '.git') return undefined; // A bare repository has no checkout.
+        const mainCheckout = path.dirname(commonDir);
+        if (mainCheckout === current) return undefined;
+        return { root: current, mainCheckout };
+      } catch {
+        return undefined;
+      }
+    }
+    const parent = path.dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
   return undefined;
 }
 

@@ -31,12 +31,12 @@
     {
       "id": "copane.gettingStarted",
       "title": "Get Started with Copane",
-      "description": "Let Claude Code and Codex work in this window's browser tabs and terminals, next to you.",
+      "description": "Let Claude Code, Codex and GitHub Copilot work in this window's browser tabs and terminals, next to you.",
       "steps": [
         {
           "id": "intro",
           "title": "What Copane does",
-          "description": "Copane gives Claude Code, Codex and other MCP agents the VS Code window they run in: its integrated browser tabs and its terminals. You see every click and every command, and you can take over at any moment.\nTwo one-time steps follow: let agents use the integrated browser, and turn Copane on for your agents.",
+          "description": "Copane gives Claude Code, Codex, GitHub Copilot and other MCP agents the VS Code window they run in: its integrated browser tabs and its terminals. You see every click and every command, and you can take over at any moment.\nTwo one-time steps follow: let agents use the integrated browser, and turn Copane on for your agents.",
           "media": {
             "svg": "media/walkthrough/intro.svg",
             "altText": "A VS Code window with a browser tab and a terminal, both marked with the color and label of the agent session using them."
@@ -88,8 +88,8 @@
         },
         {
           "id": "agents",
-          "title": "Turn Copane on for Claude Code and Codex",
-          "description": "Copane adds an MCP server named copane to your user configuration of Claude Code (~/.claude.json) and Codex (~/.codex/config.toml), and keeps it current. Nothing else in those files changes.\n[Turn On](command:copane.registerAgents)\nIn a remote window that is the configuration on the remote machine, where the agents run. **Turn Off** in the Copane view's ... menu removes it again.",
+          "title": "Turn Copane on for your agents",
+          "description": "Copane adds an MCP server named copane to your user configuration of Claude Code (~/.claude.json), Codex (~/.codex/config.toml) and GitHub Copilot (~/.copilot/mcp-config.json, read by the Copilot CLI and by Copilot chat in VS Code), and keeps it current. Nothing else in those files changes.\n[Turn On](command:copane.registerAgents)\nIn a remote window that is the configuration on the remote machine, where the agents run. **Turn Off** in the Copane view's ... menu removes it again.",
           "when": "copane.setup.agents != 'none'",
           "completionEvents": ["onContext:copane.setup.agentsReady"],
           "media": {
@@ -99,8 +99,8 @@
         },
         {
           "id": "agentsNone",
-          "title": "Install Claude Code or Codex",
-          "description": "Copane gives its tools to agents that speak MCP. Neither Claude Code nor Codex was found on this machine (or both are turned off in Copane's settings). Install one of them, then turn Copane on for it.\n[Find the Claude Code Extension](command:workbench.extensions.search?%22anthropic.claude-code%22)\n[Turn On](command:copane.registerAgents)\nOther MCP clients work too: run the server at ~/.copane/bin/mcp-server from them.",
+          "title": "Install an agent",
+          "description": "Copane gives its tools to agents that speak MCP. None of Claude Code, Codex and GitHub Copilot was found on this machine (or they are turned off in Copane's settings). Install one of them, then turn Copane on for it.\n[Find the Claude Code Extension](command:workbench.extensions.search?%22anthropic.claude-code%22)\n[Turn On](command:copane.registerAgents)\nOther MCP clients work too: run the server at ~/.copane/bin/mcp-server from them.",
           "when": "copane.setup.agents == 'none'",
           "completionEvents": ["onContext:copane.setup.agentsReady"],
           "media": {
@@ -111,7 +111,7 @@
         {
           "id": "tryIt",
           "title": "Try it",
-          "description": "Start a **new** Claude Code or Codex session in this window (sessions that were already running do not see Copane's tools) and give it this prompt:\n\u201cUse the copane tools: set your session title to \"Copane tour\", open https://example.com in a VS Code browser tab and tell me the page heading, then run node --version in a VS Code terminal and tell me what it printed.\u201d\n[Copy Prompt](command:copane.walkthrough.copyPrompt)\nA browser tab opens on example.com and a terminal named after the session (Claude 1) runs the command, both marked in the session's color, and the session appears in the Copane view. Your agent may ask you to approve its tool calls.",
+          "description": "Start a **new** Claude Code, Codex or GitHub Copilot session in this window (sessions that were already running do not see Copane's tools) and give it this prompt:\n\u201cUse the copane tools: set your session title to \"Copane tour\", open https://example.com in a VS Code browser tab and tell me the page heading, then run node --version in a VS Code terminal and tell me what it printed.\u201d\n[Copy Prompt](command:copane.walkthrough.copyPrompt)\nA browser tab opens on example.com and a terminal named after the session (Claude 1) runs the command, both marked in the session's color, and the session appears in the Copane view. Your agent may ask you to approve its tool calls.",
           "completionEvents": ["onContext:copane.setup.sessionSeen"],
           "media": {
             "svg": "media/walkthrough/try.svg",

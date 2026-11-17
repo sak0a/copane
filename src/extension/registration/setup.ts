@@ -47,7 +47,7 @@ export type AgentsSetup =
   | 'ready'
   /** An agent is installed, but none has Copane's server: "Turn On" fixes it. */
   | 'off'
-  /** Neither Claude Code nor Codex was found (or both are turned off in settings). */
+  /** None of Claude Code, Codex and GitHub Copilot was found (or they are turned off in settings). */
   | 'none';
 
 export interface AgentInput {

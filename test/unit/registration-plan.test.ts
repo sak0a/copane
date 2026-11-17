@@ -11,6 +11,13 @@ const base: PlanInput = { agent: 'Claude Code', state: { kind: 'absent' }, mode:
 const plan = (over: Partial<PlanInput>, trigger: 'startup' | 'repair' = 'startup') => planAgent({ ...base, ...over }, trigger);
 
 describe('startup check', () => {
+  it('asks about an agent the earlier consent did not cover (GitHub Copilot installed later)', () => {
+    // The consent recorded for Claude Code and Codex is not Copilot's: consentFor() gives undefined.
+    expect(plan({ agent: 'GitHub Copilot', consent: undefined })).toEqual({ action: 'ask' });
+    expect(plan({ agent: 'GitHub Copilot', consent: undefined, mode: 'automatic' })).toMatchObject({ action: 'add' });
+    expect(plan({ agent: 'GitHub Copilot', detected: false })).toEqual({ action: 'none', note: 'not installed' });
+  });
+
   it('leaves a current entry alone', () => {
     expect(plan({ state: { kind: 'ours', current: true, command: 'x' } })).toMatchObject({ action: 'none' });
   });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { RefTable } from '../../src/extension/browser/page/refs';
-import { buildTree, diffLines, findInTree, renderSnapshot, renderText, shortUrl, snapshotLines, textWindow, type AXNode, type SnapshotInput } from '../../src/extension/browser/page/snapshot';
+import { compareDelivered, describeDelta, lastDelivered, setDelivered, type Delivered } from '../../src/extension/browser/page/snapshotDelta';
+import { buildTree, diffLines, findInTree, renderSnapshot, renderText, renderTree, shortUrl, snapshotLines, textWindow, type AXNode, type SnapshotInput } from '../../src/extension/browser/page/snapshot';
 
 let nextId = 1;
 /** Builds an AX node tree from a compact description. */
@@ -327,6 +328,137 @@ describe('diffLines', () => {
     const diff = diffLines(lines(page(false)), lines(page(true)));
     expect(diff.added).toEqual([]);
     expect(diff.removed).toEqual([]);
+  });
+});
+
+describe('snapshot delta (re-reading a page)', () => {
+  /** A page of named buttons; a button keeps its node (backend id) across renderings, as in a real DOM. */
+  const ids = new Map<string, number>();
+  const idOf = (label: string) => ids.get(label) ?? (ids.set(label, 100 + ids.size), ids.get(label)!);
+  const page = (labels: string[], ids: number[] = labels.map(idOf)) => ax('RootWebArea', '', { backend: 1, children: labels.map((l, i) => ax('button', l, { backend: ids[i] })) });
+  const labels = Array.from({ length: 30 }, (_, i) => `Button ${i}`);
+  function shown(nodes: AXNode[], table: RefTable, opts: { loaderId?: string; url?: string; maxChars?: number } = {}): Delivered {
+    const maxChars = opts.maxChars ?? 50_000;
+    const out = renderTree(buildTree(treeInput(nodes)), { refFor: n => table.assign(n, opts.loaderId ?? 'L1'), maxChars });
+    return { loaderId: opts.loaderId ?? 'L1', url: opts.url ?? 'http://x.test/', maxChars, urls: false, ...out.shown! };
+  }
+
+  it('answers an unchanged page with one line that keeps the refs and says how to get it in full', () => {
+    const table = new RefTable();
+    const first = shown(page(labels), table);
+    const delta = compareDelivered(first, shown(page(labels), table));
+    expect(delta).toEqual({ kind: 'unchanged' });
+    const out = describeDelta(delta as { kind: 'unchanged' }, 'tab-1', first);
+    expect(out).toBe('- Snapshot of tab-1: unchanged since your last snapshot of it; its refs are still valid. Pass offset: 0 to get it in full again.');
+  });
+
+  it('answers a small change with the changed lines, their refs, and what is gone', () => {
+    const table = new RefTable();
+    const first = shown(page(labels), table);
+    const changed = [...labels];
+    changed[3] = 'Button 3 pressed';
+    const nodes = labels.map(idOf);
+    changed.splice(10, 1);
+    nodes.splice(10, 1);
+    const delta = compareDelivered(first, shown(page(changed, nodes), table));
+    expect(delta.kind).toBe('changed');
+    if (delta.kind !== 'changed') return;
+    // Same node, same ref as in the first snapshot.
+    expect(first.lines[3]).toBe('- button "Button 3" [ref=e4]');
+    expect(delta.lines).toEqual(['- button "Button 3 pressed" [ref=e4]']);
+    expect(delta.changed).toBe(1);
+    expect(delta.gone).toEqual(['button "Button 10"']);
+    const out = describeDelta(delta, 'tab-1', first);
+    expect(out).toMatch(/^- Snapshot of tab-1: 1 line changed since your last snapshot of it.*Pass offset: 0 to get it in full again\.\n```yaml\n- button "Button 3 pressed" \[ref=e4\]\n```\nGone since then: button "Button 10"\.$/);
+  });
+
+  it('gives the full snapshot after a large change, a navigation, another URL or other options', () => {
+    const table = new RefTable();
+    const first = shown(page(labels), table);
+    expect(compareDelivered(undefined, first).kind).toBe('full');
+    expect(compareDelivered(first, shown(page(labels.map(l => `${l} renamed`)), table)).kind).toBe('full');
+    expect(compareDelivered(first, shown(page(labels), table, { loaderId: 'L2' })).kind).toBe('full');
+    expect(compareDelivered(first, shown(page(labels), table, { url: 'http://x.test/#other' })).kind).toBe('full');
+    expect(compareDelivered(first, shown(page(labels), table, { maxChars: 40_000 })).kind).toBe('full');
+    expect(compareDelivered(first, { ...shown(page(labels), table), urls: true }).kind).toBe('full');
+  });
+
+  it('counts a line whose ref changed as changed (the ref the agent holds is not valid for it)', () => {
+    const first = shown(page(labels), new RefTable());
+    const other = new RefTable();
+    other.assign({ backendNodeId: 1, frameId: 'main', role: 'x', name: '' }, 'L1');
+    const delta = compareDelivered(first, shown(page(labels), other));
+    expect(delta.kind).not.toBe('unchanged');
+  });
+
+  it('for a cut snapshot, compares only what was shown, and keeps saying where it was cut', () => {
+    const many = Array.from({ length: 200 }, (_, i) => `Button number ${i} with a longer label`);
+    const table = new RefTable();
+    const first = shown(page(many), table, { maxChars: 3000 });
+    expect(first.footer[0]).toMatch(/^\[Snapshot cut: showing characters 0-\d+ of \d+/);
+    const same = compareDelivered(first, shown(page(many), table, { maxChars: 3000 }));
+    expect(same.kind).toBe('unchanged');
+    const end = /0-(\d+)/.exec(first.footer[0]!)![1];
+    expect(describeDelta(same as { kind: 'unchanged' }, 'tab-1', first)).toContain(`(it was cut at character ${end} of `);
+    // A change below the cut was never shown: only the new cut summary, nothing claimed gone.
+    const below = [...many];
+    below[150] = 'Changed far below';
+    const d1 = compareDelivered(first, shown(page(below, many.map(idOf)), table, { maxChars: 3000 }));
+    expect(d1.kind).toBe('changed');
+    if (d1.kind !== 'changed') return;
+    expect(d1.lines).toEqual([]);
+    expect(d1.gone).toEqual([]);
+    expect(d1.footer[0]).toMatch(/^\[Snapshot cut/);
+    // A line inserted at the top pushes the last shown one below the cut: moved, not gone.
+    const d2 = compareDelivered(first, shown(page(['New at the top', ...many].slice(0, 201)), table, { maxChars: 3000 }));
+    expect(d2.kind).toBe('changed');
+    if (d2.kind !== 'changed') return;
+    expect(d2.lines.join('\n')).toContain('button "New at the top"');
+    expect(d2.gone).toEqual([]);
+  });
+
+  it('repeats only the numbers of a cut summary whose list of parts did not change', () => {
+    const sections = (first: string) =>
+      ax('RootWebArea', '', {
+        backend: 1,
+        children: Array.from({ length: 30 }, (_, i) =>
+          ax('region', `Section ${i}`, {
+            backend: 10 + i * 10,
+            children: [ax('heading', i === 0 ? first : `Heading ${i}`, { backend: 11 + i * 10, props: { level: 2 } }), ax('paragraph', '', { backend: 12 + i * 10, children: [text(`Text of section ${i} `.repeat(8))] })],
+          }),
+        ),
+      });
+    const table = new RefTable();
+    const first = shown(sections('Heading 0'), table, { maxChars: 4000 });
+    expect(first.footer.length).toBeGreaterThan(3);
+    const delta = compareDelivered(first, shown(sections('Heading 0, renamed'), table, { maxChars: 4000 }));
+    expect(delta.kind).toBe('changed');
+    if (delta.kind !== 'changed') return;
+    expect(delta.lines).toEqual(['- region "Section 0" [ref=e1]:', '  - heading "Heading 0, renamed" [level=2] [ref=e2]']);
+    expect(delta.footer).toHaveLength(2);
+    expect(delta.footer[0]).toMatch(/^\[Snapshot cut: showing characters 0-\d+ of \d+/);
+    expect(delta.footer[1]).toMatch(/to read on, with offset \d+/);
+  });
+
+  it('remembers one record per ref table', () => {
+    const a = new RefTable();
+    const b = new RefTable();
+    const d = shown(page(labels), a);
+    setDelivered(a, d);
+    expect(lastDelivered(a)).toBe(d);
+    expect(lastDelivered(b)).toBeUndefined();
+  });
+});
+
+describe('cut summary', () => {
+  it('does not list a heading right after the landmark of the same name', () => {
+    const sections = Array.from({ length: 30 }, (_, i) =>
+      ax('region', `Section ${i}`, { children: [ax('heading', `Section ${i}`, { props: { level: 2 } }), ax('paragraph', '', { children: [text(`Some text of section ${i} that takes room`.repeat(3))] })] }),
+    );
+    const out = render(ax('RootWebArea', '', { children: sections }), { maxChars: 4000 });
+    const summary = out.text.slice(out.text.indexOf('Parts below the cut'));
+    expect(summary).toMatch(/^ {2}- region "Section 20" \[ref=e\d+\]$/m);
+    expect(summary).not.toMatch(/heading "Section 20"/);
   });
 });
 

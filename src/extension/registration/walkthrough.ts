@@ -57,7 +57,7 @@ export class SetupTracker implements vscode.Disposable {
       vscode.commands.registerCommand('copane.walkthrough.copyPrompt', async (options?: { toClipboard?: boolean }) => {
         // `toClipboard: false` is for tests: a dev host shares the clipboard of the person using the machine.
         if (options?.toClipboard !== false) await vscode.env.clipboard.writeText(TRY_IT_PROMPT);
-        vscode.window.setStatusBarMessage('$(check) Copane: prompt copied. Paste it into a new Claude Code or Codex session.', 6000);
+        vscode.window.setStatusBarMessage('$(check) Copane: prompt copied. Paste it into a new Claude Code, Codex or Copilot session.', 6000);
         return TRY_IT_PROMPT;
       }),
       vscode.commands.registerCommand('copane.registration.setupState', async (options?: { simulateNoIntegratedBrowser?: boolean; ignoreSessions?: boolean }) => {

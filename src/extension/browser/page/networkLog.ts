@@ -1,6 +1,8 @@
 // Network requests of one tab, recorded from CDP `Network.*` events into a bounded buffer, with
 // filtering and formatting for the agent. Pure: fed with CDP event params.
 import { clip, formatBytes, formatMs, RingBuffer } from './ringBuffer';
+import { PRETTY_JSON_MAX } from './scripts';
+import { shortUrl } from './snapshot';
 
 export interface NetworkEntry {
   seq: number;
@@ -97,6 +99,49 @@ function capHeaders(headers: Record<string, unknown> | undefined): Record<string
   return out;
 }
 
+/**
+ * `base` overlaid with `over`, matching names case-insensitively: the headers actually sent (HTTP/2
+ * sends them lower-case) replace the ones the page asked for, so none is listed twice.
+ */
+export function mergeHeaders(base: Record<string, unknown> | undefined, over: Record<string, unknown>): Record<string, unknown> {
+  const replaced = new Set(Object.keys(over).map(k => k.toLowerCase()));
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(base ?? {})) if (k !== '…' && !replaced.has(k.toLowerCase())) out[k] = v;
+  return Object.assign(out, over);
+}
+
+/** Headers every browser request carries, left out of the request details (the HAR export keeps them). */
+const ROUTINE_HEADER = /^(:|sec-ch-|sec-fetch-)|^(priority|accept-encoding)$/i;
+
+/** Splits headers into those worth reading and the number of routine ones left out. */
+export function notableHeaders(headers: Record<string, string> | undefined): { shown: [string, string][]; routine: number } {
+  const all = Object.entries(headers ?? {});
+  const shown = all.filter(([k]) => !ROUTINE_HEADER.test(k));
+  return { shown, routine: all.length - shown.length };
+}
+
+/**
+ * A request or response body for reading, indented by two spaces and cut at `max`. JSON is
+ * re-indented while short, and made compact when long, so the cut spends its budget on content.
+ */
+export function formatBody(body: string, max: number): string {
+  let text = body;
+  if (/^\s*[{[]/.test(text) && text.length < 200_000) {
+    try {
+      const value: unknown = JSON.parse(text);
+      const pretty = JSON.stringify(value, null, 2);
+      text = pretty.length <= Math.min(PRETTY_JSON_MAX, max) ? pretty : JSON.stringify(value);
+    } catch {
+      // not JSON after all
+    }
+  }
+  const cut = text.length > max ? `${text.slice(0, max)}\n… (${text.length - max} more characters; raise maxBodyChars to see more)` : text;
+  return cut
+    .split('\n')
+    .map(l => `  ${l}`)
+    .join('\n');
+}
+
 export class NetworkLog {
   readonly entries: RingBuffer<NetworkEntry>;
   private readonly live = new Map<string, NetworkEntry>();
@@ -174,7 +219,7 @@ export class NetworkLog {
   /** `Network.requestWillBeSentExtraInfo`: the headers actually sent (cookies included). */
   onRequestExtra(p: { requestId: string; headers?: Record<string, unknown> }): void {
     const entry = this.live.get(p.requestId);
-    if (entry && p.headers && !entry.withheld) entry.requestHeaders = capHeaders({ ...entry.requestHeaders, ...p.headers });
+    if (entry && p.headers && !entry.withheld) entry.requestHeaders = capHeaders(mergeHeaders(entry.requestHeaders, p.headers));
   }
 
   /** `Network.responseReceived` */
@@ -269,6 +314,16 @@ export function withheldUrl(url: string): string {
   return cut < 0 ? url : `${url.slice(0, cut)}${url[cut]}…`;
 }
 
+/** The origin whose URLs `formatNetworkEntry(…, pageUrl)` prints as paths, if any. */
+export function pageOrigin(pageUrl: string | undefined): string | undefined {
+  try {
+    const origin = pageUrl ? new URL(pageUrl).origin : undefined;
+    return origin && origin !== 'null' ? origin : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function isFailure(e: NetworkEntry): boolean {
   return (e.failed !== undefined && !e.canceled) || (e.status !== undefined && e.status >= 400);
 }
@@ -332,8 +387,11 @@ function statusMatches(e: NetworkEntry, status: string): boolean {
   return true;
 }
 
-/** "r12  GET 200 fetch  http://…/api/items  34 ms, 1.2 kB" */
-export function formatNetworkEntry(e: NetworkEntry, now: number): string {
+/**
+ * "r12  GET 200 fetch  http://…/api/items  34 ms, 1.2 kB". With `pageUrl`, URLs on the page's origin
+ * are printed as paths ("/api/items"); the caller names that origin once.
+ */
+export function formatNetworkEntry(e: NetworkEntry, now: number, pageUrl?: string): string {
   let state: string;
   if (e.failed) state = e.canceled ? 'CANCELED' : `FAILED (${e.failed})`;
   else if (e.status !== undefined) state = `${e.status}${e.redirectedTo ? ' →' : ''}`;
@@ -344,5 +402,5 @@ export function formatNetworkEntry(e: NetworkEntry, now: number): string {
     : e.respondedAt !== undefined ? `headers after ${formatMs(e.respondedAt - e.startedAt)}, body not finished`
     : `${formatMs(now - e.startedAt)} so far`;
   const details = [timing, e.size !== undefined && !e.failed ? formatBytes(e.size) : '', e.fromCache ? 'cache' : '', e.intercepted ?? '', e.withheld ? 'sent while the user had the tab: details withheld' : ''].filter(Boolean).join(', ');
-  return `${e.id}  ${e.method} ${state} ${e.type.toLowerCase()}  ${clip(e.url, 300)}${details ? `  (${details})` : ''}`;
+  return `${e.id}  ${e.method} ${state} ${e.type.toLowerCase()}  ${clip(shortUrl(e.url, pageUrl), 300)}${details ? `  (${details})` : ''}`;
 }

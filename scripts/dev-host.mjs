@@ -115,6 +115,7 @@ const sandboxEnv = {
   COPANE_HOME: dirs.home,
   CLAUDE_CONFIG_DIR: join(base, 'claude'),
   CODEX_HOME: join(base, 'codex'),
+  COPILOT_HOME: join(base, 'copilot'),
   COPANE_ARGV_JSON: join(base, 'argv.json'),
 };
 const env = { ...process.env, ...sandboxEnv };

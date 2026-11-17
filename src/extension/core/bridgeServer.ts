@@ -18,7 +18,7 @@ import {
 } from '../../shared/protocol';
 import type { Disposable } from './events';
 import { scopedLogger, type Logger } from './log';
-import { describeSession, type AgentSession, type SessionManager } from './sessions';
+import { describeSession, type AgentSession, type SessionClient, type SessionManager } from './sessions';
 import type { ToolRegistry } from './tools';
 
 export interface BridgeServerOptions {
@@ -31,6 +31,30 @@ export interface BridgeServerOptions {
   log: Logger;
   /** Usage guidance sent to each agent, built at connect time so it reflects current capabilities. */
   instructions: () => string;
+  /**
+   * Whether a session's client is known not to pass MCP server instructions to its model; such a
+   * session gets them once, with its first successful tool result. Default `dropsServerInstructions`;
+   * `() => false` turns it off.
+   */
+  needsUsageNotes?: (client: SessionClient) => boolean;
+}
+
+/**
+ * Clients known not to give the model the server's MCP `instructions`. Copilot CLI passes them only
+ * when started with `--allow-all-mcp-server-instructions`.
+ */
+export function dropsServerInstructions(client: SessionClient): boolean {
+  return client.kind === 'copilot';
+}
+
+export const USAGE_NOTES_HEADING = "Copane's usage notes (shown once, with your first Copane tool result):";
+
+/**
+ * The result with the usage notes added as one more text part after everything else; content and
+ * other fields are left as they are.
+ */
+export function withUsageNotes(result: CallToolResult, instructions: string): CallToolResult {
+  return { ...result, content: [...result.content, { type: 'text', text: `${USAGE_NOTES_HEADING}\n${instructions}` }] };
 }
 
 export class BridgeServer implements Disposable {
@@ -38,6 +62,8 @@ export class BridgeServer implements Disposable {
   private readonly peers = new Set<RpcPeer>();
   private readonly peerSessions = new Map<RpcPeer, AgentSession>();
   private readonly subscriptions: Disposable[] = [];
+  /** Sessions that have been given the usage notes in a tool result (see `needsUsageNotes`). */
+  private readonly notesGiven = new WeakSet<AgentSession>();
 
   constructor(private readonly options: BridgeServerOptions) {
     this.server = net.createServer(socket => this.accept(socket));
@@ -133,6 +159,11 @@ export class BridgeServer implements Disposable {
         log: scopedLogger(options.log, `${current.label} ${params.name}`),
       });
       options.log.debug(`${current.label} ${params.name} ${result.isError ? 'failed' : 'ok'} in ${Date.now() - started} ms`);
+      // Once per session (the session object outlives reconnects with the same key), on success only.
+      if (!result.isError && !this.notesGiven.has(current) && (options.needsUsageNotes ?? dropsServerInstructions)(current.client)) {
+        this.notesGiven.add(current);
+        return withUsageNotes(result, options.instructions());
+      }
       return result;
     });
 

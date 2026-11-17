@@ -50,12 +50,19 @@ export interface Region {
   readonly startedAt?: number;
 }
 
-/** A read position: new output is everything after it. */
+/**
+ * A read position: new output is everything after it, on the normal screen. A full-screen program
+ * (alternate screen) leaves the normal buffer untouched, so a mark taken meanwhile holds the normal
+ * buffer's line in `line` and gets a real marker when the program returns to the normal screen.
+ */
 export interface Mark {
+  /** Undefined while the mark waits for the normal screen (see `line`). */
   readonly marker: IMarker | undefined;
   readonly col: number;
   /** Set when the mark was taken while a full-screen program was showing. */
   readonly alternate: boolean;
+  /** Taken on the alternate screen: the normal buffer's line, used until `marker` is set. */
+  readonly line?: number;
   /** How many times output had been skipped when the mark was taken (see TerminalMirror.skips). */
   readonly skips?: number;
 }
@@ -112,6 +119,8 @@ export class TerminalMirror {
   private readonly waiters: Array<{ seq: number; resolve: () => void }> = [];
   private inSkipped = false;
   private disposed = false;
+  /** Marks taken on the alternate screen, given markers when the normal screen is back. */
+  private readonly pendingMarks: Array<{ marker: IMarker | undefined; line?: number }> = [];
 
   /** A command's output starts (OSC 633;C or `beginRegion`). Fired while parsing, in stream order. */
   readonly onRegionStart: Event<Region> = this.startEmitter.event;
@@ -139,6 +148,9 @@ export class TerminalMirror {
     this.xterm.parser.registerOscHandler(FRAME_OSC, data => {
       if (this.feed === 'executions') this.onShellIntegration(data);
       return true;
+    });
+    this.xterm.buffer.onBufferChange(buffer => {
+      if (buffer.type === 'normal') this.resolvePendingMarks();
     });
     this.xterm.parser.registerOscHandler(SKIP_OSC, data => {
       this.inSkipped = data === 'start';
@@ -338,10 +350,28 @@ export class TerminalMirror {
   /** The current position, for reading what comes after it later. */
   mark(options: { exact?: boolean } = {}): Mark {
     const buffer = this.xterm.buffer.normal;
-    if (this.alternate) return { marker: undefined, col: 0, alternate: true, skips: this.skips };
     // Unless exact, start at the beginning of the cursor line: a progress bar may still redraw it.
+    const col = options.exact ? buffer.cursorX : 0;
+    if (this.alternate) {
+      // The normal buffer does not change until the program leaves the alternate screen.
+      const mark: Mark = { marker: undefined, col, alternate: true, skips: this.skips, line: buffer.baseY + buffer.cursorY };
+      this.pendingMarks.push(mark);
+      return mark;
+    }
     const marker = this.xterm.registerMarker(0);
-    return { marker, col: options.exact ? buffer.cursorX : 0, alternate: false, skips: this.skips };
+    return { marker, col, alternate: false, skips: this.skips };
+  }
+
+  /** Back on the normal screen: marks taken on the alternate screen get markers at their line. */
+  private resolvePendingMarks(): void {
+    const buffer = this.xterm.buffer.normal;
+    // registerMarker counts from the cursor of the active buffer, which is the normal one again. Its
+    // cursor may not be restored yet (xterm.js restores it after this event), so count from where it is now.
+    const cursor = buffer.baseY + buffer.cursorY;
+    for (const mark of this.pendingMarks.splice(0)) {
+      if (mark.marker || mark.line === undefined) continue;
+      mark.marker = this.xterm.registerMarker(Math.min(mark.line, buffer.length - 1) - cursor);
+    }
   }
 
   /** A mark at the end of a finished region (nothing more will be written into it). */
@@ -350,17 +380,21 @@ export class TerminalMirror {
     return this.mark({ exact: true });
   }
 
-  /** Everything after `mark` on the normal screen, as rendered. */
+  /**
+   * Everything after `mark` on the normal screen, as rendered. While a full-screen program shows,
+   * that is only what was printed before it started; its own screen is `screen()`.
+   */
   linesSince(mark: Mark | undefined): LinesResult {
     const buffer = this.xterm.buffer.normal;
     const endLine = buffer.baseY + buffer.cursorY;
-    if (!mark || mark.alternate || !mark.marker || mark.marker.line < 0) {
-      const lost = !!mark && !mark.alternate;
+    const line = mark?.marker ? mark.marker.line : mark?.line;
+    if (!mark || line === undefined || line < 0) {
+      // No mark: the last screenful. A mark whose line is gone: it scrolled out, read what is left.
       const from = mark ? 0 : Math.max(0, endLine - this.xterm.rows + 1);
-      return { lines: tidy(readLines(buffer, from, 0, endLine, undefined)), startLost: lost };
+      return { lines: tidy(readLines(buffer, from, 0, endLine, undefined)), startLost: !!mark };
     }
     const skipped = mark.skips !== undefined && this.skips > mark.skips;
-    return { lines: tidy(readLines(buffer, mark.marker.line, mark.col, endLine, undefined)), startLost: skipped };
+    return { lines: tidy(readLines(buffer, Math.min(line, endLine), mark.col, endLine, undefined)), startLost: skipped };
   }
 
   /** The visible screen of the active buffer (the full-screen program's screen if one is running). */

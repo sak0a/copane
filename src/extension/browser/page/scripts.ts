@@ -242,6 +242,9 @@ export const DEEP_ACTIVE_ELEMENT = `function () {
   return el && el !== document.body && el !== document.documentElement ? el : null;
 }`;
 
+/** JSON up to this length is indented for reading; longer JSON is compact (browser_evaluate, request bodies). */
+export const PRETTY_JSON_MAX = 1500;
+
 /** Any world, `this` = a value. JSON for the agent: DOM nodes described, cycles cut, size bounded. */
 export const SERIALIZE = `function (maxChars) {
   const seen = new WeakSet();
@@ -297,8 +300,13 @@ export const SERIALIZE = `function (maxChars) {
     }
     return out;
   };
+  // Indented while small enough to scan; compact above that, where indentation would cost a third.
   let json;
-  try { json = JSON.stringify(walk(this, 0), null, 2); } catch (e) { json = String(e); }
+  try {
+    const value = walk(this, 0);
+    json = JSON.stringify(value, null, 2);
+    if (json !== undefined && json.length > ${PRETTY_JSON_MAX}) json = JSON.stringify(value);
+  } catch (e) { json = String(e); }
   if (json === undefined) json = 'undefined';
   return json.length > maxChars ? json.slice(0, maxChars) + '\\n… (cut: ' + json.length + ' characters in total)' : json;
 }`;

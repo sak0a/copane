@@ -48,6 +48,12 @@ describe('agentsSetup', () => {
     expect(agentsSetup([{ enabled: true, detected: true, state: { kind: 'foreign', command: 'x' } }])).toBe('off');
     expect(agentsSetup([{ enabled: true, detected: false, state: { kind: 'absent' } }])).toBe('none');
   });
+  it('counts GitHub Copilot like the other agents (three agents, only Copilot registered)', () => {
+    const absent = { enabled: true, detected: true, state: { kind: 'absent' } } as const;
+    expect(agentsSetup([absent, absent, { enabled: true, detected: true, state: ours }])).toBe('ready');
+    expect(agentsSetup([{ ...absent, detected: false }, { ...absent, detected: false }, absent])).toBe('off');
+    expect(agentsSetup([{ ...absent, detected: false }, { ...absent, detected: false }, { enabled: false, detected: true, state: ours }])).toBe('none');
+  });
 });
 
 describe('setupContext and the first-run walkthrough', () => {

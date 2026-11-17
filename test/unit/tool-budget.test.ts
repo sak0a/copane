@@ -9,7 +9,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 /** Characters of all tool definitions together (about 3.6 characters per token). */
-const TOTAL_BUDGET = 30_000;
+const TOTAL_BUDGET = 28_400;
 /** Characters of any one tool definition. */
 const PER_TOOL_BUDGET = 1_800;
 /**
@@ -18,9 +18,13 @@ const PER_TOOL_BUDGET = 1_800;
  */
 const INSTRUCTIONS_BUDGET = 3_400;
 
+/** Whether the stand-in offers the proposed browser API (`window.browserTabs`), read at activation. */
+const vscodeState = vi.hoisted(() => ({ browserAvailable: true }));
+
 vi.mock('vscode', () => {
   const api = anything('vscode');
-  return new Proxy({}, { get: (_t, key) => (key === 'then' ? undefined : api[key]), has: () => true });
+  const window = new Proxy(api.window, { get: (t, key) => (key === 'browserTabs' ? (vscodeState.browserAvailable ? [] : undefined) : t[key]) });
+  return new Proxy({}, { get: (_t, key) => (key === 'then' ? undefined : key === 'window' ? window : api[key]), has: () => true });
 });
 
 /**
@@ -46,11 +50,15 @@ function anything(path: string): any {
 interface Measured {
   tools: Array<{ name: string; chars: number }>;
   total: number;
-  instructions: { browserAvailable: number; browserMissing: number };
+  instructions: number;
 }
 
-/** The tool list and instructions of a production window, as an agent receives them. */
-async function measure(): Promise<Measured> {
+/**
+ * The tool list and instructions of a production window, as an agent receives them: with the
+ * integrated browser enabled (the default) or not (no browser_* tools, shorter instructions).
+ */
+async function measure({ browserAvailable = true } = {}): Promise<Measured> {
+  vscodeState.browserAvailable = browserAvailable;
   const { ToolRegistry } = await import('../../src/extension/core/tools');
   const { SessionManager } = await import('../../src/extension/core/sessions');
   const { LeaseManager } = await import('../../src/extension/core/leases');
@@ -76,13 +84,13 @@ async function measure(): Promise<Measured> {
     activateSessionTools(services);
     activateBrowser(services);
     activateTerminals(services);
+    expect(services.browser.available).toBe(browserAvailable);
     const tools = [...services.tools.list(), ...LOCAL_TOOLS].map(t => ({ name: t.name as string, chars: JSON.stringify(t).length }));
-    const instructions = (available: boolean) => buildInstructions({ ...services, browser: { ...services.browser, available } }).length;
     return {
       tools,
       // As in measure-tokens.mjs: the JSON array of all definitions.
       total: tools.reduce((n, t) => n + t.chars, 0) + tools.length + 1,
-      instructions: { browserAvailable: instructions(true), browserMissing: instructions(false) },
+      instructions: buildInstructions(services).length,
     };
   } finally {
     for (const s of subscriptions.reverse()) {
@@ -102,22 +110,36 @@ const ADVICE =
 describe('tool definition budget', () => {
   it('keeps every tool and the whole list within budget', async () => {
     const m = await measure();
+    const without = await measure({ browserAvailable: false });
     expect(m.tools.length, 'no tools were collected: did a module change how it registers its tools?').toBeGreaterThan(20);
     const largest = [...m.tools].sort((a, b) => b.chars - a.chars);
     const summary = `${m.tools.length} tools, ${m.total} chars (≈ ${Math.round(m.total / 3.6)} tokens); largest: ${largest
       .slice(0, 6)
       .map(t => `${t.name} ${t.chars}`)
       .join(', ')}`;
-    console.log(`Tool definitions: ${summary}. Instructions: ${m.instructions.browserAvailable} chars (${m.instructions.browserMissing} without the browser).`);
+    console.log(
+      `Tool definitions: ${summary}. Without the browser: ${without.tools.length} tools, ${without.total} chars. ` +
+        `Instructions: ${m.instructions} chars (${without.instructions} without the browser).`,
+    );
 
     const over = largest.filter(t => t.chars > PER_TOOL_BUDGET);
     expect(over.map(t => `${t.name}: ${t.chars} chars`), `These tool definitions are over the ${PER_TOOL_BUDGET}-character budget per tool. ${ADVICE}`).toEqual([]);
     expect(m.total, `All tool definitions together are ${m.total} characters, over the budget of ${TOTAL_BUDGET} (${summary}). ${ADVICE}`).toBeLessThanOrEqual(TOTAL_BUDGET);
   });
 
+  it('lists no browser tools, and says how to enable the browser, when it is not enabled', async () => {
+    const m = await measure({ browserAvailable: false });
+    expect(m.tools.map(t => t.name).filter(name => name.startsWith('browser_'))).toEqual([]);
+    expect(m.tools.map(t => t.name)).toEqual(expect.arrayContaining(['session_info', 'terminal_run', 'window_status']));
+    const { buildInstructions } = await import('../../src/extension/core/instructions');
+    const text = buildInstructions({ browser: { available: false } } as any);
+    expect(text).not.toMatch(/^(Browser|Pages):/m);
+    expect(text).toContain('Copane: Enable Integrated Browser');
+    expect(text).toMatch(/^Terminals:/m);
+  });
+
   it('keeps the instructions within budget', async () => {
-    const { instructions } = await measure();
-    const longest = Math.max(instructions.browserAvailable, instructions.browserMissing);
+    const longest = Math.max((await measure()).instructions, (await measure({ browserAvailable: false })).instructions);
     expect(
       longest,
       `core/instructions.ts produces ${longest} characters, over the budget of ${INSTRUCTIONS_BUDGET}: Claude Code drops what is past 4096 characters, and the MCP server adds its own lines. Keep only guidance that several tools share.`,

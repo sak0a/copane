@@ -174,6 +174,46 @@ test('snapshot: text mode, find, link targets', async () => {
   await fails('browser_snapshot', { mode: 'text', find: 'x' }, /either find or mode "text"/);
 });
 
+test('snapshot: reading a page again returns only what changed since this session last read it', async () => {
+  const tab = await open('/form.html');
+  const first = await a.ok('browser_snapshot');
+  assert.match(first, /- Snapshot of tab-\d+:\n```yaml\n/);
+  const unchanged = /- Snapshot of tab-\d+: unchanged since your last snapshot of it; its refs are still valid\. Pass offset: 0 to get it in full again\.$/;
+  // Nothing changed (a screenshot in between does not count): one line instead of the page.
+  await a.ok('browser_screenshot');
+  const again = await a.ok('browser_snapshot');
+  assert.match(again, unchanged);
+  assert.ok(again.length < 400, `short form too long: ${again.length}`);
+  // offset 0 asks for all of it, with the same refs.
+  assert.equal(await a.ok('browser_snapshot', { offset: 0 }), first);
+  // An action changed the page: the changed lines, although the action's result showed them already.
+  const typed = await a.ok('browser_type', { ref: refOf(first, 'textbox "Name"'), text: 'Ada' });
+  assert.match(typed, /Changed on the page:/);
+  const changed = await a.ok('browser_snapshot');
+  assert.match(changed, /- Snapshot of tab-\d+: \d+ lines? changed since your last snapshot of it \(each with the line it sits under\); everything else and its refs are as they were\. Pass offset: 0 to get it in full again\.\n```yaml\n- form \[ref=e\d+\]:\n  - textbox "Name" \[required\] \[ref=e\d+\]: Ada\n/);
+  assert.match(changed, new RegExp(`button "Create account" \\[ref=${refOf(first, 'button "Create account"')}\\]`));
+  assert.doesNotMatch(changed, /textbox "Email"|heading "Sign up"/);
+  assert.ok(changed.length < first.length / 2, `changed form too long: ${changed.length} of ${first.length}`);
+  assert.match(await a.ok('browser_snapshot'), unchanged);
+  // Another session has not read the tab yet: it gets all of it.
+  const b = await agent({ session: 'browser-page-snapshot-b' });
+  try {
+    assert.match(await b.ok('browser_snapshot', { tab }), /- Snapshot of tab-\d+:\n```yaml\n[\s\S]*textbox "Email"/);
+  } finally {
+    await b.close();
+  }
+  // Another page: all of it.
+  await a.ok('browser_navigate', { url: url('/spa.html') });
+  assert.match(await a.ok('browser_snapshot'), /- Snapshot of tab-\d+:\n```yaml\n[\s\S]*button "Shuffle"/);
+  // A cut snapshot read again: says where it was cut, so reading on stays possible.
+  await a.ok('browser_navigate', { url: url('/long.html') });
+  const cut = await a.ok('browser_snapshot', { maxChars: 5000 });
+  const end = /with offset (\d+)/.exec(cut)[1];
+  assert.match(await a.ok('browser_snapshot', { maxChars: 5000 }), new RegExp(`unchanged since your last snapshot of it \\(it was cut at character ${end} of \\d+: pass offset ${end} to read on\\)`));
+  // Another maxChars: all of it.
+  assert.match(await a.ok('browser_snapshot', { maxChars: 6000 }), /\[Snapshot cut: showing characters 0-/);
+});
+
 test('refs fail clearly when the page changed underneath', async () => {
   const tab = await open('/spa.html');
   let snap = await a.ok('browser_snapshot');
@@ -186,7 +226,7 @@ test('refs fail clearly when the page changed underneath', async () => {
   await a.ok('browser_click', { selector: '#rename' });
   await fails('browser_click', { ref: rename }, /has changed: it was button "Rename me" in your snapshot and is now button "Renamed"/);
   // Our own action changing a ref's label keeps it usable.
-  snap = await a.ok('browser_snapshot');
+  snap = await a.ok('browser_snapshot', { offset: 0 });
   const later = refOf(snap, 'button "Load later"');
   await a.ok('browser_click', { ref: later });
   await a.ok('browser_click', { ref: later });
@@ -447,8 +487,8 @@ test('network: listing, filters, onlyNew and request details with headers and bo
   await evaluate("fetch('/echo', { method: 'POST', headers: { 'content-type': 'application/json', 'x-agent': 'yes' }, body: JSON.stringify({ hello: 'world' }) }).then(r => r.text())");
   await a.ok('browser_wait_for', { loadState: 'networkidle' });
   const list = await a.ok('browser_network_requests');
-  assert.match(list, /r\d+ {2}GET 200 document {2}http:\/\/127\.0\.0\.1:\d+\/spa\.html/);
-  assert.match(list, /r\d+ {2}GET 200 fetch {2}http:\/\/127\.0\.0\.1:\d+\/json/);
+  assert.match(list, /paths are relative to http:\/\/127\.0\.0\.1:\d+:\nr\d+ {2}GET 200 document {2}\/spa\.html/);
+  assert.match(list, /r\d+ {2}GET 200 fetch {2}\/json/);
   assert.match(list, /r\d+ {2}GET 500 fetch/);
   const failed = await a.ok('browser_network_requests', { status: 'failed' });
   assert.match(failed, /500/);

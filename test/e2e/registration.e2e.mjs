@@ -1,6 +1,6 @@
-// Registration with Claude Code and Codex, browser enablement, the status report and the MCP server's
-// reconnect after a window reload, against a running dev host. Everything is written to the dev
-// host's throwaway config (CLAUDE_CONFIG_DIR, CODEX_HOME, COPANE_ARGV_JSON under
+// Registration with Claude Code, Codex and GitHub Copilot, browser enablement, the status report and
+// the MCP server's reconnect after a window reload, against a running dev host. Everything is written
+// to the dev host's throwaway config (CLAUDE_CONFIG_DIR, CODEX_HOME, COPILOT_HOME, COPANE_ARGV_JSON under
 // /tmp/copane-dev/<name>/), never to the real one.
 //
 //   node scripts/dev-host.mjs --name registration
@@ -14,6 +14,8 @@ const claudeDir = join(hostDir, 'claude');
 const claudeFile = join(claudeDir, '.claude.json');
 const codexDir = join(hostDir, 'codex');
 const codexFile = join(codexDir, 'config.toml');
+const copilotDir = join(hostDir, 'copilot');
+const copilotFile = join(copilotDir, 'mcp-config.json');
 const argvFile = join(hostDir, 'argv.json');
 const setupFile = join(hostDir, 'home', 'setup.json');
 const launcher = join(hostDir, 'home', 'bin', process.platform === 'win32' ? 'mcp-server.js' : 'mcp-server');
@@ -22,6 +24,7 @@ const readHistory = () => (existsSync(historyFile) ? JSON.parse(readFileSync(his
 
 const CLAUDE_BEFORE = { numStartups: 7, mcpServers: { github: { type: 'http', url: 'https://example.com/mcp' } }, projects: { '/p': { allowedTools: [] } } };
 const CODEX_BEFORE = '# my codex settings\nmodel = "o3" # keep this comment\n\n[mcp_servers.other]\ncommand = "x"\n';
+const COPILOT_BEFORE = '// my copilot servers\n{\n  "mcpServers": {\n    "other": { "type": "local", "command": "npx", "args": ["other"], "tools": ["*"] }\n  },\n  "unknownKey": 1\n}\n';
 const ARGV_BEFORE = `// This configuration file allows you to pass permanent command line arguments to VS Code.
 {
 \t// Allows to disable crash reporting.
@@ -35,11 +38,17 @@ function resetConfigs() {
   mkdirSync(codexDir, { recursive: true });
   writeFileSync(claudeFile, JSON.stringify(CLAUDE_BEFORE, null, 2));
   writeFileSync(codexFile, CODEX_BEFORE);
+  // The folder existing is what makes Copilot "installed" in the dev host, whether or not `copilot` is on the PATH.
+  mkdirSync(copilotDir, { recursive: true });
+  writeFileSync(copilotFile, COPILOT_BEFORE);
   rmSync(setupFile, { force: true });
 }
 
 const readClaude = () => JSON.parse(readFileSync(claudeFile, 'utf8'));
 const readCodex = () => readFileSync(codexFile, 'utf8');
+const readCopilotText = () => readFileSync(copilotFile, 'utf8');
+/** mcp-config.json is JSONC; ours has one leading line comment. */
+const readCopilot = () => JSON.parse(readCopilotText().replace(/^\s*\/\/.*$/gm, ''));
 
 /** Runs a VS Code command in the dev host and returns its (JSON) result. */
 async function command(a, id, ...args) {
@@ -71,7 +80,7 @@ function available(cmd) {
   }
 }
 
-test('asks once, then registers with Claude Code and Codex, keeping everything else in their files', async () => {
+test('asks once, then registers with Claude Code, Codex and GitHub Copilot, keeping everything else in their files', async () => {
   resetConfigs();
   const a = await agent({ session: 'reg-1' });
   try {
@@ -80,9 +89,10 @@ test('asks once, then registers with Claude Code and Codex, keeping everything e
     assert.deepEqual(results.map(r => [r.agent, r.outcome.kind]), [
       ['Claude Code', 'changed'],
       ['Codex', 'changed'],
+      ['GitHub Copilot', 'changed'],
     ]);
     const prompts = await shownPrompts(a);
-    const consent = prompts.find(p => p.message.includes('let Claude Code and Codex use'));
+    const consent = prompts.find(p => p.message.includes('let Claude Code, Codex and GitHub Copilot use'));
     assert.ok(consent, 'the consent prompt was shown');
     assert.deepEqual(consent.choices, ['Register', 'Not Now', 'Never']);
 
@@ -97,6 +107,18 @@ test('asks once, then registers with Claude Code and Codex, keeping everything e
     assert.ok(codex.startsWith(CODEX_BEFORE.trimEnd()), 'the existing Codex config is unchanged');
     assert.match(codex, /\[mcp_servers\.copane\]\ncommand = ".*mcp-server"/);
     assert.match(codex, /env_vars = \["COPANE_INSTANCE", "COPANE_SESSION"\]/);
+
+    assert.match(readCopilotText(), /^\/\/ my copilot servers\n/, 'the comment stays');
+    const copilot = readCopilot();
+    assert.deepEqual(copilot.mcpServers.copane, {
+      type: 'local',
+      command: launcher,
+      args: [],
+      env: { COPANE_HOME: join(hostDir, 'home'), COPANE_INSTANCE: '${COPANE_INSTANCE:-}', COPANE_SESSION: '${COPANE_SESSION:-}' },
+      tools: ['*'],
+    });
+    assert.deepEqual(copilot.mcpServers.other, { type: 'local', command: 'npx', args: ['other'], tools: ['*'] });
+    assert.equal(copilot.unknownKey, 1);
 
     // Idempotent and quiet the second time.
     const before = (await shownPrompts(a)).length;
@@ -126,6 +148,17 @@ test('the registered server is what the real claude and codex start, and it reac
   assert.ok(diagnose.selected, `the server finds a window: ${diagnose.problem}`);
 });
 
+test('the real copilot CLI lists the entry from the dev host\'s COPILOT_HOME', async () => {
+  // Reads only (no model request); COPILOT_HOME keeps it on the dev host's throwaway folder.
+  const listed = JSON.parse(execFileSync('copilot', ['mcp', 'list', '--json'], { env: cliEnv({ COPILOT_HOME: copilotDir }), cwd: join(hostDir, 'ws'), encoding: 'utf8', timeout: 60_000 }));
+  const ours = listed.mcpServers.copane;
+  assert.ok(ours, `copane is listed: ${JSON.stringify(Object.keys(listed.mcpServers))}`);
+  assert.equal(ours.command, launcher);
+  assert.equal(ours.enabled, true);
+  assert.equal(ours.source, 'user');
+  assert.ok(listed.mcpServers.other, 'the user\'s other server is still listed');
+}, { skip: available('copilot') ? undefined : 'the copilot CLI is not installed' });
+
 test('never replaces a "copane" server the user configured, unless they say so', async () => {
   resetConfigs();
   const theirs = { type: 'stdio', command: 'npx', args: ['their-vscode-server'] };
@@ -154,7 +187,7 @@ test('never replaces a "copane" server the user configured, unless they say so',
   }
 });
 
-test('the status report covers this window, the browser, both agents and the sessions', async () => {
+test('the status report covers this window, the browser, every agent and the sessions', async () => {
   const a = await agent({ session: 'reg-status' });
   try {
     await a.ok('session_set_title', { title: 'status check' });
@@ -163,6 +196,7 @@ test('the status report covers this window, the browser, both agents and the ses
     assert.match(report, /listening ✓/);
     assert.match(report, /### Claude Code[\s\S]*registered ✓/);
     assert.match(report, /### Codex[\s\S]*registered ✓/);
+    assert.match(report, /### GitHub Copilot[\s\S]*Config: .*copilot.mcp-config\.json[\s\S]*registered ✓/);
     assert.match(report, /Self-test .*: ok ✓/);
     assert.match(report, /Claude \d+ · status check — claude-code/);
   } finally {
@@ -179,11 +213,13 @@ test('unregister removes only Copane entries and is not undone on the next start
     assert.ok(readClaude().mcpServers.copane);
     await answers(a, [null]);
     const results = await command(a, 'copane.unregisterAgents');
-    assert.deepEqual(results.map(r => r.outcome.kind), ['changed', 'changed']);
+    assert.deepEqual(results.map(r => r.outcome.kind), ['changed', 'changed', 'changed']);
     // The claude CLI adds its own first-run fields to a fresh config; ours are exactly as before.
     const claude = readClaude();
     for (const key of Object.keys(CLAUDE_BEFORE)) assert.deepEqual(claude[key], CLAUDE_BEFORE[key], key);
     assert.equal(readCodex(), CODEX_BEFORE);
+    assert.match(readCopilotText(), /^\/\/ my copilot servers\n/, 'the comment stays');
+    assert.deepEqual(readCopilot(), JSON.parse(COPILOT_BEFORE.replace(/^\/\/.*$/m, '')));
     assert.equal(JSON.parse(readFileSync(setupFile, 'utf8')).consent, 'declined');
     const before = (await shownPrompts(a)).length;
     assert.deepEqual(await command(a, 'copane.registration.runStartupCheck'), []);
@@ -251,12 +287,12 @@ test('the MCP server reconnects after the window reloads and keeps its session k
   await sleep(500);
 });
 
-/** Turned on, with both agents registered: the state the owner was in before the entry disappeared. */
+/** Turned on, with all three agents registered: the state the owner was in before the entry disappeared. */
 async function turnedOn(a) {
   resetConfigs();
   await answers(a, [null]);
   const results = await command(a, 'copane.registerAgents');
-  assert.deepEqual(results.map(r => r.outcome.kind), ['changed', 'changed']);
+  assert.deepEqual(results.map(r => r.outcome.kind), ['changed', 'changed', 'changed']);
 }
 
 test('an entry removed outside Copane comes back at startup, with the reason in the history', async () => {
@@ -331,6 +367,7 @@ test('Check and Repair checks end to end, fixes Copane\'s entries and reports wh
     assert.match(texts, /ok: The MCP server script is in place/);
     assert.match(texts, /ok: Claude Code: registered and current/);
     assert.match(texts, /ok: Codex: registered and current/);
+    assert.match(texts, /ok: GitHub Copilot: registered and current/);
     assert.match(texts, /ok: Start test: the server answered the MCP handshake and listed \d+ tools, and ended when its input closed/);
     assert.match(texts, /ok: Window test: .*finds this window .*and the window answers/);
     assert.match(texts, /ok: This window is published and listening/);
@@ -370,19 +407,22 @@ test('Turn Off removes everything and Check and Repair respects it; Turn On brin
     await command(a, 'copane.unregisterAgents');
     assert.equal(readClaude().mcpServers.copane, undefined);
     assert.equal(readCodex(), CODEX_BEFORE);
+    assert.equal(readCopilot().mcpServers.copane, undefined);
     const report = await command(a, 'copane.repair', { quiet: true });
     const problems = report.lines.filter(l => l.kind === 'problem').map(l => l.text);
-    assert.equal(problems.length, 2);
-    for (const p of problems) assert.match(p, /not registered, because it was turned off; run "Copane: Turn On \(Register with Claude Code and Codex\)"/);
+    assert.equal(problems.length, 3);
+    for (const p of problems) assert.match(p, /not registered, because it was turned off; run "Copane: Turn On \(Register with Claude Code, Codex and Copilot\)"/);
     assert.equal(readClaude().mcpServers.copane, undefined, 'repair does not undo Turn Off');
     assert.deepEqual(await command(a, 'copane.registration.runStartupCheck'), [], 'nor does the startup check');
-    assert.deepEqual(readHistory().slice(-2).map(r => [r.action, r.trigger, r.outcome]), [
-      ['remove', 'turn-off', 'changed'],
-      ['remove', 'turn-off', 'changed'],
+    assert.deepEqual(readHistory().slice(-3).map(r => [r.agent, r.action, r.trigger, r.outcome]), [
+      ['Claude Code', 'remove', 'turn-off', 'changed'],
+      ['Codex', 'remove', 'turn-off', 'changed'],
+      ['GitHub Copilot', 'remove', 'turn-off', 'changed'],
     ]);
     await answers(a, [null]);
     const on = await command(a, 'copane.registerAgents');
-    assert.deepEqual(on.map(r => r.outcome.kind), ['changed', 'changed']);
+    assert.deepEqual(on.map(r => r.outcome.kind), ['changed', 'changed', 'changed']);
+    assert.equal(readCopilot().mcpServers.copane.command, launcher);
     assert.equal(readClaude().mcpServers.copane.command, launcher);
   } finally {
     await a.close();

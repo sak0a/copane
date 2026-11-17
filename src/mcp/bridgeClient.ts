@@ -48,7 +48,11 @@ export interface BridgeClientOptions {
   env: NodeJS.ProcessEnv;
   cwd: string;
   pid: number;
-  sessionKey: string;
+  /**
+   * The session key, or how to choose it from the MCP client's name (`sessionKeyFrom`). A function is
+   * called once, at the first connection: MCP initialize, which names the client, comes before it.
+   */
+  sessionKey: string | ((clientName: string) => string);
   readInstances(): InstanceInfo[];
   ancestors(): Promise<number[]>;
   log(message: string): void;
@@ -63,19 +67,39 @@ export interface Connection {
   note: string | undefined;
 }
 
+/** The environment variable in which an agent gives its MCP servers its own session id. */
+const SESSION_ID_VARS: Partial<Record<AgentKind, string>> = {
+  // The conversation id; the same when it is resumed with --resume, and its sub-agents use the same
+  // MCP server process.
+  'claude-code': 'CLAUDE_CODE_SESSION_ID',
+  // Undocumented (observed in Copilot CLI 1.0.105): the id `copilot --resume=<id>` takes.
+  copilot: 'COPILOT_AGENT_SESSION_ID',
+};
+
 /**
- * Stable identity of this agent session, so a reconnect resumes it. Claude Code puts the conversation
- * id in CLAUDE_CODE_SESSION_ID for its MCP servers; it stays the same when the conversation is resumed
- * with --resume, and its sub-agents use the same MCP server process.
+ * Stable identity of this agent session, so a reconnect resumes it: `COPANE_SESSION` when set, else
+ * the session id the connected agent puts in its MCP servers' environment, else a random one.
+ *
+ * Agents started inside one another inherit each other's variables (a `copilot` run in a Claude Code
+ * shell has `CLAUDE_CODE_SESSION_ID`), so when the client is known (`clientName`, from MCP
+ * initialize) only that agent's own variable is used: another agent's id would make this session
+ * take over that agent's session. Without a client name, the variables are tried in a fixed order.
  */
-export function sessionKeyFrom(env: NodeJS.ProcessEnv): string {
-  return env[Env.sessionKey] || env.CLAUDE_CODE_SESSION_ID || randomUUID();
+export function sessionKeyFrom(env: NodeJS.ProcessEnv, clientName?: string): string {
+  const explicit = env[Env.sessionKey];
+  if (explicit) return explicit;
+  if (clientName !== undefined) {
+    const own = SESSION_ID_VARS[agentKind(clientName)];
+    return (own && env[own]) || randomUUID();
+  }
+  return env.CLAUDE_CODE_SESSION_ID || env.COPILOT_AGENT_SESSION_ID || randomUUID();
 }
 
 export function agentKind(clientName: string): AgentKind {
   const name = clientName.toLowerCase();
   if (name.includes('claude')) return 'claude-code';
   if (name.includes('codex')) return 'codex';
+  if (name.includes('copilot')) return 'copilot';
   return 'other';
 }
 
@@ -84,6 +108,7 @@ const MATCH_WORDS: Record<InstanceMatch, string> = {
   env: 'this agent runs in one of its integrated terminals',
   reconnect: 'it replaced the window this session used before (a window reload)',
   cwd: 'the working directory is inside its workspace',
+  worktree: 'the working directory is a git worktree of a repository open in it',
   single: 'it is the only open window',
   explicit: 'chosen with window_select',
 };
@@ -106,6 +131,7 @@ export class BridgeClient {
   private graceTimer: NodeJS.Timeout | undefined;
   private lastVisible = '[]';
   private disposed = false;
+  private key: string | undefined;
   client: { name: string; version?: string } = { name: 'unknown' };
   /** Called when the tool list the agent should see has changed. */
   onToolsChanged: () => void = () => {};
@@ -118,8 +144,11 @@ export class BridgeClient {
     return this.connection && !this.connection.peer.isClosed ? this.connection : undefined;
   }
 
+  /** Fixed when first read, which is at the first connection (after MCP initialize named the client). */
   get sessionKey(): string {
-    return this.options.sessionKey;
+    const { sessionKey } = this.options;
+    this.key ??= typeof sessionKey === 'string' ? sessionKey : sessionKey(this.client.name);
+    return this.key;
   }
 
   /** Starts looking for a window in the background, so tools appear once one opens. */
@@ -271,6 +300,7 @@ export class BridgeClient {
       explicit: this.explicit,
       previous: this.previous,
       realpath: p => fs.realpathSync.native(p),
+      readFile: p => fs.readFileSync(p, 'utf8'),
     });
     if (!found) {
       this.lastProblem = explainNoMatch({ instances, cwd: this.options.cwd, env: this.options.env });
@@ -291,7 +321,7 @@ export class BridgeClient {
       const params: HelloParams = {
         protocolVersion: PROTOCOL_VERSION,
         token: instance.token,
-        sessionKey: this.options.sessionKey,
+        sessionKey: this.sessionKey,
         client: { ...this.client, kind: agentKind(this.client.name) },
         process: { pid: this.options.pid, cwd: this.options.cwd },
         matchedBy,

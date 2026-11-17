@@ -17,7 +17,7 @@ class TargetGone extends Error {
   }
 }
 
-const AGENT_APPS: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex' };
+const AGENT_APPS: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex', copilot: 'GitHub Copilot' };
 
 export function registerUiCommands(services: BridgeServices, state: UiState, tree: SessionsTree): vscode.Disposable[] {
   const { sessions } = services;

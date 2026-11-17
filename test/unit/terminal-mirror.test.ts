@@ -65,6 +65,44 @@ describe('TerminalMirror (stream feed)', () => {
     expect(m.alternate).toBe(false);
   });
 
+  it('a mark taken on the alternate screen never re-reads earlier normal-screen output', async () => {
+    const m = new TerminalMirror({ feed: 'stream', cols: 30, rows: 6 });
+    for (let i = 1; i <= 20; i++) await m.write(`old ${i}\r\n`);
+    await m.write('$ less file\r\n');
+    const before = m.mark();
+    await m.write('\x1b[?1049h\x1b[H\x1b[2Jpage 1\r\n');
+    const onAlt = m.mark();
+    expect(onAlt.alternate).toBe(true);
+    expect(onAlt.marker).toBeUndefined();
+    // Nothing new on the normal screen while the program shows; its screen is screen().
+    expect(m.linesSince(onAlt)).toEqual({ lines: [], startLost: false });
+    expect(m.linesSince(before).lines).toEqual([]);
+    await m.write('\x1b[H\x1b[2Jpage 2\r\n');
+    const again = m.mark();
+    expect(m.linesSince(onAlt).lines).toEqual([]);
+    // The program quits; the shell prints after it. Only that is new.
+    await m.write('\x1b[?1049lbye\r\n$ ');
+    expect(m.alternate).toBe(false);
+    expect(onAlt.marker).toBeDefined();
+    expect(m.linesSince(onAlt).lines).toEqual(['bye', '$']);
+    expect(m.linesSince(again).lines).toEqual(['bye', '$']);
+    expect(m.linesSince(before).lines).toEqual(['bye', '$']);
+    // The marker follows the buffer from now on, like any other.
+    await m.write('\r\nmore\r\n');
+    expect(m.linesSince(onAlt).lines).toEqual(['bye', '$', 'more']);
+  });
+
+  it('a mark on the alternate screen keeps unread lines printed before the program started', async () => {
+    const m = new TerminalMirror({ feed: 'stream', cols: 30, rows: 6 });
+    await m.write('seen\r\n');
+    const mark = m.mark();
+    await m.write('unread\r\n\x1b[?1049h\x1b[H\x1b[2Jscreen\r\n');
+    expect(m.linesSince(mark).lines).toEqual(['unread']);
+    const exact = m.mark({ exact: true });
+    await m.write('\x1b[?1049l');
+    expect(m.linesSince(exact).lines).toEqual([]);
+  });
+
   it('tracks application cursor key mode', async () => {
     const m = new TerminalMirror({ feed: 'stream' });
     expect(m.applicationCursorKeys).toBe(false);

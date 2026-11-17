@@ -19,6 +19,20 @@ describe('SessionManager', () => {
     expect(new Set([s1.color.id, s2.color.id, s3.color.id]).size).toBe(3);
   });
 
+  it('labels Copilot sessions "Copilot n" with a badge of their own', () => {
+    const m = new SessionManager();
+    const copilot = { name: 'copilot-cli', kind: 'copilot' as const };
+    const sessions = [
+      m.connect({ sessionKey: 'a', client: claude }),
+      m.connect({ sessionKey: 'b', client: copilot }),
+      m.connect({ sessionKey: 'c', client: copilot }),
+      m.connect({ sessionKey: 'd', client: { name: 'other', kind: 'other' } }),
+    ];
+    expect(sessions.map(s => s.label)).toEqual(['Claude 1', 'Copilot 1', 'Copilot 2', 'Agent 1']);
+    expect(sessions.map(s => s.badge)).toEqual(['C1', 'G1', 'G2', 'A1']);
+    for (const s of sessions) expect(s.badge.length).toBeLessThanOrEqual(2);
+  });
+
   it('resumes a session that reconnects with the same key', () => {
     const m = new SessionManager({ graceMs: () => 60_000 });
     const first = m.connect({ sessionKey: 'a', client: claude });
@@ -101,6 +115,53 @@ describe('ToolRegistry', () => {
     expect(await registry.call('echo', { message: 'boom' }, ctx)).toEqual({ content: [{ type: 'text', text: 'It went boom. Try another message.' }], isError: true });
     expect((await registry.call('echo', {}, ctx)).isError).toBe(true);
     expect((await registry.call('nope', {}, ctx)).isError).toBe(true);
+  });
+
+  it('advertises upper bounds but not lower bounds, closed nested objects or string record keys; zod still checks them', async () => {
+    const bounded = new ToolRegistry();
+    bounded.register([
+      defineTool({
+        name: 'bounded',
+        description: 'Bounds.',
+        input: {
+          command: z.string().min(1).max(500),
+          seconds: z.number().int().min(1).max(300).optional(),
+          // Parameters named like keywords are parameters, not keywords.
+          minimum: z.number().min(0).optional(),
+          items: z.array(z.object({ name: z.string().min(1) })).min(1).max(5).optional(),
+          headers: z.record(z.string(), z.string()).optional(),
+          mode: z.enum(['a', 'b']).optional(),
+        },
+        handler: () => 'ok',
+      }),
+    ]);
+    const schema = bounded.list()[0]!.inputSchema;
+    const wire = JSON.stringify(schema);
+    expect(wire).not.toMatch(/"minimum"\s*:\s*-?\d|"minLength"|"minItems"|"propertyNames"|"additionalProperties":false|9007199254740991/);
+    expect(schema).toMatchObject({
+      type: 'object',
+      required: ['command'],
+      properties: {
+        command: { type: 'string', maxLength: 500 },
+        seconds: { type: 'integer', maximum: 300 },
+        minimum: { type: 'number' },
+        items: { type: 'array', maxItems: 5, items: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } },
+        headers: { type: 'object', additionalProperties: { type: 'string' } },
+        mode: { enum: ['a', 'b'] },
+      },
+    });
+    for (const [args, field] of [
+      [{ command: '' }, 'command'],
+      [{ command: 'x', seconds: 0 }, 'seconds'],
+      [{ command: 'x', items: [] }, 'items'],
+      [{ command: 'x', items: [{ name: '' }] }, 'items'],
+    ] as const) {
+      const result = await bounded.call('bounded', args, ctx);
+      expect(result.isError).toBe(true);
+      const message = (result.content[0] as { text: string }).text;
+      expect(message).toMatch(/Too small/);
+      expect(message).toContain(field);
+    }
   });
 });
 

@@ -8,12 +8,12 @@
     },
     {
       "command": "copane.registerAgents",
-      "title": "Turn On (Register with Claude Code and Codex)",
+      "title": "Turn On (Register with Claude Code, Codex and Copilot)",
       "category": "Copane"
     },
     {
       "command": "copane.unregisterAgents",
-      "title": "Turn Off (Unregister from Claude Code and Codex)",
+      "title": "Turn Off (Unregister from Claude Code, Codex and Copilot)",
       "category": "Copane"
     },
     {
@@ -44,13 +44,13 @@
           "manual"
         ],
         "enumDescriptions": [
-          "Ask once before adding the \"copane\" MCP server to Claude Code's and Codex's user configuration. Afterwards Copane keeps its own entry present and up to date (it re-adds it if something removes it) until you run \"Copane: Turn Off\".",
-          "Add and keep the \"copane\" MCP server in Claude Code's and Codex's user configuration without asking.",
+          "Ask once before adding the \"copane\" MCP server to the user configuration of Claude Code, Codex and GitHub Copilot. Afterwards Copane keeps its own entry present and up to date (it re-adds it if something removes it) until you run \"Copane: Turn Off\".",
+          "Add and keep the \"copane\" MCP server in the user configuration of Claude Code, Codex and GitHub Copilot without asking.",
           "Never change agent configuration on its own; only report problems. Use \"Copane: Turn On\", \"Copane: Turn Off\" and \"Copane: Check and Repair Setup\"."
         ],
         "default": "ask",
         "scope": "machine",
-        "markdownDescription": "How Copane makes its tools available to agents. It adds an MCP server named `copane` to the user configuration of Claude Code (`~/.claude.json`) and Codex (`~/.codex/config.toml`), and never changes or removes a `copane` server it did not add."
+        "markdownDescription": "How Copane makes its tools available to agents. It adds an MCP server named `copane` to the user configuration of Claude Code (`~/.claude.json`), Codex (`~/.codex/config.toml`) and GitHub Copilot (`~/.copilot/mcp-config.json`), and never changes or removes a `copane` server it did not add."
       },
       "copane.registration.claudeCode": {
         "type": "boolean",
@@ -63,6 +63,12 @@
         "default": true,
         "scope": "machine",
         "markdownDescription": "Register the `copane` MCP server with Codex, when Codex is installed."
+      },
+      "copane.registration.copilot": {
+        "type": "boolean",
+        "default": true,
+        "scope": "machine",
+        "markdownDescription": "Register the `copane` MCP server with GitHub Copilot (`~/.copilot/mcp-config.json`, or `$COPILOT_HOME/mcp-config.json`), which the Copilot CLI and Copilot chat in VS Code read, when Copilot is installed."
       }
     }
   },

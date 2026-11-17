@@ -64,7 +64,13 @@ export type SessionChange =
   | { type: 'updated'; session: AgentSession }
   | { type: 'removed'; session: AgentSession };
 
-const KIND_NAMES: Record<AgentKind, string> = { 'claude-code': 'Claude', codex: 'Codex', other: 'Agent' };
+const KIND_NAMES: Record<AgentKind, string> = { 'claude-code': 'Claude', codex: 'Codex', copilot: 'Copilot', other: 'Agent' };
+/**
+ * The badge letter where it is not the name's first letter. Badges are at most two characters (VS Code
+ * file decorations), so Claude, Codex and Copilot cannot all be told apart by their name: Copilot is
+ * "G" (GitHub Copilot). Claude and Codex keep "C"; their color and tooltip tell them apart.
+ */
+const BADGE_LETTERS: Partial<Record<AgentKind, string>> = { copilot: 'G' };
 
 export interface SessionManagerOptions {
   /** How long a disconnected session is kept before it is removed. */
@@ -288,7 +294,7 @@ export class SessionManager {
     return {
       ...rest,
       label: `${name} ${fields.number}`,
-      badge: `${name.charAt(0)}${fields.number > 9 ? '+' : fields.number}`,
+      badge: `${BADGE_LETTERS[fields.client.kind] ?? name.charAt(0)}${fields.number > 9 ? '+' : fields.number}`,
       lastActivityAt: this.now(),
       ...(matchedBy ? { matchedBy } : {}),
     };
