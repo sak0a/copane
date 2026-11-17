@@ -57,6 +57,8 @@ export interface BridgeClientOptions {
   ancestors(): Promise<number[]>;
   log(message: string): void;
   timing?: Partial<BridgeClientTiming>;
+  /** A window chosen before this client existed (as with `window_select`), tried before discovery. */
+  window?: string;
 }
 
 export interface Connection {
@@ -105,7 +107,7 @@ export function agentKind(clientName: string): AgentKind {
 
 const MATCH_WORDS: Record<InstanceMatch, string> = {
   ancestor: "this agent was started by that window's extension host",
-  env: 'this agent runs in one of its integrated terminals',
+  env: 'COPANE_INSTANCE names it (set in its integrated terminals, and by the server definition it gives VS Code chat)',
   reconnect: 'it replaced the window this session used before (a window reload)',
   cwd: 'the working directory is inside its workspace',
   worktree: 'the working directory is a git worktree of a repository open in it',
@@ -138,6 +140,7 @@ export class BridgeClient {
 
   constructor(private readonly options: BridgeClientOptions) {
     this.timing = { ...DEFAULT_TIMING, ...options.timing };
+    this.explicit = options.window;
   }
 
   get current(): Connection | undefined {

@@ -149,7 +149,7 @@ test('filters apply: only the matching requests are written', async () => {
 
 test('requests sent while the user had the tab stay withheld in the HAR, also with secrets', async () => {
   await a.ok('browser_navigate', { url: server.url('/handoff') });
-  const handoff = await a.ok('browser_request_user_input', { message: 'Please sign in', done_when: { text: 'Signed in' }, timeout: 30 }, { timeoutMs: 60_000 });
+  const handoff = await a.ok('browser_request_user_input', { message: 'Please sign in', done_when: { text: 'Signed in' }, timeout_seconds: 30 }, { timeoutMs: 60_000 });
   assert.match(handoff, /yours again/);
   const result = await a.ok('browser_network_requests', { har: 'har-e2e/handoff.har', harInclude: ['secrets', 'bodies'] });
   assert.match(result, /\d+ requests? (was|were) sent while the user had the tab: in the file without URL query, headers or bodies\./);

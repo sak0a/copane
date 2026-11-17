@@ -1,4 +1,5 @@
-// MCP stdio server. One process per agent session, spawned by the agent (Claude Code, Codex, ...).
+// MCP stdio server. One process per agent session, spawned by the agent (Claude Code, Codex, ...);
+// VS Code's own MCP client runs one for all its chats in a window, one session per chat.
 // It finds the VS Code window the agent runs in, connects to that window's bridge and forwards the
 // tool list and tool calls. It holds no tool logic of its own.
 //
@@ -16,9 +17,10 @@ import * as os from 'node:os';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { RpcPeer } from '../shared/jsonrpc';
 import { bridgeHome, readLiveInstances } from '../shared/paths';
-import { Methods, type InstanceInfo } from '../shared/protocol';
+import { Env, Methods, type InstanceInfo } from '../shared/protocol';
 import { ancestorPids, lookupAncestors } from './ancestors';
 import { BridgeClient, sessionKeyFrom } from './bridgeClient';
+import { ConversationBridges } from './conversations';
 import { explainNoMatch, selectInstance } from './discovery';
 import { createProxyServer } from './proxy';
 
@@ -92,22 +94,31 @@ async function diagnose(): Promise<void> {
 }
 
 async function serve(options: { connect: boolean }): Promise<void> {
-  const bridge = new BridgeClient({
+  // Looked up once: every conversation's client (below) runs in this same process.
+  let ancestors: Promise<number[]> | undefined;
+  const common = {
     env: process.env,
     cwd: process.cwd(),
     pid: process.pid,
-    sessionKey: clientName => sessionKeyFrom(process.env, clientName),
     readInstances: options.connect ? () => readLiveInstances() : () => [],
-    ancestors: options.connect ? () => ancestorPids() : async () => [],
+    ancestors: options.connect ? () => (ancestors ??= ancestorPids()) : async () => [],
     log,
+  };
+  const bridge = new BridgeClient({ ...common, sessionKey: clientName => sessionKeyFrom(process.env, clientName) });
+  // VS Code's own MCP client runs one process for all chats of a window and names each chat's
+  // conversation in its calls: each conversation gets a session of its own (conversations.ts).
+  const conversations = new ConversationBridges({
+    explicitKey: process.env[Env.sessionKey] || undefined,
+    create: (sessionKey, window) => new BridgeClient({ ...common, sessionKey, window }),
   });
-  const server = createProxyServer(bridge, { version: VERSION, initWaitMs: options.connect ? 3000 : 0 });
+  const server = createProxyServer(bridge, { version: VERSION, initWaitMs: options.connect ? 3000 : 0, conversations });
   await server.connect(new StdioServerTransport());
   // The agent closing our stdin means the session ended.
   let ended = false;
   const end = () => {
     if (ended) return;
     ended = true;
+    conversations.dispose();
     bridge.dispose();
     process.exit(0);
   };

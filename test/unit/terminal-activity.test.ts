@@ -23,6 +23,15 @@ describe('assessActivity', () => {
     expect(a.summary).toMatch(/terminal_request_user_input/);
   });
 
+  it('has a brief form for repeated polls, except at a prompt (which always says what to do)', () => {
+    const full = assessActivity({ ...base, alternate: true });
+    expect(full.summary).toMatch(/terminal_send/);
+    expect(full.brief).toBe('A full-screen program owns the terminal (quiet for 5.0 s).');
+    expect(assessActivity(base).brief).toBe('No output for 5.0 s, no prompt.');
+    const prompt = assessActivity({ ...base, beforeCursor: 'Password: ', tail: ['Password:'] });
+    expect(prompt.brief).toBe(prompt.summary);
+  });
+
   it('recognises yes/no questions and menus', () => {
     expect(assessActivity({ ...base, beforeCursor: 'Continue? [Y/n] ' }).kind).toBe('waiting-for-input');
     const menu = assessActivity({ ...base, beforeCursor: '', tail: ['? Pick a template (Use arrow keys)', '❯ react', '  vue'] });

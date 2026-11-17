@@ -42,7 +42,7 @@ test('a Codex client gets a "Codex" session label and color', async () => {
   // Codex 0.16x introduces itself as "codex-mcp-client" (title "Codex").
   const a = await agent({ client: 'codex-mcp-client' });
   try {
-    const info = JSON.parse(/^\{[\s\S]*?\n\}/.exec(await a.ok('session_info'))[0]);
+    const info = JSON.parse(await a.ok('session_info'));
     assert.match(info.you?.label ?? '', /^Codex \d+$/);
     assert.ok(info.you.color, 'has a color');
   } finally {

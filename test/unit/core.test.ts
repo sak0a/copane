@@ -163,6 +163,33 @@ describe('ToolRegistry', () => {
       expect(message).toContain(field);
     }
   });
+
+  it('refuses unknown arguments, naming them and the valid ones, without running the tool', async () => {
+    let ran = 0;
+    const strict = new ToolRegistry();
+    strict.register([
+      defineTool({ name: 'emulate', description: 'x', input: { viewport: z.object({ width: z.number() }).optional(), timeout_seconds: z.number().optional() }, handler: () => `ran ${++ran}` }),
+      defineTool({ name: 'bare', description: 'x', input: {}, handler: () => 'ok' }),
+    ]);
+    const message = async (name: string, args: unknown) => {
+      const result = await strict.call(name, args, ctx);
+      expect(result.isError).toBe(true);
+      return (result.content[0] as { text: string }).text;
+    };
+    expect(await message('emulate', { device: { name: 'iPhone' } })).toBe(
+      'emulate has no argument "device"; nothing was done. Its arguments are "viewport", "timeout_seconds". Call it again with only those.',
+    );
+    expect(await message('emulate', { device: 1, timeoutSeconds: 5, viewport: { width: 1 } })).toBe(
+      'emulate has no arguments "device", "timeoutSeconds"; nothing was done. Its arguments are "viewport", "timeout_seconds". ("timeoutSeconds" is "timeout_seconds".) Call it again with only those.',
+    );
+    expect(await message('bare', { x: 1 })).toMatch(/^bare has no argument "x"; nothing was done\. It takes no arguments\./);
+    expect(ran).toBe(0);
+    // MCP's own `_meta` is never an argument; known arguments and nested objects pass as before.
+    expect(await strict.call('emulate', { _meta: { progressToken: 1 }, viewport: { width: 2, extra: true } }, ctx)).toEqual({ content: [{ type: 'text', text: 'ran 1' }] });
+    expect(await strict.call('bare', undefined, ctx)).toEqual({ content: [{ type: 'text', text: 'ok' }] });
+    // The advertised schema is unchanged: no additionalProperties at the top.
+    expect(strict.list()[0]!.inputSchema).not.toHaveProperty('additionalProperties');
+  });
 });
 
 describe('base hardening', () => {

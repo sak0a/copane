@@ -79,11 +79,20 @@ test('interprets progress bars, colors and cursor movement', async () => {
   }
 });
 
-test('cuts long output at the end and pages through the rest', async () => {
+/** The cut-range marker of a head+tail result: [from, to, the call that reads them]. */
+const cutRange = text => {
+  const m = /\[… (\d+) lines? cut here \(lines (\d+)-(\d+) of (\d+)\)\. Read them with (terminal_read (\{.*\}))\.\]/.exec(text);
+  return m && { count: Number(m[1]), from: Number(m[2]), to: Number(m[3]), total: Number(m[4]), call: m[5], args: JSON.parse(m[6]) };
+};
+
+test('cuts long output in the middle (start and end kept) and pages through the rest', async () => {
   const a = await agent({ session: 'term-long' });
   try {
     const out = await a.ok('terminal_run', { command: 'seq 1 3000', max_chars: 2000 });
-    assert.match(out, /Showing lines \d+-3000 of 3000; \d+ earlier lines cut/);
+    const cut = cutRange(out);
+    assert.ok(cut, out.slice(0, 600));
+    assert.equal(cut.total, 3000);
+    assert.match(out, /exited with code 0[^\n]*\n1\n2\n3\n/);
     assert.ok(body(out).trimEnd().endsWith('3000'), out.slice(-200));
     assert.ok(out.length < 2600, `result is ${out.length} chars`);
     const page = await a.ok('terminal_read', { what: 'command', from_line: 1, max_chars: 1000 });
@@ -91,7 +100,66 @@ test('cuts long output at the end and pages through the rest', async () => {
     assert.match(page, /more lines\. Continue with terminal_read/);
     const huge = await a.ok('terminal_run', { command: 'seq 1 20000' });
     assert.match(huge, /scrolled out of the terminal history/);
+    assert.ok(cutRange(huge), huge.slice(0, 600));
     assert.ok(body(huge).trimEnd().endsWith('20000'));
+  } finally {
+    await closeAll(a);
+    await a.close();
+  }
+});
+
+test('by default a long output keeps its first and last lines and names the call for the rest', async () => {
+  const a = await agent({ session: 'term-headtail' });
+  try {
+    // 3500 lines: all of it stays in the terminal history (4000 lines), so line N is the number N.
+    const out = await a.ok('terminal_run', { command: 'seq 1 3500' });
+    assert.match(out, /exited with code 0/);
+    assert.ok(out.length < 13_000, `result is ${out.length} chars`);
+    const cut = cutRange(out);
+    assert.ok(cut, out.slice(0, 800));
+    assert.equal(cut.total, 3500);
+    assert.equal(cut.count, cut.to - cut.from + 1);
+    const shown = body(out).split('\n').filter(l => /^\d+$/.test(l)).map(Number);
+    const expected = [...Array.from({ length: cut.from - 1 }, (_, i) => i + 1), ...Array.from({ length: 3500 - cut.to }, (_, i) => cut.to + 1 + i)];
+    assert.deepEqual(shown, expected, 'lines 1..from-1 and to+1..3500, in order');
+    // The suggested call returns the missing lines, from the first one; paging on reaches all of them.
+    assert.equal(cut.args.from_line, cut.from);
+    const got = [];
+    for (let args = cut.args, i = 0; args && i < 20; i++) {
+      const page = await a.ok('terminal_read', args);
+      got.push(...body(page).split('\n').filter(l => /^\d+$/.test(l)).map(Number));
+      const next = /Continue with terminal_read (\{.*\})\.\]/.exec(page);
+      args = next && got.at(-1) < cut.to ? JSON.parse(next[1]) : undefined;
+    }
+    assert.equal(got[0], cut.from);
+    assert.ok(got.at(-1) >= cut.to, `paged to ${got.at(-1)}`);
+    assert.deepEqual(got, Array.from({ length: got.length }, (_, i) => cut.from + i), 'every line exactly once');
+  } finally {
+    await closeAll(a);
+    await a.close();
+  }
+});
+
+test('repeated polls of a running command do not repeat its name and hints', async () => {
+  const a = await agent({ session: 'term-polls' });
+  try {
+    const started = await a.ok('terminal_run', { command: 'sleep 8; echo poll-done', timeout_seconds: 1 });
+    assert.match(started, /`sleep 8; echo poll-done` is still running/);
+    assert.match(started, /Next: terminal_wait \{"terminal":"term-\d+"\}/);
+    const polls = [];
+    for (let i = 0; i < 3; i++) polls.push(await a.ok('terminal_wait', { timeout_seconds: 1 }));
+    for (const poll of polls) {
+      assert.match(poll, /Still running after waiting/);
+      assert.doesNotMatch(poll, /sleep 8/, poll);
+      assert.match(poll, /still running the same command \(for /);
+    }
+    const done = await a.ok('terminal_wait', { timeout_seconds: 20 });
+    assert.match(done, /`sleep 8; echo poll-done` exited with code 0/);
+    assert.match(done, /poll-done/);
+    // The full suggestions came once for this terminal; a second running command gets the short form.
+    const again = await a.ok('terminal_run', { command: 'sleep 3', timeout_seconds: 1 });
+    assert.match(again, /Next: terminal_wait, terminal_read, terminal_send or terminal_interrupt\./);
+    await a.ok('terminal_wait', { timeout_seconds: 10 });
   } finally {
     await closeAll(a);
     await a.close();

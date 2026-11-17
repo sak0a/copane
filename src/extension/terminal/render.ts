@@ -1,12 +1,17 @@
 // Cutting terminal output to a size a model can take (Claude Code rejects tool results beyond roughly
-// 25k tokens), deliberately and visibly: keep the end by default, say what was cut and how to read it.
+// 25k tokens), deliberately and visibly: keep the start and the end, say what was cut and how to read it.
 
-/** Default size of the output part of a result, in characters (~5k tokens). */
-export const DEFAULT_MAX_CHARS = 20_000;
+/** Default size of the output part of a result, in characters (~3k tokens). */
+export const DEFAULT_MAX_CHARS = 12_000;
 /** Upper bound an agent may ask for (~20k tokens, under Claude Code's limit with room for the rest). */
 export const MAX_MAX_CHARS = 80_000;
 /** A single line longer than this is cut in the middle (minified files, base64 ...). */
 export const MAX_LINE_CHARS = 2_000;
+/**
+ * Share of the budget kept from the start when output is cut (the first compile error, the command's
+ * header); the rest keeps the end. 2,000 of the default 12,000.
+ */
+export const HEAD_SHARE = 1 / 6;
 
 export interface Clip {
   /** The lines to show, joined with "\n". */
@@ -20,6 +25,11 @@ export interface Clip {
   omittedAfter: number;
   /** Lines that were cut in the middle because they were too long on their own. */
   longLinesCut: number;
+  /**
+   * Head and tail: lines `from`-`to` (1-based, inclusive) were left out between the two; `at` is the
+   * index in `text` of the line break where they were.
+   */
+  gap?: { from: number; to: number; at: number };
 }
 
 function cutLong(line: string, limit: number): [string, boolean] {
@@ -70,57 +80,98 @@ function group(lines: readonly string[], lineLimit: number, from: number): Group
 }
 
 /**
- * Keeps the end of `lines` within `maxChars`, or, with `fromLine` (1-based), the lines starting there.
+ * Fits `lines` into `maxChars`. Without `fromLine`: everything when it fits, else the start (a sixth of
+ * the budget, `HEAD_SHARE`) and the end, with the lines between left out (`gap`). With `fromLine`
+ * (1-based): the lines starting there, as many as fit, never cut in the middle, so paging with
+ * `fromLine` = `last + 1` reaches every line exactly once.
  * Never returns an empty clip when there are lines: the last (or first) one is always included, cut.
- * Runs of 4+ identical lines and of 3+ blank lines are collapsed (with their count); line numbers
- * (`first`, `last`, `fromLine`) always count the original lines.
+ * Runs of 4+ identical lines and of 3+ blank lines are collapsed (with their count) and never split;
+ * line numbers (`first`, `last`, `gap`, `fromLine`) always count the original lines.
  */
-export function clipLines(lines: readonly string[], options: { maxChars?: number; fromLine?: number } = {}): Clip {
+export function clipLines(lines: readonly string[], options: { maxChars?: number; fromLine?: number; headTail?: boolean } = {}): Clip {
   const maxChars = Math.max(500, Math.min(options.maxChars ?? DEFAULT_MAX_CHARS, MAX_MAX_CHARS));
   const lineLimit = Math.min(MAX_LINE_CHARS, maxChars);
   const total = lines.length;
-  const picked: Group[] = [];
-  let used = 0;
-  const take = (g: Group): boolean => {
-    const cost = g.text.length + 1;
-    if (picked.length > 0 && used + cost > maxChars) return false;
-    used += cost;
-    picked.push(g);
-    return true;
-  };
-  const result = (start: number, end: number): Clip => ({
-    text: picked.map(g => g.text).join('\n'),
-    first: picked.length ? start + 1 : 0,
-    last: picked.length ? end + 1 : 0,
-    total,
-    omittedBefore: picked.length ? start : Math.min(start, total),
-    omittedAfter: picked.length ? total - end - 1 : total - Math.min(start, total),
-    longLinesCut: picked.filter(g => g.cut).length,
-  });
+  const longLinesCut = (gs: readonly Group[]) => gs.filter(g => g.cut).length;
+  const cost = (g: Group) => g.text.length + 1;
   if (options.fromLine !== undefined) {
     const start = Math.max(1, Math.min(options.fromLine, total + 1)) - 1;
-    for (const g of group(lines, lineLimit, start)) if (!take(g)) break;
-    return result(start, picked.at(-1)?.to ?? start);
+    const picked: Group[] = [];
+    let used = 0;
+    for (const g of group(lines, lineLimit, start)) {
+      if (picked.length > 0 && used + cost(g) > maxChars) break;
+      used += cost(g);
+      picked.push(g);
+    }
+    const end = picked.at(-1)?.to ?? start;
+    return {
+      text: picked.map(g => g.text).join('\n'),
+      first: picked.length ? start + 1 : 0,
+      last: picked.length ? end + 1 : 0,
+      total,
+      omittedBefore: picked.length ? start : Math.min(start, total),
+      omittedAfter: picked.length ? total - end - 1 : total - Math.min(start, total),
+      longLinesCut: longLinesCut(picked),
+    };
   }
   const groups = group(lines, lineLimit, 0);
-  for (let i = groups.length - 1; i >= 0 && take(groups[i]!); i--);
-  picked.reverse();
-  return result(picked[0]?.from ?? total, total - 1);
+  const all = groups.reduce((n, g) => n + cost(g), 0);
+  if (all <= maxChars) {
+    return { text: groups.map(g => g.text).join('\n'), first: total ? 1 : 0, last: total, total, omittedBefore: 0, omittedAfter: 0, longLinesCut: longLinesCut(groups) };
+  }
+  // The start, within its share; then the end, within the rest (and what the start left over).
+  let used = 0;
+  let h = 0;
+  if (options.headTail !== false) {
+    const headBudget = Math.floor(maxChars * HEAD_SHARE);
+    for (; h < groups.length && used + cost(groups[h]!) <= headBudget; h++) used += cost(groups[h]!);
+  }
+  let t = groups.length;
+  while (t > h && (t === groups.length || used + cost(groups[t - 1]!) <= maxChars)) used += cost(groups[--t]!);
+  const head = groups.slice(0, h);
+  const tail = groups.slice(t);
+  const headText = head.map(g => g.text).join('\n');
+  const tailText = tail.map(g => g.text).join('\n');
+  const shown = [...head, ...tail];
+  if (head.length === 0) {
+    const start = tail[0]!.from;
+    return { text: tailText, first: start + 1, last: total, total, omittedBefore: start, omittedAfter: 0, longLinesCut: longLinesCut(shown) };
+  }
+  const gapFrom = head.at(-1)!.to + 2;
+  const gapTo = tail[0]!.from;
+  return {
+    text: `${headText}\n${tailText}`,
+    first: 1,
+    last: total,
+    total,
+    omittedBefore: 0,
+    omittedAfter: 0,
+    longLinesCut: longLinesCut(shown),
+    ...(gapTo >= gapFrom ? { gap: { from: gapFrom, to: gapTo, at: headText.length } } : {}),
+  };
 }
 
 /**
  * The output block of a result: a note about what was cut (with the call that reads the rest), then
- * the text. `readMore` builds that call for a given starting line.
+ * the text. `readMore` builds that call for a given starting line. With `lineOffset`, the lines are
+ * the end part of a longer output: numbers shown (and passed to `readMore`) count from its start.
  */
-export function formatClip(clip: Clip, readMore: (fromLine: number) => string, options: { startLost?: boolean } = {}): string {
+export function formatClip(clip: Clip, readMore: (fromLine: number) => string, options: { startLost?: boolean; lineOffset?: number } = {}): string {
+  const o = options.lineOffset ?? 0;
   const notes: string[] = [];
   if (options.startLost) notes.push('[The beginning of this output scrolled out of the terminal history (4000 lines) and is no longer available.]');
   if (clip.omittedBefore > 0) {
-    notes.push(`[Showing lines ${clip.first}-${clip.last} of ${clip.total}; ${clip.omittedBefore} earlier lines cut. Read them with ${readMore(1)}.]`);
+    notes.push(`[Showing lines ${clip.first + o}-${clip.last + o} of ${clip.total + o}; ${clip.omittedBefore} earlier lines cut. Read them with ${readMore(o + 1)}.]`);
   }
   if (clip.longLinesCut > 0) notes.push(`[${clip.longLinesCut} very long line(s) were shortened in the middle.]`);
-  const body = clip.total === 0 ? '(no output)' : clip.text;
-  const tail = clip.omittedAfter > 0 ? `\n[${clip.omittedAfter} more lines. Continue with ${readMore(clip.last + 1)}.]` : '';
+  let body = clip.total === 0 ? '(no output)' : clip.text;
+  if (clip.gap) {
+    const { from, to, at } = clip.gap;
+    const n = to - from + 1;
+    const marker = `[… ${n} line${n === 1 ? '' : 's'} cut here (lines ${from + o}-${to + o} of ${clip.total + o}). Read them with ${readMore(from + o)}.]`;
+    body = `${body.slice(0, at)}\n${marker}${body.slice(at)}`;
+  }
+  const tail = clip.omittedAfter > 0 ? `\n[${clip.omittedAfter} more lines. Continue with ${readMore(clip.last + o + 1)}.]` : '';
   return (notes.length ? `${notes.join('\n')}\n` : '') + body + tail;
 }
 

@@ -291,6 +291,32 @@
           "minimum": 0,
           "description": "How long a disconnected agent session keeps its tabs and terminals before they are released. Lets an agent reconnect after a window reload."
         },
+        "copane.tools.profile": {
+          "type": "string",
+          "enum": [
+            "full",
+            "core"
+          ],
+          "enumDescriptions": [
+            "Every tool.",
+            "The everyday tools only: browsing, reading and acting on pages, tabs, dialogs, hand-off to you, and terminals. Leaves out the dev and test extras (emulate, route, audit, check change, inspect, export test, profiles) and rarely used tools (hover, drag, upload file, downloads, show tab, terminal interrupt, session info), about a third of what the tool list costs."
+          ],
+          "default": "full",
+          "markdownDescription": "Which tools agents get. Every tool's definition is part of every conversation, and some agents (GitHub Copilot, Codex) load all of them up front; VS Code allows 128 tools per request across all MCP servers. `core` keeps the everyday tools. Connected agents get the new list right away (their next request cannot reuse its prompt cache). `window_status` and `window_select` are always there."
+        },
+        "copane.tools.disabled": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "Tool names agents do not get, on top of `#copane.tools.profile#`, e.g. `[\"browser_route\", \"terminal_close\"]`. A call to one is refused with a message saying it is turned off. Unknown names are ignored; `window_status` and `window_select` cannot be turned off."
+        },
+        "copane.usageNotesInResults": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Give Copane's usage notes to GitHub Copilot sessions once, with their first tool result, because Copilot does not pass an MCP server's instructions to its model. Turn this off if you start Copilot with `--allow-all-mcp-server-instructions`: the notes would then arrive twice."
+        },
         "copane.browser.userTabs": {
           "type": "string",
           "enum": [
@@ -441,6 +467,12 @@
           ],
           "default": "keep",
           "description": "What happens to an agent session's terminals when the session ends (after the reconnect grace period)."
+        },
+        "copane.vscodeChat.serverDefinition": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine",
+          "markdownDescription": "**Experimental.** Also offer the `copane` MCP server to VS Code's own chat and agent mode (GitHub Copilot chat) as a server this extension provides, which always connects to *this* window, instead of guessing the window from the working directory. Not yet verified with a signed-in Copilot. Together with the `mcp-config.json` entry (`#copane.registration.copilot#`), a Copilot chat session may list Copane twice or use the other entry; if it does, turn off one of the two: this setting, or the `mcp-config.json` entry with `copilot mcp disable copane` (which also turns Copane off for the Copilot CLI) and `#copane.registration.copilot#` off."
         }
       }
     },
@@ -860,6 +892,13 @@
         "view": "copane.tabs",
         "when": "copane.setup.browser == 'unsupported'",
         "contents": "This editor has no integrated browser that extensions can drive, so agents cannot open or use browser tabs here. Their terminals are in the Copane view."
+      }
+    ],
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "copane.window",
+        "label": "Copane (this window)",
+        "when": "config.copane.vscodeChat.serverDefinition"
       }
     ],
     "walkthroughs": [

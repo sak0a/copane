@@ -5,13 +5,14 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { BridgeServer, dropsServerInstructions, USAGE_NOTES_HEADING, withUsageNotes } from '../../src/extension/core/bridgeServer';
+import { BridgeServer, dropsServerInstructions, USAGE_NOTES_HEADING, usageNotesPolicy, withUsageNotes } from '../../src/extension/core/bridgeServer';
+import type { ToolSelection } from '../../src/extension/core/toolSelection';
 import { ToolError } from '../../src/extension/core/errors';
 import { nullLogger } from '../../src/extension/core/log';
 import { SessionManager, type SessionClient } from '../../src/extension/core/sessions';
 import { defineTool, image, text, ToolRegistry } from '../../src/extension/core/tools';
 import { RpcError, RpcPeer } from '../../src/shared/jsonrpc';
-import { ErrorCodes, Methods, PROTOCOL_VERSION, type CallToolResult, type HelloParams, type HelloResult } from '../../src/shared/protocol';
+import { ErrorCodes, Methods, PROTOCOL_VERSION, type CallToolResult, type HelloParams, type HelloResult, type ListToolsResult } from '../../src/shared/protocol';
 
 const windowInfo = { instanceId: '1', workspaceName: 'w', workspaceFolders: ['/w'], remoteName: null, platform: process.platform };
 let dir: string;
@@ -227,5 +228,55 @@ describe('usage notes for clients that drop server instructions', () => {
     const result: CallToolResult = { content: [{ type: 'text', text: 'r' }] };
     expect(withUsageNotes(result, 'i')).toEqual({ content: [{ type: 'text', text: 'r' }, { type: 'text', text: `${USAGE_NOTES_HEADING}\ni` }] });
     expect(result.content).toHaveLength(1);
+  });
+
+  it('follows the user\'s switch (copane.usageNotesInResults), read at each call', async () => {
+    let on = false;
+    await restart(usageNotesPolicy(() => on));
+    const copilot = await connect();
+    await copilot.request(Methods.hello, copilotHello('cop'));
+    expect(texts(await call(copilot, 'whoami'))).toEqual(['Copilot 1']);
+    on = true;
+    expect(texts(await call(copilot, 'whoami'))).toEqual(['Copilot 1', `${USAGE_NOTES_HEADING}\nhi`]);
+    const policy = usageNotesPolicy(() => true);
+    expect(policy({ name: 'copilot-cli', kind: 'copilot' })).toBe(true);
+    expect(policy({ name: 'claude-code', kind: 'claude-code' })).toBe(false);
+  });
+});
+
+describe('tool selection (copane.tools.*)', () => {
+  let selection: ToolSelection = {};
+
+  async function restart(): Promise<void> {
+    server.dispose();
+    server = new BridgeServer({ socketPath, token: 'secret', extensionVersion: '0.0.0', window: windowInfo, sessions, tools, log: nullLogger, instructions: () => 'hi', toolSelection: () => selection });
+    await server.listen();
+  }
+  const names = async (peer: RpcPeer) => (await peer.request<ListToolsResult>(Methods.listTools)).tools.map(t => t.name);
+
+  it('lists only the tools that are on and refuses calls to the others, read at each request', async () => {
+    selection = { disabled: ['wait', 'unknown_tool'] };
+    await restart();
+    const peer = await connect();
+    await peer.request(Methods.hello, hello('a'));
+    expect(await names(peer)).toEqual(['whoami']);
+    const refused = await peer.request<CallToolResult>(Methods.callTool, { name: 'wait', arguments: { ms: 1 } });
+    expect(refused).toEqual({ content: [{ type: 'text', text: expect.stringMatching(/^wait is turned off in this VS Code window by the user's setting "copane.tools.disabled"\./) }], isError: true });
+    selection = {};
+    expect(await names(peer)).toEqual(['whoami', 'wait']);
+    expect(await peer.request<CallToolResult>(Methods.callTool, { name: 'wait', arguments: { ms: 1 } })).toEqual({ content: [{ type: 'text', text: 'done' }] });
+  });
+
+  it('tells connected peers when told the selection changed', async () => {
+    await restart();
+    const peer = await connect();
+    await peer.request(Methods.hello, hello('a'));
+    let count = 0;
+    const changed = new Promise<void>(resolve => peer.onNotification(Methods.toolsChanged, () => (++count, resolve())));
+    server.notifyToolsChanged();
+    server.notifyToolsChanged();
+    await changed;
+    await new Promise(r => setTimeout(r, 100));
+    expect(count).toBe(1);
   });
 });

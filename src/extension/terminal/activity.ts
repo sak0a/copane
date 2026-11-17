@@ -33,6 +33,8 @@ export interface Activity {
   kind: ActivityKind;
   /** One sentence for the agent. */
   summary: string;
+  /** The same, without the advice, for an agent that already read `summary` (repeated polls). */
+  brief: string;
   /** The prompt seems to ask for a secret: hand over to the user instead of answering. */
   secret: boolean;
 }
@@ -46,7 +48,10 @@ const CHOICE_RE = /\((y\/n|yes\/no|y\/N|Y\/n)\)|\[(y\/n|Y\/n|y\/N|yes\/no)\]|use
 const LOGIN_RE = /\b(user ?name|login|e-?mail|sign in|one-time code|device code|open .*https?:\/\/)\b/i;
 
 export function assessActivity(input: ActivityInput): Activity {
-  if (!input.running) return { kind: 'idle', summary: 'Nothing is running; the shell is at its prompt.', secret: false };
+  if (!input.running) {
+    const summary = 'Nothing is running; the shell is at its prompt.';
+    return { kind: 'idle', summary, brief: summary, secret: false };
+  }
   const quietS = (input.quietMs / 1000).toFixed(1);
   const recent = input.tail.slice(-4).join('\n');
   const secret = SECRET_RE.test(input.beforeCursor) || SECRET_RE.test(input.tail.slice(-2).join('\n'));
@@ -54,12 +59,13 @@ export function assessActivity(input: ActivityInput): Activity {
     return {
       kind: 'full-screen',
       summary: `A full-screen program owns the terminal (quiet for ${quietS} s). Drive it with terminal_send keys (q quits most pagers; the result shows the screen), or interrupt it.`,
+      brief: `A full-screen program owns the terminal (quiet for ${quietS} s).`,
       secret,
     };
   }
   if (input.quietMs < QUIET_MS) {
     const summary = input.outputSinceStart === false ? 'It started moments ago and has printed nothing yet.' : 'Output is still arriving: the command is working.';
-    return { kind: 'working', summary, secret: false };
+    return { kind: 'working', summary, brief: summary, secret: false };
   }
   const line = input.beforeCursor.trimEnd();
   const promptLike = line.trim() !== '' && input.afterCursor === '' && (QUESTION_RE.test(line) || CHOICE_RE.test(line) || LOGIN_RE.test(line) || secret);
@@ -69,11 +75,14 @@ export function assessActivity(input: ActivityInput): Activity {
     const what = secret
       ? 'It appears to ask for a secret: call terminal_request_user_input so the user types it; never ask for it in chat.'
       : 'Answer with terminal_send (e.g. text plus keys ["Enter"]), or hand over with terminal_request_user_input if the user should decide.';
-    return { kind: 'waiting-for-input', summary: `Probably waiting for input: no output for ${quietS} s and the last line is a prompt ("${shown}"). ${what}`, secret };
+    // The prompt (and what to do about a secret) can differ each time: always said in full.
+    const summary = `Probably waiting for input: no output for ${quietS} s and the last line is a prompt ("${shown}"). ${what}`;
+    return { kind: 'waiting-for-input', summary, brief: summary, secret };
   }
   return {
     kind: 'silent',
     summary: `No output for ${quietS} s and nothing looks like a prompt: probably still working (or waiting without a prompt).`,
+    brief: `No output for ${quietS} s, no prompt.`,
     secret,
   };
 }

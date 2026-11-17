@@ -25,6 +25,22 @@ export interface BridgeServices {
   terminals: TerminalService;
   /** Set by the remote module during activation: the user's machine as seen from a remote window. */
   remote?: RemoteService;
+  /** Set by the registration module during activation: how agents start the MCP server. */
+  mcpServer?: McpServerLaunch;
+}
+
+// ---------------------------------------------------------------- MCP server launch
+
+/**
+ * The stdio command agents are registered with (the launcher in the bridge home, which survives
+ * extension updates). In a remote window it is a path on the remote side, where this extension runs.
+ */
+export interface McpServerLaunch {
+  spec(): { readonly command: string; readonly args: readonly string[]; readonly env: Readonly<Record<string, string>> };
+  /** Why the server could not be installed in the bridge home, or undefined when it is in place. */
+  installError(): string | undefined;
+  /** Fires when `spec()` or `installError()` may have changed (the server was installed again). */
+  readonly onDidChange: Event<void>;
 }
 
 // ---------------------------------------------------------------- Remote windows

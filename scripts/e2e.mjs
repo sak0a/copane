@@ -53,6 +53,8 @@ export const SUITES = {
   'browser-change': {},
   codex: {},
   copilot: {},
+  'vscode-chat': {},
+  'mcp-conversations': {},
   remote: {
     notInCi: {
       linux: 'needs a remote dev host in a Docker container (scripts/remote-dev-host.mjs) and runs inside it',
