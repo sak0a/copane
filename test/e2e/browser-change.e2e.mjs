@@ -295,7 +295,9 @@ test('a failed request from before the baseline is "still there" after a reload,
 
 test('an emulated device in a background tab: regions in CSS px of the device', async () => {
   const tab = await open('/plain.html');
-  await a.ok('browser_emulate', { width: 400, height: 4000, deviceScaleFactor: 3 });
+  // Taller than the tab, so the image is scaled, but not so tall that one digit is lost: at 400×4000 the
+  // Linux CI runner's image is 71 px wide (0.18 px per CSS px), where a changed digit is below the threshold.
+  await a.ok('browser_emulate', { width: 400, height: 1200, deviceScaleFactor: 3 });
   try {
     // A page loaded under the emulation can be laid out differently from one that was emulated after it
     // loaded (on the Linux CI runner the heading counted as changed), so load it under the emulation first.
