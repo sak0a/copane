@@ -3,7 +3,9 @@ import { ConsoleLog, formatConsoleArgs, formatConsoleEntry, formatRemoteObject, 
 import { filterNetwork, formatBody, formatNetworkEntry, mergeHeaders, NetworkLog, notableHeaders, pageOrigin, urlMatcher } from '../../src/extension/browser/page/networkLog';
 import { PRETTY_JSON_MAX, SERIALIZE } from '../../src/extension/browser/page/scripts';
 import { clip, formatBytes, formatMs, RingBuffer } from '../../src/extension/browser/page/ringBuffer';
-import { fullPageHeight, MAX_EDGE, MAX_PIXELS, screenshotScale } from '../../src/extension/browser/page/screenshotMath';
+import { coordinateNote, fullPageHeight, SCREENSHOT_BUDGETS, screenshotScale, sharperAvailable } from '../../src/extension/browser/page/screenshotMath';
+import { currentPageScope, earlierNote } from '../../src/extension/browser/page/logScope';
+import { SessionNotices } from '../../src/extension/browser/page/sessionNotices';
 import { normalizeUrl } from '../../src/extension/browser/page/navigationTools';
 
 const seq = () => {
@@ -187,17 +189,109 @@ describe('evaluate results (SERIALIZE)', () => {
 });
 
 describe('screenshot sizing', () => {
-  it('never upscales and stays within the edge and pixel limits', () => {
+  it('never upscales and stays within the edge and pixel limits of each detail', () => {
     expect(screenshotScale(800, 600)).toBe(1);
-    const s = screenshotScale(1920, 1080);
-    expect(1920 * s).toBeLessThanOrEqual(MAX_EDGE + 0.5);
-    expect(1920 * s * 1080 * s).toBeLessThanOrEqual(MAX_PIXELS + 1);
+    for (const detail of ['normal', 'high'] as const) {
+      const { maxEdge, maxPixels } = SCREENSHOT_BUDGETS[detail];
+      for (const [w, h] of [[1920, 1080], [1440, 900], [3000, 400], [400, 3000]] as const) {
+        const s = screenshotScale(w, h, detail);
+        expect(Math.max(w, h) * s).toBeLessThanOrEqual(maxEdge + 0.5);
+        expect(w * s * h * s).toBeLessThanOrEqual(maxPixels + 1);
+      }
+    }
+  });
+
+  it('defaults to about 0.8 MP / 1280 px; high keeps the earlier 1.15 MP / 1568 px', () => {
+    // A 1440×900 window: ~1,070 vision tokens by default (w × h / 750), ~1,530 with detail high.
+    const s = screenshotScale(1440, 900);
+    expect(Math.round(1440 * s)).toBe(1131);
+    expect(Math.round(900 * s)).toBe(707);
+    const hi = screenshotScale(1440, 900, 'high');
+    expect(Math.round(1440 * hi)).toBe(1356);
+    expect(Math.round(900 * hi)).toBe(848);
+    // The longest edge binds for a wide strip.
+    expect(3000 * screenshotScale(3000, 300)).toBeCloseTo(1280);
+    expect(3000 * screenshotScale(3000, 300, 'high')).toBeCloseTo(1568);
+  });
+
+  it('says a sharper image exists only when high would differ', () => {
+    expect(sharperAvailable(1440, 900, 'normal')).toBe(true);
+    expect(sharperAvailable(1440, 900, 'high')).toBe(false);
+    expect(sharperAvailable(1000, 700, 'normal')).toBe(false);
   });
 
   it('cuts very tall full-page shots so they stay readable', () => {
     expect(fullPageHeight(780, 2000)).toBe(2000);
-    expect(fullPageHeight(780, 30000)).toBe(3136);
-    expect(fullPageHeight(1600, 30000)).toBeLessThan(3136);
+    expect(fullPageHeight(780, 30000)).toBe(2560);
+    expect(fullPageHeight(780, 30000, 'high')).toBe(3136);
+    expect(fullPageHeight(1600, 30000)).toBeLessThan(2560);
+  });
+
+  it('tells how image pixels map to browser_click x/y', () => {
+    expect(coordinateNote({ kind: 'viewport', scale: 1 })).toBe('Its pixels are CSS px: usable as x/y for browser_click.');
+    expect(coordinateNote({ kind: 'viewport', scale: 0.7856 })).toBe('For browser_click x/y, divide its coordinates by 0.786.');
+    expect(coordinateNote({ kind: 'element', scale: 1, origin: { x: 120.4, y: 40 } })).toBe('For browser_click x/y: x = 120 + imageX, y = 40 + imageY.');
+    expect(coordinateNote({ kind: 'element', scale: 0.5, origin: { x: 0, y: -30 } })).toBe('For browser_click x/y: x = imageX / 0.500, y = imageY / 0.500 - 30.');
+    expect(coordinateNote({ kind: 'page', scale: 0.8, scroll: { x: 0, y: 0 } })).toBe('For browser_click x/y: x = imageX / 0.800, y = imageY / 0.800.');
+    expect(coordinateNote({ kind: 'page', scale: 0.8, scroll: { x: 0, y: 1200 } })).toBe('For browser_click x/y (the page is scrolled to 0, 1200): x = imageX / 0.800, y = imageY / 0.800 - 1200.');
+  });
+});
+
+describe('page scope of the logs', () => {
+  const load = (seq: number, loaderId: string, time = seq * 1000) => ({ seq, time, loaderId, sameDocument: false });
+  const push = (seq: number, loaderId: string) => ({ seq, time: seq * 1000, loaderId, sameDocument: true });
+
+  it('is everything when the bridge attached to a page already showing', () => {
+    expect(currentPageScope({ navigations: [], loaderId: 'L1', requests: [{ seq: 1, requestId: 'x' }] })).toEqual({ startSeq: 0 });
+  });
+
+  it('starts at the request that produced the document, with its redirects', () => {
+    // Page L1, then a POST to /login (request id = loader id L2) redirected twice, then L2 commits.
+    const requests = [
+      { seq: 1, requestId: 'L1' },
+      { seq: 3, requestId: 'a' },
+      { seq: 4, requestId: 'L2' }, // POST /login → 302
+      { seq: 5, requestId: 'b' }, // a beacon of the old page while the navigation runs
+      { seq: 6, requestId: 'L2' }, // GET /home → 302
+      { seq: 7, requestId: 'L2' }, // GET /home/
+      { seq: 9, requestId: 'c' },
+    ];
+    const scope = currentPageScope({ navigations: [load(2, 'L1'), load(8, 'L2')], loaderId: 'L2', requests });
+    expect(scope).toEqual({ startSeq: 4, loadedAt: 8000 });
+  });
+
+  it('keeps the page across same-document navigations', () => {
+    const scope = currentPageScope({ navigations: [load(2, 'L1'), load(5, 'L2'), push(7, 'L2'), push(9, 'L2')], loaderId: 'L2', requests: [{ seq: 4, requestId: 'L2' }] });
+    expect(scope).toEqual({ startSeq: 4, loadedAt: 5000 });
+  });
+
+  it('starts at the navigation when its request was not recorded (back/forward cache, buffer full)', () => {
+    expect(currentPageScope({ navigations: [load(2, 'L1'), load(6, 'L2')], loaderId: 'L2', requests: [] })).toEqual({ startSeq: 6, loadedAt: 6000 });
+  });
+
+  it('treats a reload as a new page', () => {
+    const scope = currentPageScope({ navigations: [load(1, 'L1'), load(3, 'L2'), load(5, 'L3')], loaderId: 'L3', requests: [{ seq: 2, requestId: 'L2' }, { seq: 4, requestId: 'L3' }] });
+    expect(scope).toEqual({ startSeq: 4, loadedAt: 5000 });
+  });
+
+  it('says what was left out and how to see it', () => {
+    expect(earlierNote(0, { one: 'request', many: 'requests' })).toBe('');
+    expect(earlierNote(1, { one: 'request', many: 'requests' })).toBe('1 request from earlier pages left out (allPages: true lists them)');
+    expect(earlierNote(12, { one: 'message', many: 'messages' })).toBe('12 messages from earlier pages left out (allPages: true lists them)');
+  });
+});
+
+describe('session notices', () => {
+  it('gives the full text once per session and topic, then the short one', () => {
+    const n = new SessionNotices();
+    expect(n.pick('s1', 'sign-in', 'FULL', 'short')).toBe('FULL');
+    expect(n.pick('s1', 'sign-in', 'FULL', 'short')).toBe('short');
+    expect(n.pick('s2', 'sign-in', 'FULL', 'short')).toBe('FULL');
+    expect(n.first('s1', 'a11y-caveat')).toBe(true);
+    expect(n.first('s1', 'a11y-caveat')).toBe(false);
+    n.dropSession('s1');
+    expect(n.pick('s1', 'sign-in', 'FULL', 'short')).toBe('FULL');
+    expect(n.pick('s2', 'sign-in', 'FULL', 'short')).toBe('short');
   });
 });
 

@@ -24,7 +24,7 @@ import { imageSize } from './imageSize';
 import { DialogInterrupt, type PageStates } from './pageState';
 import { ThrottleTargets } from './throttle';
 import { sameNetwork, throttlingNote } from './throttleLogic';
-import { screenshotScale } from './screenshotMath';
+import { screenshotScale, sharperAvailable, SHARPER_NOTE } from './screenshotMath';
 import { TOGGLE_BRIDGE_UI } from './scripts';
 import { elementBox, viewport } from './targets';
 
@@ -300,7 +300,8 @@ export class EmulationManager implements PageHook, vscode.Disposable {
     const state = this.tabs.get(call.tab.id);
     if (!state?.settings.device) return undefined;
     const vp = await viewport(call);
-    const scale = screenshotScale(vp.width, vp.height);
+    const detail = request.detail ?? 'normal';
+    const scale = screenshotScale(vp.width, vp.height, detail);
     let hidden = 0;
     try {
       hidden = await call.evaluate<number>(TOGGLE_BRIDGE_UI, [true]);
@@ -323,7 +324,7 @@ export class EmulationManager implements PageHook, vscode.Disposable {
         if (size && dw && dh && Math.abs(size.width / size.height - vp.width / vp.height) > 0.02 * (vp.width / vp.height)) {
           // A tab in the background is drawn at a fixed size without fitting the device to it: the frame
           // shows that whole area, with the emulated viewport at its top-left at 1:1.
-          const viewScale = screenshotScale(dw, dh);
+          const viewScale = screenshotScale(dw, dh, detail);
           const whole = (await screencastFrame(call, request.format, Math.round(dw * viewScale), Math.round(dh * viewScale))) ?? frame;
           data = whole.data;
           factor = (imageSize(Buffer.from(data, 'base64'))?.width ?? dw * viewScale) / dw;
@@ -351,6 +352,7 @@ export class EmulationManager implements PageHook, vscode.Disposable {
     }
     if (request.fullPage) notes.push('Only the viewport can be captured while a device is emulated; scroll with browser_scroll for the rest of the page.');
     const mapping = Math.abs(factor - 1) < 0.01 ? 'Image pixels are viewport CSS pixels, so a point in it can be passed as x/y to browser_click.' : `To click a point in it, divide its image coordinates by ${factor.toFixed(3)} and pass them as x/y to browser_click.`;
+    if (sharperAvailable(vp.width, vp.height, detail) && factor < 0.99) notes.push(SHARPER_NOTE);
     const mismatch = this.sizeMismatch(state.settings, vp);
     return [
       image(data, `image/${request.format}`),

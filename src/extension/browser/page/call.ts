@@ -9,6 +9,8 @@ import type { FrameTarget } from './frames';
 import { DialogInterrupt, type DialogInfo, type PageState, type PageStates } from './pageState';
 import { clip } from './ringBuffer';
 import type { RefStore, RefTable } from './refs';
+import type { ScreenshotDetail } from './screenshotMath';
+import type { SessionNotices } from './sessionNotices';
 import { accessibleName, roleName, type AXNode } from './snapshot';
 import type { ElementTarget } from './targets';
 
@@ -20,6 +22,8 @@ export interface PageEnv {
   cursors: Map<string, { console: number; network: number }>;
   /** The page as this session last saw it, per `${sessionId}\0${tabId}`: what action results compare against. */
   baselines: Map<string, { loaderId: string | undefined; lines: string[] }>;
+  /** Guidance already given in full to a session (sessionNotices.ts). */
+  notices: SessionNotices;
   /** Features that hook into page tool calls (downloads, emulation). */
   hooks?: PageHook[];
 }
@@ -52,6 +56,8 @@ export interface ScreenshotRequest {
   target: { backendNodeId: number; label: string } | undefined;
   fullPage: boolean;
   format: 'jpeg' | 'png';
+  /** Image size budget (screenshotMath.ts); default "normal". */
+  detail?: ScreenshotDetail;
 }
 
 /** True when a hook says the page wants taps instead of mouse presses. */

@@ -7,7 +7,7 @@ import { addCrossOriginFrames } from './frameSnapshot';
 import { DialogInterrupt } from './pageState';
 import { clip } from './ringBuffer';
 import { elementArgs, tabArg } from './schema';
-import { fullPageHeight, screenshotScale } from './screenshotMath';
+import { coordinateNote, fullPageHeight, screenshotScale, sharperAvailable, SHARPER_NOTE } from './screenshotMath';
 import { TOGGLE_BRIDGE_UI } from './scripts';
 import { compareDelivered, describeDelta, lastDelivered, setDelivered, type Delivered } from './snapshotDelta';
 import { buildTree, findInTree, renderText, renderTree, snapshotLines, textWindow, type AXNode, type RefNode, type Tree } from './snapshot';
@@ -215,6 +215,7 @@ export function snapshotTools(env: PageEnv): ToolDefinition<any>[] {
         ...elementArgs,
         fullPage: z.boolean().optional(),
         format: z.enum(['jpeg', 'png']).optional().describe('Default jpeg; png for exact pixels.'),
+        detail: z.enum(['normal', 'high']).optional().describe('high: sharper, ~1.4× the tokens.'),
         tab: tabArg,
       },
       annotations: { readOnlyHint: true },
@@ -224,21 +225,24 @@ export function snapshotTools(env: PageEnv): ToolDefinition<any>[] {
           if (target && args.fullPage) throw new ToolError('invalid_input', 'Pass either an element (ref/selector) or fullPage, not both.');
           if (target) await scrollIntoView(call, target);
           const format = args.format ?? 'jpeg';
+          const detail = args.detail ?? 'normal';
           for (const hook of env.hooks ?? []) {
-            const shot = await hook.screenshot?.(call, { target, fullPage: Boolean(args.fullPage), format });
+            const shot = await hook.screenshot?.(call, { target, fullPage: Boolean(args.fullPage), format, detail });
             if (shot) return shot;
           }
           const vp = await viewport(call);
           let region: { x: number; y: number; width: number; height: number };
           let what: string;
           let cut = '';
+          let origin: { x: number; y: number } | undefined;
           if (target) {
             const box = await elementBox(target.call, target.backendNodeId);
             if (!box || box.width < 1 || box.height < 1) throw new ToolError('failed', `${target.label} has no visible box to capture (it is hidden or empty).`);
             region = { x: box.x + vp.pageX, y: box.y + vp.pageY, width: box.width, height: box.height };
+            origin = { x: box.x, y: box.y };
             what = target.label;
           } else if (args.fullPage) {
-            const height = fullPageHeight(vp.contentWidth, vp.contentHeight);
+            const height = fullPageHeight(vp.contentWidth, vp.contentHeight, detail);
             region = { x: 0, y: 0, width: vp.contentWidth, height };
             what = 'the full page';
             if (height < vp.contentHeight) cut = ` The page is ${Math.round(vp.contentHeight)} px tall; only the top ${height} px were captured to keep the image readable. Scroll with browser_scroll and take viewport screenshots for the rest.`;
@@ -246,7 +250,7 @@ export function snapshotTools(env: PageEnv): ToolDefinition<any>[] {
             region = { x: vp.pageX, y: vp.pageY, width: vp.width, height: vp.height };
             what = 'the viewport';
           }
-          const scale = screenshotScale(region.width, region.height);
+          const scale = screenshotScale(region.width, region.height, detail);
           let hidden = 0;
           try {
             hidden = await call.evaluate<number>(TOGGLE_BRIDGE_UI, [true]);
@@ -267,11 +271,9 @@ export function snapshotTools(env: PageEnv): ToolDefinition<any>[] {
           }
           const w = Math.round(region.width * scale);
           const h = Math.round(region.height * scale);
-          const mapping =
-            !target && !args.fullPage
-              ? scale === 1 ? ' Its pixels are CSS px: usable as x/y for browser_click.' : ` For browser_click x/y, divide its coordinates by ${scale.toFixed(3)}.`
-              : '';
-          return [image(data, `image/${format}`), text(`Screenshot of ${what} in ${call.tab.id}, ${w}×${h} px.${mapping}${cut}`)];
+          const mapping = coordinateNote(origin ? { kind: 'element', scale, origin } : args.fullPage ? { kind: 'page', scale, scroll: { x: vp.pageX, y: vp.pageY } } : { kind: 'viewport', scale });
+          const sharper = sharperAvailable(region.width, region.height, detail) ? ` ${SHARPER_NOTE}` : '';
+          return [image(data, `image/${format}`), text(`Screenshot of ${what} in ${call.tab.id}, ${w}×${h} px. ${mapping}${sharper}${cut}`)];
         }),
     }),
   ];

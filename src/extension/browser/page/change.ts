@@ -473,7 +473,7 @@ async function captureForDiff(call: PageCall, budget: Budget): Promise<DiffCaptu
     await withoutBridgeUi(call, budget, async () => {
       for (const hook of call.env.hooks ?? []) {
         if (!hook.screenshot) continue;
-        const shot = await withTimeout(hook.screenshot(call, { target: undefined, fullPage: false, format: 'png' }), budget.ms(CAPTURE_MS), 'the screenshot');
+        const shot = await withTimeout(hook.screenshot(call, { target: undefined, fullPage: false, format: 'png', detail: 'high' }), budget.ms(CAPTURE_MS), 'the screenshot');
         if (!shot) continue;
         const img = shot.find(c => c.type === 'image');
         const said = shot.find(c => c.type === 'text');
@@ -481,7 +481,7 @@ async function captureForDiff(call: PageCall, budget: Budget): Promise<DiffCaptu
         if (img?.type === 'image' && img.mimeType === 'image/png') png = img.data;
         return;
       }
-      const s = screenshotScale(vp.width, vp.height);
+      const s = screenshotScale(vp.width, vp.height, 'high');
       const { data } = await call.send<{ data: string }>(
         'Page.captureScreenshot',
         { format: 'png', clip: { x: vp.pageX, y: vp.pageY, width: vp.width, height: vp.height, scale: s / vp.dpr }, fromSurface: true },

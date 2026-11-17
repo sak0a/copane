@@ -95,6 +95,15 @@ test('screenshots show the emulated viewport and clicks by coordinates hit, also
     await a.ok('browser_emulate', { preset: 'desktop' });
     assert.deepEqual([(await report(a)).width, (await report(a)).height], [1920, 1080]);
     assert.equal(await clickCell(a, 2, 3), 'r2c3');
+    // Default detail stays within ~0.8 MP / 1280 px; detail high gives the sharper image it points at.
+    const normal = await a.call('browser_screenshot', {});
+    const [, nw, nh] = /\((\d+)×(\d+) px; viewport/.exec(normal.text).map(Number);
+    assert.ok(Math.max(nw, nh) <= 1282 && nw * nh <= 805_000, `default ${nw}×${nh}: ${normal.text}`);
+    const high = await a.call('browser_screenshot', { detail: 'high' });
+    const [, hw] = /\((\d+)×(\d+) px; viewport/.exec(high.text).map(Number);
+    assert.ok(hw <= 1570, high.text);
+    if (/Downscaled; detail: "high"/.test(normal.text)) assert.ok(hw > nw, `detail high ${hw} px wide, default ${nw}: ${high.text}`);
+    assert.doesNotMatch(high.text, /Downscaled/);
     await a.ok('browser_emulate', { reset: true });
     assert.equal(await clickCell(a, 3, 3), 'r3c3');
     assert.equal(await clickCell(a, 1, 0), 'r1c0');

@@ -196,5 +196,5 @@ export async function performanceAudit(call: PageCall, options: { reload: boolea
   const loadedAgo = t.nav ? Date.now() - (t.timeOrigin + t.nav.load) : undefined;
   const conditions = (call.env.hooks ?? []).map(h => h.measurementNote?.(call, t.timeOrigin)).filter((n): n is string => !!n);
   return formatPerf({
-    conditions, tabId: call.tab.id, url: call.state.url, browser: t.chrome ? `Chromium ${t.chrome}` : 'Chromium', loadedAgo: loadedAgo !== undefined && loadedAgo >= 0 ? loadedAgo : undefined, reloaded: options.reload, background: !call.tab.active, timings, network });
+    conditions, tabId: call.tab.id, url: call.state.url, browser: t.chrome ? `Chromium ${t.chrome}` : 'Chromium', loadedAgo: loadedAgo !== undefined && loadedAgo >= 0 ? loadedAgo : undefined, reloaded: options.reload, background: !call.tab.active, timings, network, brief: !call.env.notices.first(call.ctx.session.id, 'perf-caveat') });
 }

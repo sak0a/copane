@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { contrastDetail, formatA11y, wcagOf, type AxeRule } from '../../src/extension/browser/page/a11yReport';
+import { A11Y_CAVEAT, A11Y_CAVEAT_SHORT, contrastDetail, formatA11y, wcagOf, type AxeRule } from '../../src/extension/browser/page/a11yReport';
 import type { NetworkEntry } from '../../src/extension/browser/page/networkLog';
 import { clsOf, formatPerf, summarizeNetwork, type PageTimings } from '../../src/extension/browser/page/perfReport';
 
@@ -51,6 +51,17 @@ describe('formatA11y', () => {
     const text = formatA11y({ tabId: 'tab-2', scope: 'only form [ref=e3]', version: '4.14.0', frames: 1, violations: [], incomplete: [], skipped: [] });
     expect(text.split('\n')[0]).toBe('Accessibility of tab-2 (only form [ref=e3]; axe-core 4.14.0, WCAG 2.2 A/AA and best practices): no problems found by the automated checks.');
     expect(text).toMatch(/not a conformance verdict/);
+  });
+
+  it('gives the caveat in short once the session has had it', () => {
+    const input = { tabId: 'tab-2', scope: 'whole page', version: '4.14.0', frames: 1, violations: [], incomplete: [], skipped: [] };
+    const full = formatA11y(input);
+    const brief = formatA11y({ ...input, brief: true });
+    expect(full).toContain(A11Y_CAVEAT);
+    expect(brief).not.toContain(A11Y_CAVEAT);
+    expect(brief).toContain(A11Y_CAVEAT_SHORT);
+    expect(brief).toMatch(/Not a conformance verdict: keyboard use/);
+    expect(full.length - brief.length).toBeGreaterThan(100);
   });
 
   it('describes contrast failures with ratio and colours', () => {
@@ -167,6 +178,9 @@ describe('formatPerf', () => {
     expect(text).toContain('Render-blocking: /styles.css 120 ms.');
     expect(text).toMatch(/not comparable with Lighthouse scores or field Core Web Vitals/);
     expect(text.length).toBeLessThan(2000);
+    const brief = formatPerf({ tabId: 'tab-1', url: 'http://localhost:3000/', browser: 'Chromium 150', loadedAgo: 4000, reloaded: false, background: false, timings, network, brief: true });
+    expect(brief.split('\n').at(-1)).toBe('Measured in Chromium 150 on this machine, without CPU or network throttling: compare before and after a change; not comparable with Lighthouse or field data. Request details: browser_network_requests with id.');
+    expect(text.length - brief.length).toBeGreaterThan(100);
   });
 
   it('does not report paint-bound interaction times of a background tab as INP', () => {

@@ -444,8 +444,27 @@ test('screenshot: viewport, element, full page, png, and the bridge UI hidden', 
   const full = await a.call('browser_screenshot', { fullPage: true });
   assert.match(full.text, /The page is \d+ px tall; only the top \d+ px were captured/);
   const [, fw, fh] = /(\d+)×(\d+) px/.exec(full.text).map(Number);
-  assert.ok(Math.max(fw, fh) <= 1568 && fw * fh <= 1_150_000 + 2000, `full page ${fw}×${fh}`);
+  assert.ok(Math.max(fw, fh) <= 1280 && fw * fh <= 800_000 + 2000, `full page ${fw}×${fh}`);
+  assert.match(full.text, /For browser_click x\/y: x = imageX \/ 0\.\d+, y = imageY \/ 0\.\d+\. Downscaled; detail: "high" gives a sharper image/);
   assert.ok(Buffer.from(full.images[0].data, 'base64').length < 1_500_000);
+  const high = await a.call('browser_screenshot', { fullPage: true, detail: 'high' });
+  const [, hw, hh] = /(\d+)×(\d+) px/.exec(high.text).map(Number);
+  assert.ok(Math.max(hw, hh) <= 1568 && hw * hh <= 1_150_000 + 2000 && hh > fh, `full page with detail high ${hw}×${hh}, default ${fw}×${fh}`);
+  assert.doesNotMatch(high.text, /Downscaled/);
+});
+
+test('screenshot: about 0.8 MP by default, 1.15 MP with detail high, and how image pixels map to clicks', async () => {
+  await open('/form.html');
+  // A page area of 1440×900 CSS px, as a normal window shows: the default budget binds, then high's.
+  await evaluate("() => { document.body.innerHTML = '<div id=area style=\"width:1440px;height:900px;background:linear-gradient(#fff,#ccc)\"><button id=b style=\"margin:300px 0 0 700px\">Hit</button></div>'; document.body.style.margin = '0'; scrollTo(0, 0); }");
+  const shot = await a.call('browser_screenshot', { selector: '#area' });
+  assert.match(shot.text, /^Screenshot of .*#area.* in tab-\d+, 1131×707 px\. For browser_click x\/y: x = imageX \/ 0\.786, y = imageY \/ 0\.786\. Downscaled; detail: "high" gives a sharper image \(~1\.4× the tokens\)\.$/);
+  const high = await a.call('browser_screenshot', { selector: '#area', detail: 'high' });
+  assert.match(high.text, /, 1356×848 px\. For browser_click x\/y: x = imageX \/ 0\.942, y = imageY \/ 0\.942\.$/);
+  assert.equal(high.images.length, 1);
+  // A viewport shot is never larger than the viewport, and says how to map its pixels.
+  const vp = await a.call('browser_screenshot');
+  assert.match(vp.text, /^Screenshot of the viewport in tab-\d+, \d+×\d+ px\. (Its pixels are CSS px|For browser_click x\/y, divide its coordinates by)/);
 });
 
 // ---------------------------------------------------------------- console and network
@@ -503,6 +522,47 @@ test('network: listing, filters, onlyNew and request details with headers and bo
   await a.ok('browser_network_requests', { onlyNew: true });
   assert.match(await a.ok('browser_network_requests', { onlyNew: true }), /No matching requests/);
   await fails('browser_network_requests', { id: 'r99999' }, /No request "r99999"/);
+});
+
+test('console and network: the current page and its redirects by default, earlier pages with allPages', async () => {
+  await open('/spa.html');
+  await a.ok('browser_history', { action: 'reload' });
+  await a.ok('browser_click', { selector: '#fetch-ok' });
+  await evaluate("console.log('first page says hi')");
+  await a.ok('browser_wait_for', { loadState: 'networkidle' });
+  await a.ok('browser_console_messages', { onlyNew: true });
+  // A second page, reached through an HTTP redirect.
+  await a.ok('browser_navigate', { url: url('/redirect?to=/form.html') });
+  await evaluate("console.log('second page says hi')");
+  const left = /\(loaded \d\d:\d\d:\d\d\)[^:\n]*; \d+ requests? from earlier pages left out \(allPages: true lists them\)/;
+  const net = await a.ok('browser_network_requests');
+  assert.match(net, /^\d+ requests? in tab-\d+ on the current page /);
+  assert.match(net, left);
+  assert.match(net, /GET 302 → document {2}\/redirect\?to=\/form\.html/, 'the redirect that led to the page stays visible');
+  assert.match(net, /GET 200 document {2}\/form\.html/);
+  assert.doesNotMatch(net, /\/json|spa\.html/);
+  const allNet = await a.ok('browser_network_requests', { allPages: true });
+  assert.match(allNet, /\/json/);
+  assert.match(allNet, /spa\.html/);
+  assert.doesNotMatch(allNet, /left out/);
+  // Filters apply to the count of what was left out too.
+  assert.match(await a.ok('browser_network_requests', { filter: '/json' }), /^No matching requests in tab-\d+, on the current page \(loaded [\d:]+\); 1 request from earlier pages left out \(allPages: true lists them\)\./);
+  const con = await a.ok('browser_console_messages');
+  assert.match(con, /second page says hi/);
+  assert.doesNotMatch(con, /first page says hi/);
+  assert.match(con, /on the current page \(loaded [\d:]+\) \(0 errors, 0 warnings\); \d+ messages? from earlier pages left out \(allPages: true lists them\):/);
+  const allCon = await a.ok('browser_console_messages', { allPages: true });
+  assert.match(allCon, /first page says hi[\s\S]*--- page loaded: .*form\.html ---[\s\S]*second page says hi/);
+  // A same-document navigation (pushState) keeps the page.
+  await evaluate("history.pushState({}, '', '/form.html#step2'); console.log('after pushState')");
+  const pushed = await a.ok('browser_console_messages');
+  assert.match(pushed, /second page says hi[\s\S]*after pushState/);
+  // onlyNew is not limited to the page: what was not read yet is shown once, wherever it came from.
+  await evaluate("console.log('unread when leaving')");
+  await a.ok('browser_navigate', { url: url('/spa.html') });
+  const unread = await a.ok('browser_console_messages', { onlyNew: true });
+  assert.match(unread, /new since your last read[\s\S]*unread when leaving[\s\S]*--- page loaded: .*spa\.html ---/);
+  assert.doesNotMatch(unread, /left out/);
 });
 
 test('actions report what changed on the page, within a small budget', async () => {
