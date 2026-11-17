@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Aria-modal fixture</title>
+<style>
+  body { font: 15px/1.4 sans-serif; margin: 16px; }
+  .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.4); }
+  .dialog { position: fixed; top: 80px; left: 80px; background: #fff; padding: 16px; z-index: 1; }
+</style>
+</head>
+<body>
+<!-- The dialog comes first, so Tab never reaches the page behind it. -->
+<div class="dialog" id="dialog" role="dialog" aria-modal="true" aria-label="Sign in">
+  <input aria-label="User name">
+  <button type="button" id="ok">OK</button>
+  <button type="button" id="cancel">Cancel</button>
+</div>
+<main aria-hidden="true" id="page">
+  <h1>Behind the dialog</h1>
+  <button type="button">Behind one</button>
+  <a href="/x">Behind link</a>
+  <div role="button">Behind div</div>
+</main>
+<!-- Not aria-hidden: only the open aria-modal dialog says it is out of reach. -->
+<aside><button type="button">Behind two</button></aside>
+<div class="backdrop" id="backdrop"></div>
+<script>
+  // A scripted modal: Tab and Shift+Tab wrap inside it; most of the page behind is aria-hidden.
+  const dialog = document.getElementById('dialog');
+  const items = () => [...dialog.querySelectorAll('input, button')];
+  dialog.addEventListener('keydown', e => {
+    if (e.key !== 'Tab') return;
+    const list = items();
+    if (!e.shiftKey && document.activeElement === list.at(-1)) { e.preventDefault(); list[0].focus(); }
+    if (e.shiftKey && document.activeElement === list[0]) { e.preventDefault(); list.at(-1).focus(); }
+  });
+  if (location.search.includes('none')) { dialog.remove(); document.getElementById('backdrop').remove(); document.getElementById('page').removeAttribute('aria-hidden'); }
+</script>
+</body>
+</html>

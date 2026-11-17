@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Inspector attributes fixture</title><script src="/common.js"></script></head>
+<body>
+  <!-- code-inspector-plugin: path:line:col:tag (absolute) -->
+  <button id="insp">Add to cart</button>
+  <!-- react-dev-inspector: relative path plus line and column attributes -->
+  <section id="rdi" data-inspector-relative-path="src/components/Layout.jsx" data-inspector-line="4" data-inspector-column="5">
+    <h2 id="inner">Inside a marked section</h2>
+  </section>
+  <script>
+    document.getElementById('insp').setAttribute('data-insp-path', `${projectPath('src/components/Card.jsx')}:7:7:button`);
+  </script>
+</body>
+</html>

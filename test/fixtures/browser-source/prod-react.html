@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>React production fixture</title></head>
+<body>
+  <div id="root"><div class="c1"><button id="add" data-testid="add-to-cart">Add to cart</button></div></div>
+  <script>
+    // A production build: fibers exist, without _debugOwner / _debugSource / _debugStack, and minified names.
+    function a() {}
+    const root = { tag: 3, return: null };
+    const comp = { tag: 0, type: a, return: root };
+    const div = { tag: 5, type: 'div', return: comp };
+    const button = { tag: 5, type: 'button', return: div };
+    document.querySelector('.c1').__reactFiber$z9 = div;
+    document.getElementById('add').__reactFiber$z9 = button;
+  </script>
+</body>
+</html>

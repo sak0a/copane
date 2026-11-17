@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Page with a story frame</title>
+</head>
+<body>
+  <h1>Storybook-like page</h1>
+  <!-- ?story=<url of story.html on another origin> -->
+  <iframe id="story" width="400" height="200"></iframe>
+  <script>document.getElementById('story').src = new URLSearchParams(location.search).get('story');</script>
+</body>
+</html>

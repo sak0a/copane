@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Vue 3 fixture</title><script src="/common.js"></script></head>
+<body>
+  <div id="app" data-v-app>
+    <h1 id="title">Editor</h1>
+    <nav class="toolbar">
+      <div class="editor-toolbar">
+        <div class="save">
+          <span class="hint">Ctrl+S</span>
+          <button id="save" data-v-inspector="src/components/SaveButton.vue:14:5">Save</button>
+        </div>
+      </div>
+    </nav>
+    <p id="lone">Gone component</p>
+    <p id="cycle">Cyclic parent</p>
+  </div>
+  <script>
+    // What Vue 3 sets in development: el.__vueParentComponent (the instance whose render made it),
+    // instance.parent, and type.__file (from vue-loader or @vitejs/plugin-vue).
+    const App = { type: { __name: 'App', __file: projectPath('src/App.vue') }, parent: null };
+    // Built elsewhere (a container): only the suffix matches the workspace.
+    const Toolbar = { type: { __name: 'Toolbar', __file: '/home/build/app/src/components/Toolbar.vue' }, parent: App };
+    const EditorToolbar = { type: { name: 'EditorToolbar', __file: projectPath('src/components/EditorToolbar.vue') }, parent: Toolbar };
+    const SaveButton = { type: { __name: 'SaveButton', __file: projectPath('src/components/SaveButton.vue') }, parent: EditorToolbar };
+    const Gone = { type: { __name: 'Gone', __file: '/home/build/app/src/components/Gone.vue' }, parent: App };
+    const set = (sel, inst) => Object.defineProperty(document.querySelector(sel), '__vueParentComponent', { value: inst });
+    set('#title', App);
+    set('.toolbar', Toolbar);
+    set('.editor-toolbar', EditorToolbar);
+    set('.save', SaveButton);
+    set('.hint', SaveButton);
+    set('#save', SaveButton);
+    set('#lone', Gone);
+    // An instance that is its own parent must not loop or repeat.
+    const Loop = { type: { __name: 'Loop', __file: projectPath('src/App.vue') } };
+    Loop.parent = Loop;
+    set('#cycle', Loop);
+    document.getElementById('app').__vue_app__ = { version: '3.5.0' };
+  </script>
+</body>
+</html>

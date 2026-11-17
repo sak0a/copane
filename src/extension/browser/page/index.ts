@@ -10,10 +10,12 @@ import type { BridgeServices, CdpPage } from '../../core/services';
 import type { ToolContext } from '../../core/tools';
 import { actionTools } from './actionTools';
 import { auditTools } from './auditTool';
+import { changeTools } from './changeTool';
 import { DownloadManager } from './downloads';
 import { downloadTools } from './downloadTools';
 import { EmulationManager, type TabInfoHost } from './emulation';
 import { emulationTools } from './emulationTools';
+import { inspectTools } from './inspectTool';
 import type { PageEnv } from './call';
 import { debugCdpTools } from './debugCdp';
 import { logTools } from './logTools';
@@ -25,6 +27,7 @@ import { Recorder } from './recorder';
 import { RefStore } from './refs';
 import { scriptTools } from './scriptTools';
 import { snapshotTools } from './snapshotTools';
+import { originalLocation } from './source';
 import { testExportTools } from './testExportTool';
 import { waitTools } from './waitTools';
 
@@ -108,8 +111,10 @@ export function registerPageTools(services: BridgeServices, host: TabInfoHost, e
         ...downloadTools(env, downloads),
         ...emulationTools(env, emulation),
       ]),
+      ...inspectTools(env),
       ...testExportTools(env, recorder),
       ...auditTools(env),
+      ...changeTools(env, { locate: originalLocation }),
       ...debugCdpTools(services),
     ]),
   );
