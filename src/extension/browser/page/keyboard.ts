@@ -1007,6 +1007,9 @@ class Walk {
     const pageChanges = this.pageChanges ?? (await this.readWatch());
     const notRestored = await this.restore();
     if (failure !== undefined) throw this.explain(failure, notRestored);
+    // A navigation can commit after the step that caused it was judged (seen on a slow machine): what the
+    // walk read after that belongs to another page, so it is not a result.
+    this.checkNavigation();
     return formatKeyboard({ ...result!, notRestored, pageChanges });
   }
 
