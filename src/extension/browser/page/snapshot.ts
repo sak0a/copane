@@ -70,6 +70,12 @@ export interface SnapshotOutput {
   urlsOmitted: boolean;
   /** Every line of the full rendering, refs still as placeholders: the baseline for `diffLines`. */
   lines: string[];
+  /**
+   * For a rendering from the top (no offset): what `text` shows, line by line with refs filled in
+   * (`lines` above the cut, `footer` the cut's summary), and the lines below the cut, not shown and
+   * still with placeholders. What snapshotDelta.ts compares against the next snapshot.
+   */
+  shown?: { lines: string[]; footer: string[]; below: string[] };
 }
 
 interface ElementView {
@@ -532,7 +538,10 @@ export function renderTree(tree: Tree, input: RenderOptions): SnapshotOutput {
   const totalChars = lines.reduce((n, l) => n + shownLength(l.text) + 1, 0);
   const base = { rootFound: tree.rootFound, urlsOmitted: state.urlsOmitted, lines: input.urls ? snapshotLines(tree, input.pageUrl) : all };
   const offset = Math.max(0, input.offset ?? 0);
-  if (offset === 0 && totalChars <= input.maxChars) return { ...base, text: fill(all.join('\n')), truncated: false, totalChars };
+  if (offset === 0 && totalChars <= input.maxChars) {
+    const filled = all.map(fill);
+    return { ...base, text: filled.join('\n'), truncated: false, totalChars, shown: { lines: filled, footer: [], below: [] } };
+  }
 
   // Over budget: keep whole lines up to the budget (minus room for the summary), then list the
   // landmarks and headings that were cut, so the agent can narrow the next snapshot to one of them.
@@ -560,14 +569,18 @@ export function renderTree(tree: Tree, input: RenderOptions): SnapshotOutput {
   }
   if (i >= lines.length) {
     const tail = skipped > 0 ? [`[Snapshot continued from character ${skipped}: this is the end of the page.]`] : [];
-    return { ...base, text: fill([...kept, ...tail].join('\n')), truncated: skipped > 0, totalChars };
+    const filled = kept.map(fill);
+    const shown = skipped > 0 ? undefined : { lines: filled, footer: [], below: [] };
+    return { ...base, text: [...filled, ...tail.map(fill)].join('\n'), truncated: skipped > 0, totalChars, shown };
   }
   // The shallowest parts first (the page's top-level structure), then deeper ones while room remains;
   // listed in page order.
   const rest = lines
     .slice(i)
     .map((l, index) => ({ ...l, index }))
-    .filter(l => l.landmark && l.text.includes('\u0001'));
+    .filter(l => l.landmark && l.text.includes('\u0001'))
+    // A heading named like the landmark listed just before it (region "Section 2", heading "Section 2") adds nothing.
+    .filter((l, k, all) => k === 0 || !sameNamedHeading(all[k - 1]!.text, l.text));
   const byDepth = [...rest].sort((a, b) => a.depth - b.depth || a.index - b.index);
   const chosen = new Set<number>();
   let summaryUsed = 0;
@@ -585,7 +598,18 @@ export function renderTree(tree: Tree, input: RenderOptions): SnapshotOutput {
     ...(summary.length ? [`Parts below the cut include:`, ...summary, ...(rest.length > summary.length ? [`  … and ${rest.length - summary.length} more`] : [])] : []),
     `To read one part, call browser_snapshot with its ref; to read on, with offset ${end}; to look for something, with find.]`,
   ];
-  return { ...base, text: fill([...kept, ...footer].join('\n')), truncated: true, totalChars };
+  const filledKept = kept.map(fill);
+  const filledFooter = footer.map(fill);
+  const shown = skipped > 0 ? undefined : { lines: filledKept, footer: filledFooter, below: lines.slice(i).map(l => l.text) };
+  return { ...base, text: [...filledKept, ...filledFooter].join('\n'), truncated: true, totalChars, shown };
+}
+
+/** True when `line` is a heading with the same name as the landmark (not a heading) on `prev`. */
+function sameNamedHeading(prev: string, line: string): boolean {
+  const named = (l: string) => /^\s*- (\w+) ("(?:[^"\\]|\\.)*")/.exec(l);
+  const a = named(prev);
+  const b = named(line);
+  return Boolean(a && b && b[1] === 'heading' && a[1] !== 'heading' && a[2] === b[2]);
 }
 
 /** Cuts plain text at a line boundary within `maxChars`, starting at `offset`. */

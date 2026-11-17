@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **GitHub Copilot** is a third agent Copane registers with: the `copane` entry in
+  `~/.copilot/mcp-config.json` (or `$COPILOT_HOME`), which the Copilot CLI and Copilot chat in VS
+  Code read. Edited in place keeping comments, other servers and your own `tools` filter; passes
+  `COPANE_INSTANCE`/`COPANE_SESSION` through as `${NAME:-}` references. Setting
+  `copane.registration.copilot`; detected by `~/.copilot`, `copilot` on the PATH or the Copilot Chat
+  extension. Status reports a server turned off with `copilot mcp disable`.
+- **Copilot sessions** are labelled "Copilot 1" (badge `G1`), keep their Copane session across
+  `copilot --resume`, and get Copane's usage notes once with their first tool result, because the
+  Copilot CLI does not pass MCP server instructions to the model by default. An agent running in a
+  git worktree finds the window that has the main checkout open.
+- **Fewer tokens.** Without the integrated browser no `browser_*` tools are listed (13 tools instead
+  of 44). Reading a page again with `browser_snapshot` returns only what changed (`offset: 0` for
+  the whole page). Full-screen terminal programs no longer re-send old scrollback and results show
+  their screen; repeated and blank terminal lines are collapsed with a count. Network lists print
+  paths of the page's own origin, request details merge duplicate headers and leave out routine
+  ones, and large JSON from `browser_evaluate` and request bodies is compact. Shorter instructions
+  and schemas.
 - **Keyboard walk** (`browser_audit` with `type: "keyboard"`): presses Tab through the page and
   reports the focus order, focus that is not visible, keyboard traps, controls Tab never reaches, a
   missing or broken skip link and focus jumps, each with its WCAG criterion, element ref and fix.

@@ -254,7 +254,7 @@ test('refs into a frame that navigated, went same-origin or was removed are stal
   await until(async () => /Innermost text/.test(await a.ok('browser_evaluate', { function: `() => document.getElementById('nav').contentDocument?.body?.innerText ?? ''` })), 'same-origin frame');
   assert.ok(moved !== undefined);
   await fails('browser_click', { ref: inner }, /was inside a frame that is gone/);
-  snap = await a.ok('browser_snapshot');
+  snap = await a.ok('browser_snapshot', { offset: 0 });
   assert.match(snap, /- iframe "Navigating frame" \[ref=e\d+\]:\n {2}- paragraph: Innermost text/);
   assert.match(await a.ok('browser_click', { ref: /- iframe "Navigating frame"[\s\S]*?button "Innermost button" \[ref=(e\d+)\]/.exec(snap)[1] }), /It is now button "Innermost clicked"/);
 
@@ -262,7 +262,7 @@ test('refs into a frame that navigated, went same-origin or was removed are stal
   const user = refOf(snap, 'textbox "Username"');
   await a.ok('browser_evaluate', { function: `() => document.getElementById('login').remove()` });
   await fails('browser_type', { ref: user, text: 'x' }, /Ref e\d+ \(textbox "Username"\) (was inside a frame that is gone|no longer exists|was removed)/);
-  assert.doesNotMatch(await a.ok('browser_snapshot'), /Login frame/);
+  assert.doesNotMatch(await a.ok('browser_snapshot', { offset: 0 }), /Login frame/);
 });
 
 test('a frame that goes away while a call uses it fails at once instead of hanging', async () => {
@@ -288,7 +288,7 @@ test('many frames: the snapshot is bounded, fast, and says how to read the rest'
   let snap;
   for (let i = 0; i < 3; i++) {
     const started = Date.now();
-    snap = await a.ok('browser_snapshot');
+    snap = await a.ok('browser_snapshot', { offset: 0 });
     times.push(Date.now() - started);
   }
   const read = [...snap.matchAll(/- iframe "[^"]*" \[ref=e\d+\]:\n {2}- /g)].length;

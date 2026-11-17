@@ -79,6 +79,8 @@ describe('terminal names after a label change', () => {
     expect(labelPrefix('Claude 2')).toBe('Claude 2');
     expect(labelPrefix('Claude 2: dev server')).toBe('Claude 2');
     expect(labelPrefix('Codex 11 (3)')).toBe('Codex 11');
+    expect(labelPrefix('Copilot 1: tests')).toBe('Copilot 1');
+    expect(renamedFor('Copilot 2: tests', 'Copilot 2', 'Copilot 1')).toBe('Copilot 1: tests');
     expect(labelPrefix('Claude 2x')).toBeUndefined();
     expect(labelPrefix('zsh')).toBeUndefined();
   });

@@ -6,18 +6,13 @@ import type { BrowserServiceImpl } from '../service';
 import { agentLoginStoreSetting, type ProfileManager } from './manager';
 import { DEFAULT_PROFILE, ISOLATION_NOTE, LIFETIME, LOST, parseProfileName, privateKey, resolveProfile } from './model';
 
-/** Which store browser_open uses, in one line (also in browser_open's `profile` description). */
-export const PRECEDENCE =
-  "Which store a new tab uses: browser_open's `profile`, else the default the user set for your session, else the one you set with browser_profiles, else the user's setting (the shared default store, or a private profile per session).";
-
 export function profileTools(services: BridgeServices, browser: BrowserServiceImpl, profiles: ProfileManager): ToolDefinition<any>[] {
   return [
     defineTool({
       name: 'browser_profiles',
       title: 'Browser login profiles',
       description:
-        'Lists login profiles: separate cookie and login stores for browser tabs (e.g. "dev", "test", "prod" signed in as different accounts). Tabs of one profile share logins; other tabs do not. With `default`, sets the profile your browser_open uses when you pass none. ' +
-        PRECEDENCE,
+        'Lists login profiles: separate cookie and login stores for browser tabs (e.g. "dev", "test", "prod" signed in as different accounts). Tabs of one profile share logins; other tabs do not. With `default`, sets the profile your browser_open uses when you pass none. The result says which store your new tabs use and why.',
       input: {
         default: z
           .string()

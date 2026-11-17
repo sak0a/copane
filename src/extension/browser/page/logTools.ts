@@ -5,7 +5,7 @@ import { defineTool, type ToolDefinition } from '../../core/tools';
 import { withPage, type PageCall, type PageEnv } from './call';
 import { exportHar } from './harExport';
 import { formatConsoleEntry, levelAtLeast, shortLocation, type ConsoleEntry, type ConsoleLevel } from './consoleLog';
-import { filterNetwork, formatNetworkEntry, urlMatcher, type NetworkEntry } from './networkLog';
+import { filterNetwork, formatBody, formatNetworkEntry, notableHeaders, pageOrigin, urlMatcher, type NetworkEntry } from './networkLog';
 import { clip, formatBytes, formatMs } from './ringBuffer';
 import { tabArg } from './schema';
 
@@ -100,7 +100,7 @@ export function logTools(env: PageEnv): ToolDefinition<any>[] {
         limit: z.number().int().min(1).max(500).optional().describe('Newest N, default 100.'),
         maxBodyChars: z.number().int().min(100).max(20_000).optional().describe('With id: cut bodies here, default 4000.'),
         har: z.string().optional().describe('Write the matching requests (static included) to this HAR file, e.g. "network.har"; cookies and tokens are masked.'),
-        harInclude: z.array(z.enum(['bodies', 'secrets'])).optional().describe('With har: response bodies; secrets unmasked (you can then read them).'),
+        harInclude: z.array(z.enum(['bodies', 'secrets'])).optional().describe('With har: response bodies; secrets unmasked (you can then read them; only if the user needs them).'),
         tab: tabArg,
       },
       annotations: { readOnlyHint: true },
@@ -129,12 +129,14 @@ export function logTools(env: PageEnv): ToolDefinition<any>[] {
           cursor.network = state.seq;
           const now = Date.now();
           const limited = result.matched.slice(-(args.limit ?? 100));
-          const { kept, dropped } = fitNewest(limited.map(e => formatNetworkEntry(e, now)), OUTPUT_BUDGET);
+          const origin = pageOrigin(state.url);
+          const { kept, dropped } = fitNewest(limited.map(e => formatNetworkEntry(e, now, origin)), OUTPUT_BUDGET);
+          const onOrigin = origin !== undefined && limited.some(e => e.url.startsWith(`${origin}/`));
           const scope = args.onlyNew ? 'new since your last read' : `since ${time(state.recordingSince)} (when the bridge attached)`;
           const hidden = result.hiddenStatic ? `${result.hiddenStatic} static resources (images, scripts, styles, fonts) hidden; pass includeStatic: true to see them.` : '';
           if (result.matched.length === 0) return [`No matching requests in ${call.tab.id}, ${scope}.`, hidden].filter(Boolean).join('\n');
           const failed = result.matched.filter(e => e.failed || (e.status ?? 0) >= 400).length;
-          const head = `${result.matched.length} request${result.matched.length === 1 ? '' : 's'} in ${call.tab.id} ${scope}${failed ? ` (${failed} failed)` : ''}:`;
+          const head = `${result.matched.length} request${result.matched.length === 1 ? '' : 's'} in ${call.tab.id} ${scope}${failed ? ` (${failed} failed)` : ''}${onOrigin ? `; paths are relative to ${origin}` : ''}:`;
           const older = result.matched.length - limited.length + dropped;
           return [head, ...(older ? [`(${older} older requests not shown; raise limit or filter)`] : []), ...kept, ...(hidden ? [hidden] : [])].join('\n');
         }),
@@ -156,11 +158,15 @@ async function requestDetails(call: PageCall, rawId: string, max: number): Promi
     lines.push('Sent while the user had the tab (browser_request_user_input): its URL query, headers and bodies are withheld because they may carry what the user typed.');
     return lines.join('\n');
   }
+  let routine = 0;
   const headerBlock = (title: string, h: Record<string, string> | undefined) => {
     if (!h || Object.keys(h).length === 0) return [`${title}: (none recorded)`];
-    return [`${title}:`, ...Object.entries(h).map(([k, v]) => `  ${k}: ${v}`)];
+    const notable = notableHeaders(h);
+    routine += notable.routine;
+    return notable.shown.length ? [`${title}:`, ...notable.shown.map(([k, v]) => `  ${k}: ${v}`)] : [`${title}: (only routine ones)`];
   };
   lines.push(...headerBlock('Request headers', e.requestHeaders), ...headerBlock('Response headers', e.responseHeaders));
+  if (routine) lines.push(`(${routine} routine header${routine === 1 ? '' : 's'} left out: pseudo-headers, sec-ch-*, sec-fetch-*, priority, accept-encoding; a har export has them all.)`);
   let post = e.postData;
   if (e.hasPostData && post === undefined && !state.dialog) {
     try {
@@ -169,7 +175,7 @@ async function requestDetails(call: PageCall, rawId: string, max: number): Promi
       post = undefined;
     }
   }
-  if (e.hasPostData) lines.push('Request body:', post !== undefined ? indentBody(post, max) : '  (not available)');
+  if (e.hasPostData) lines.push('Request body:', post !== undefined ? formatBody(post, max) : '  (not available)');
   if (e.redirectedTo) lines.push('Response body: (a redirect has no body)');
   else if (e.failed) lines.push(`Response body: (none; the request failed: ${e.failed})`);
   else if (e.end === undefined) lines.push('Response body: (not complete yet)');
@@ -181,9 +187,9 @@ async function requestDetails(call: PageCall, rawId: string, max: number): Promi
         const bytes = Buffer.from(r.body, 'base64');
         const textual = /^(text\/|application\/(json|javascript|xml|x-www-form-urlencoded|.*\+json|.*\+xml))/.test(e.mimeType ?? '');
         lines.push(textual ? 'Response body:' : `Response body: (binary ${e.mimeType ?? ''}, ${formatBytes(bytes.length)}; not shown)`);
-        if (textual) lines.push(indentBody(bytes.toString('utf8'), max));
+        if (textual) lines.push(formatBody(bytes.toString('utf8'), max));
       } else {
-        lines.push(`Response body (${formatBytes(r.body.length)}):`, indentBody(r.body, max));
+        lines.push(`Response body (${formatBytes(r.body.length)}):`, formatBody(r.body, max));
       }
     } catch (err) {
       if (err instanceof ToolError && err.code === 'cancelled') throw err;
@@ -191,20 +197,4 @@ async function requestDetails(call: PageCall, rawId: string, max: number): Promi
     }
   }
   return lines.join('\n');
-}
-
-function indentBody(body: string, max: number): string {
-  let text = body;
-  if (/^\s*[{[]/.test(text) && text.length < 200_000) {
-    try {
-      text = JSON.stringify(JSON.parse(text), null, 2);
-    } catch {
-      // not JSON after all
-    }
-  }
-  const cut = text.length > max ? `${text.slice(0, max)}\n… (${text.length - max} more characters; raise maxBodyChars to see more)` : text;
-  return cut
-    .split('\n')
-    .map(l => `  ${l}`)
-    .join('\n');
 }

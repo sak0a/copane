@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest';
-import { explainNoMatch, isInside, sameFolders, selectInstance } from '../../src/mcp/discovery';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { explainNoMatch, isInside, sameFolders, selectInstance, worktreeOf } from '../../src/mcp/discovery';
 import type { InstanceInfo } from '../../src/shared/protocol';
 
 function instance(id: string, folders: string[], lastFocusedAt = 0, startedAt = 0): InstanceInfo {
@@ -132,5 +135,82 @@ describe('selectInstance with symbolic links', () => {
     const a = inst('1', ['/work/a']);
     const b = inst('2', ['/work/b']);
     expect(selectInstance({ instances: [a, b], env: {}, cwd: '/work/b/x', ancestors: [], realpath })?.instance).toBe(b);
+  });
+});
+
+describe('selectInstance from a git worktree', () => {
+  // Real files, laid out as `git worktree add` leaves them.
+  let tmp: string;
+  let repo: string;
+  let wt: string;
+  const readFile = (p: string) => fs.readFileSync(p, 'utf8');
+  const realpath = (p: string) => fs.realpathSync.native(p);
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'copane-wt-'));
+    repo = path.join(tmp, 'repo');
+    wt = path.join(tmp, 'elsewhere', 'feature');
+    fs.mkdirSync(path.join(repo, '.git', 'worktrees', 'feature'), { recursive: true });
+    fs.mkdirSync(path.join(repo, 'packages', 'web'), { recursive: true });
+    fs.writeFileSync(path.join(repo, '.git', 'worktrees', 'feature', 'commondir'), '../..\n');
+    fs.mkdirSync(path.join(wt, 'packages', 'web', 'src'), { recursive: true });
+    fs.writeFileSync(path.join(wt, '.git'), `gitdir: ${path.join(repo, '.git', 'worktrees', 'feature')}\n`);
+  });
+  afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+  it('finds the worktree and its main checkout, and nothing for other layouts', () => {
+    expect(worktreeOf(path.join(wt, 'packages', 'web'), readFile)).toEqual({ root: wt, mainCheckout: repo });
+    expect(worktreeOf(path.join(repo, 'packages'), readFile)).toBeUndefined(); // the main checkout itself
+    expect(worktreeOf(tmp, readFile)).toBeUndefined(); // no repository (unless tmp is inside one)
+    // A submodule: `.git` file without commondir.
+    const sub = path.join(tmp, 'sub');
+    fs.mkdirSync(path.join(repo, '.git', 'modules', 'sub'), { recursive: true });
+    fs.mkdirSync(sub);
+    fs.writeFileSync(path.join(sub, '.git'), 'gitdir: ../repo/.git/modules/sub\n');
+    expect(worktreeOf(sub, readFile)).toBeUndefined();
+    // Garbage, an empty commondir, a bare repository, and a reader that fails oddly: no match, no throw.
+    fs.writeFileSync(path.join(sub, '.git'), 'not a gitdir line');
+    expect(worktreeOf(sub, readFile)).toBeUndefined();
+    fs.writeFileSync(path.join(wt, '.git'), 'gitdir: /nonexistent/x');
+    expect(worktreeOf(wt, readFile)).toBeUndefined();
+    fs.mkdirSync(path.join(tmp, 'bare.git', 'worktrees', 'b'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'bare.git', 'worktrees', 'b', 'commondir'), '../..');
+    fs.writeFileSync(path.join(wt, '.git'), `gitdir: ${path.join(tmp, 'bare.git', 'worktrees', 'b')}`);
+    expect(worktreeOf(wt, readFile)).toBeUndefined();
+    expect(
+      worktreeOf(wt, () => {
+        throw 'odd';
+      }),
+    ).toBeUndefined();
+  });
+
+  it('matches the window that has the main checkout open, as the deepest folder', () => {
+    const a = instance('1', [repo]);
+    const b = instance('2', [path.join(repo, 'packages', 'web')]);
+    const c = instance('3', [path.join(tmp, 'other')]);
+    const cwd = path.join(wt, 'packages', 'web', 'src');
+    const r = selectInstance({ instances: [a, b, c], env: {}, cwd, ancestors: [], realpath, readFile });
+    expect(r).toMatchObject({ instance: b, matchedBy: 'worktree' });
+    expect(r?.note).toContain(`main checkout is ${repo}`);
+    expect(selectInstance({ instances: [a, c], env: {}, cwd: wt, ancestors: [], realpath, readFile })).toMatchObject({ instance: a, matchedBy: 'worktree' });
+    // Without the reader, the rule is off: no match among several windows, as before.
+    expect(selectInstance({ instances: [a, c], env: {}, cwd: wt, ancestors: [], realpath })).toBeUndefined();
+  });
+
+  it('ranks below the working directory, the environment and the other exact rules', () => {
+    const main = instance('1', [repo]);
+    const holder = instance('2', [path.join(tmp, 'elsewhere')]);
+    expect(selectInstance({ instances: [main, holder], env: {}, cwd: wt, ancestors: [], realpath, readFile })).toMatchObject({ instance: holder, matchedBy: 'cwd' });
+    const other = instance('3', [path.join(tmp, 'x')]);
+    expect(selectInstance({ instances: [main, other], env: { COPANE_INSTANCE: '3' }, cwd: wt, ancestors: [], realpath, readFile })).toMatchObject({ instance: other, matchedBy: 'env' });
+    expect(selectInstance({ instances: [main, other], env: {}, cwd: wt, ancestors: [3], realpath, readFile })).toMatchObject({ instance: other, matchedBy: 'ancestor' });
+  });
+
+  it('breaks a tie between windows with the main checkout open as the working-directory rule does, and says so', () => {
+    const a = instance('1', [repo], 1);
+    const b = instance('2', [repo], 9);
+    const r = selectInstance({ instances: [a, b], env: {}, cwd: wt, ancestors: [], realpath, readFile });
+    expect(r).toMatchObject({ instance: b, matchedBy: 'worktree' });
+    expect(r?.note).toContain('2 windows have this folder open');
   });
 });

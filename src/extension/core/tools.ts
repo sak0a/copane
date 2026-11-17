@@ -62,7 +62,7 @@ export class ToolRegistry {
       if (this.tools.has(definition.name) || batch.has(definition.name)) throw new Error(`tool "${definition.name}" is already registered`);
       const schema = z.object(definition.input);
       const { $schema: _ignored, additionalProperties: _closed, ...inputSchema } = z.toJSONSchema(schema) as Record<string, unknown>;
-      dropDefaultBounds(inputSchema);
+      trimSchema(inputSchema);
       batch.set(definition.name, {
         definition,
         schema,
@@ -106,19 +106,36 @@ export class ToolRegistry {
   }
 }
 
+/** Keywords whose value maps names to schemas: the names are parameter names, not keywords. */
+const SCHEMA_MAPS = new Set(['properties', 'patternProperties', '$defs', 'definitions']);
+/** Keywords whose value is data, not a schema. */
+const DATA_KEYWORDS = new Set(['enum', 'const', 'default', 'examples', 'required']);
+const LOWER_BOUNDS = ['minimum', 'minLength', 'minItems'] as const;
+
 /**
- * Removes what zod adds to every schema without telling the agent anything: the safe-integer bounds
- * of `.int()` fields. (`additionalProperties: false` is dropped at the top level above.) Tool
- * definitions are part of every conversation, so every character counts.
+ * Removes from the advertised schema what tells the agent little: the safe-integer bounds zod adds
+ * to `.int()` fields, lower bounds (`minimum`, `minLength`, `minItems`: when a call breaks one, the
+ * zod check's message names the field and the bound), nested `additionalProperties: false` (the
+ * top-level one is dropped above) and the `propertyNames: { type: "string" }` of records. Upper
+ * bounds stay: a model plans with them. The zod schema still validates all of it. Tool definitions
+ * are part of every conversation, so every character counts.
  */
-function dropDefaultBounds(node: unknown): void {
+function trimSchema(node: unknown): void {
+  if (Array.isArray(node)) {
+    node.forEach(trimSchema);
+    return;
+  }
   if (!node || typeof node !== 'object') return;
   const n = node as Record<string, unknown>;
   if (n.maximum === Number.MAX_SAFE_INTEGER) delete n.maximum;
-  if (n.minimum === Number.MIN_SAFE_INTEGER) delete n.minimum;
-  for (const value of Object.values(n)) {
-    if (Array.isArray(value)) value.forEach(dropDefaultBounds);
-    else dropDefaultBounds(value);
+  for (const key of LOWER_BOUNDS) if (typeof n[key] === 'number') delete n[key];
+  if (n.additionalProperties === false) delete n.additionalProperties;
+  const names = n.propertyNames;
+  if (names && typeof names === 'object' && Object.keys(names).length === 1 && (names as { type?: unknown }).type === 'string') delete n.propertyNames;
+  for (const [key, value] of Object.entries(n)) {
+    if (DATA_KEYWORDS.has(key)) continue;
+    if (SCHEMA_MAPS.has(key) && value && typeof value === 'object') Object.values(value).forEach(trimSchema);
+    else trimSchema(value);
   }
 }
 

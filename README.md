@@ -17,7 +17,7 @@
   <img src="https://img.shields.io/badge/VS%20Code-1.140%2B-007ACC?logo=visualstudiocode&logoColor=white" alt="VS Code 1.140 or newer">
 </p>
 
-Copane gives Claude Code (and Codex, and other MCP agents) the VS Code window they run in:
+Copane gives Claude Code (and Codex, GitHub Copilot and other MCP agents) the VS Code window they run in:
 its **integrated browser tabs** and its **integrated terminals**. The agent and you work in the
 same tabs and the same terminals. You see every click and every command, and you can take over at
 any moment.
@@ -31,7 +31,8 @@ any moment.
   label and color ("Claude 1", "Claude 2") on the tabs and terminals it uses.
 
 It works with the **Claude Code extension for VS Code** (its chat sessions), with the **`claude`
-CLI** in the integrated terminal, and with **Codex** (`codex` CLI and extension).
+CLI** in the integrated terminal, with **Codex** (`codex` CLI and extension), and with **GitHub
+Copilot** (the `copilot` CLI, and Copilot chat in VS Code; see [GitHub Copilot](#github-copilot)).
 
 ## Install
 
@@ -46,17 +47,17 @@ step from the real state of your setup:
 
 1. **Let agents use the integrated browser** (once): **Enable Integrated Browser** adds Copane to
    VS Code's `argv.json`; then **quit VS Code completely and start it again**.
-2. **Turn Copane on for Claude Code and Codex**: adds an MCP server named `copane` to the user
+2. **Turn Copane on for your agents** (Claude Code, Codex, GitHub Copilot): adds an MCP server named `copane` to the user
    configuration of the agents that are installed (see
    [what changes on your machine](#what-changes-on-your-machine)).
-3. **Try it**: start a *new* Claude Code or Codex session and give it the prompt from the walkthrough;
+3. **Try it**: start a *new* Claude Code, Codex or Copilot session and give it the prompt from the walkthrough;
    it opens a browser tab and runs a command in a terminal, both marked with the session's label.
 4. **See and control sessions** in the Copane view.
 
 Without the walkthrough the same happens through **Copane: Enable Integrated Browser** and
 **Copane: Turn On**, or by answering *Register* when VS Code asks. Sessions that were already
-running before step 2 do not see the new server; start them again (in Claude Code, `/mcp` shows the
-`copane` server and its state).
+running before step 2 do not see the new server; start them again (in Claude Code and the Copilot
+CLI, `/mcp` shows the `copane` server and its state).
 
 ### Why the browser needs a restart
 
@@ -252,10 +253,43 @@ How Codex treats Copane's tools (checked with Codex CLI 0.167):
   lasts as long as the Codex process: it survives window reloads, but `codex resume` starts a new
   Copane session.
 
+### GitHub Copilot
+
+Copilot is registered in `~/.copilot/mcp-config.json` (or `$COPILOT_HOME/mcp-config.json`), as the
+`copane` entry under `mcpServers`, in the form `copilot mcp add` writes (`"type": "local"`,
+`"tools": ["*"]`). That one file is read by the **Copilot CLI** (`copilot`) and, according to VS
+Code's documentation, by **Copilot chat in VS Code** when its sessions run on the Copilot harness
+(the Chat view and the Agents window), so one entry covers both. Copane edits the file directly, in
+one atomic step: comments, other servers and keys it does not know stay as they are (`copilot mcp
+add` itself would drop the comments). Copilot starts local MCP servers with little more than `PATH`
+from the environment, so the entry passes the variables Copane needs as references,
+`"COPANE_INSTANCE": "${COPANE_INSTANCE:-}"` and the same for `COPANE_SESSION`, which Copilot fills
+from its own environment (empty when unset).
+
+- **Tool names.** The model sees Copane's tools as `copane-<tool>`, e.g. `copane-browser_click`.
+- **Check it.** `copilot mcp list` or `copilot mcp get copane` shows the entry; `/mcp` in a
+  Copilot CLI session shows the server and its state. `copilot mcp disable copane` turns it off
+  without removing it; **Copane: Show Status** reports that.
+- **Instructions.** The Copilot CLI gives the model the server instructions only of servers it
+  allowlists. Start it with `--allow-all-mcp-server-instructions` to include Copane's (how sessions,
+  tab access and hand-off work).
+- **Fewer tools.** Change the entry's `"tools"` to a list of tool names (without the `copane-`
+  prefix) to give Copilot only those, for example when VS Code's limit of 128 tools per request is
+  reached. Copane keeps your list, and a `"timeout"` you add, when it updates the entry.
+- **How it differs from Copilot's own browser tools.** Copane works in *your* VS Code window: the
+  integrated browser tabs you also use (tabs you opened only with your consent), terminals you can
+  see and type into, and a hand-off to you when a page or command needs a login, a password or a
+  decision. Each Copilot session gets its own label and color on the tabs and terminals it uses.
+
+Known limits: registration was checked with Copilot CLI 1.0.105 (the file format, `COPILOT_HOME`,
+`copilot mcp list` reading Copane's entry). How Copilot chat inside VS Code finds the right window
+has not been verified with a signed-in Copilot; if it reaches the wrong one or none, the agent can
+pick it with `window_select` (`window_status` says which windows there are).
+
 ### Remote windows and WSL
 
 In a WSL, SSH or Dev Container window, Copane runs on the remote side, next to your code,
-where Claude Code and Codex run too. It registers with the agents' configuration **on the remote
+where Claude Code, Codex and the Copilot CLI run too. It registers with the agents' configuration **on the remote
 machine** (for WSL: `~/.claude.json` inside WSL), and the server runs with the VS Code server's
 Node.js. The browser itself stays on your local machine and VS Code connects it through the window,
 so `localhost:3000` in a WSL window reaches the server in WSL.
@@ -307,6 +341,7 @@ Copane asks before it changes any agent's configuration, and changes only what i
 |---|---|---|
 | `~/.claude.json` (or `$CLAUDE_CONFIG_DIR/.claude.json`) | `mcpServers.copane`, a user-scope MCP server | After you agree, or with the Register command. Made with Claude Code's own `claude mcp` command when it is available, so it does not race with a running Claude Code. |
 | `~/.codex/config.toml` (or `$CODEX_HOME/config.toml`) | the `[mcp_servers.copane]` table | Same. The rest of the file, comments included, is left exactly as it was. |
+| `~/.copilot/mcp-config.json` (or `$COPILOT_HOME/mcp-config.json`) | `mcpServers.copane` | Same. Edited directly in one atomic step; comments, other servers and your own `tools` filter are kept. |
 | VS Code's `argv.json` | adds Copane to `enable-proposed-api` | When you run **Enable Integrated Browser**. Comments and other entries are kept. |
 | `~/.copane/` | the MCP server, a small launcher, one file per open window (socket path and a random token, readable only by you) | Always; this is Copane's own folder. |
 
@@ -325,7 +360,7 @@ and says why in the log. An update replaces the entry in one step and never remo
 change is logged in the **Copane** output channel with its reason and kept in
 `~/.copane/registration-history.json`.
 
-**Turn it off** with **Copane: Turn Off (Unregister from Claude Code and Codex)**. It removes
+**Turn it off** with **Copane: Turn Off (Unregister from Claude Code, Codex and Copilot)**. It removes
 Copane's entries and nothing else, and Copane does not add them back until you run
 **Copane: Turn On**. Run it before uninstalling the extension if you do not plan to reinstall it.
 
@@ -351,8 +386,8 @@ Copane's entries and nothing else, and Copane does not add them back until you r
 |---|---|
 | Copane: Get Started | Opens the getting-started walkthrough, with each step checked off from the real state of the setup. |
 | Copane: Check and Repair Setup | Checks everything end to end (entries present and current, server script and runtime, a real start of the server with an MCP handshake, this window reachable), fixes Copane's own entries and says what was wrong and what it did. The same check runs quietly at every start. |
-| Copane: Turn On (Register with Claude Code and Codex) | Adds the `copane` MCP server to the agents' user configuration and keeps it there. |
-| Copane: Turn Off (Unregister from Claude Code and Codex) | Removes Copane's entries and keeps them off. |
+| Copane: Turn On (Register with Claude Code, Codex and Copilot) | Adds the `copane` MCP server to the agents' user configuration and keeps it there. |
+| Copane: Turn Off (Unregister from Claude Code, Codex and Copilot) | Removes Copane's entries and keeps them off. |
 | Copane: Enable Integrated Browser | Allows the proposed browser API in `argv.json` and offers to quit VS Code. |
 | Copane: Show Status | Everything about this window, the browser, the agents, the server's start test, recent registration changes and the connected sessions, in one report. |
 | Copane: Copy Status Report | Puts that report on the clipboard (also the copy button above the report). |
@@ -369,6 +404,7 @@ Copane's entries and nothing else, and Copane does not add them back until you r
 | `copane.registration.mode` | `ask` | `ask`: ask once before registering. `automatic`: register without asking. `manual`: only the commands change agent configuration. |
 | `copane.registration.claudeCode` | `true` | Register with Claude Code. |
 | `copane.registration.codex` | `true` | Register with Codex (when it is installed). |
+| `copane.registration.copilot` | `true` | Register with GitHub Copilot (when the `copilot` CLI, `~/.copilot` or the Copilot Chat extension is found). |
 | `copane.browser.userTabs` | `ask` | Whether agents may use tabs you opened: ask, always allow or never. |
 | `copane.browser.agentLoginStore` | `shared` | `shared`: agents' tabs use your login store. `private`: every agent session starts in a login profile of its own. |
 | `copane.browser.loginPrompts` | `true` | Ask you for site and proxy logins in tabs an agent drives. |
@@ -413,7 +449,7 @@ Still stuck: copy the status report and the output of **Copane: Show Log** into 
 
 See [CONTRIBUTING.md](CONTRIBUTING.md), `CLAUDE.md` and `docs/ARCHITECTURE.md`. `npm run check`
 type-checks, tests and builds; `node scripts/dev-host.mjs --name <name>` starts an isolated VS Code
-with the extension and with throwaway Claude Code, Codex and `argv.json` configuration;
+with the extension and with throwaway Claude Code, Codex, Copilot and `argv.json` configuration;
 `node scripts/e2e.mjs` runs the end-to-end suites.
 
 ## Acknowledgements

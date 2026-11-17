@@ -184,7 +184,7 @@ export function unixLauncher(runtimes: string[], script: string): string {
     '#!/bin/sh',
     '# Starts the Copane MCP server (stdio). Written by the Copane VS Code extension and',
     '# refreshed each time it starts; edits are overwritten. Remove the agent registrations with the',
-    '# VS Code command "Copane: Unregister from Claude Code and Codex".',
+    '# VS Code command "Copane: Turn Off".',
     `script=${shellQuote(script)}`,
     `for runtime in ${runtimes.map(shellQuote).join(' ')}; do`,
     '  if [ -x "$runtime" ]; then ELECTRON_RUN_AS_NODE=1 exec "$runtime" "$script" "$@"; fi',

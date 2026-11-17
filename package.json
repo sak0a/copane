@@ -1,7 +1,7 @@
 {
   "name": "copane",
   "displayName": "Copane",
-  "description": "Shares your VS Code window with Claude Code and other MCP agents: its integrated browser tabs and terminals, per window and per agent session, with you able to step in.",
+  "description": "Shares your VS Code window with Claude Code, Codex, GitHub Copilot and other MCP agents: its integrated browser tabs and terminals, per window and per agent session, with you able to step in.",
   "publisher": "saka",
   "version": "0.3.0",
   "license": "PolyForm-Shield-1.0.0",
@@ -20,6 +20,8 @@
     "terminal",
     "agent",
     "codex",
+    "copilot",
+    "github copilot",
     "ai"
   ],
   "extensionKind": [
@@ -150,12 +152,12 @@
       },
       {
         "command": "copane.registerAgents",
-        "title": "Turn On (Register with Claude Code and Codex)",
+        "title": "Turn On (Register with Claude Code, Codex and Copilot)",
         "category": "Copane"
       },
       {
         "command": "copane.unregisterAgents",
-        "title": "Turn Off (Unregister from Claude Code and Codex)",
+        "title": "Turn Off (Unregister from Claude Code, Codex and Copilot)",
         "category": "Copane"
       },
       {
@@ -384,13 +386,13 @@
             "manual"
           ],
           "enumDescriptions": [
-            "Ask once before adding the \"copane\" MCP server to Claude Code's and Codex's user configuration. Afterwards Copane keeps its own entry present and up to date (it re-adds it if something removes it) until you run \"Copane: Turn Off\".",
-            "Add and keep the \"copane\" MCP server in Claude Code's and Codex's user configuration without asking.",
+            "Ask once before adding the \"copane\" MCP server to the user configuration of Claude Code, Codex and GitHub Copilot. Afterwards Copane keeps its own entry present and up to date (it re-adds it if something removes it) until you run \"Copane: Turn Off\".",
+            "Add and keep the \"copane\" MCP server in the user configuration of Claude Code, Codex and GitHub Copilot without asking.",
             "Never change agent configuration on its own; only report problems. Use \"Copane: Turn On\", \"Copane: Turn Off\" and \"Copane: Check and Repair Setup\"."
           ],
           "default": "ask",
           "scope": "machine",
-          "markdownDescription": "How Copane makes its tools available to agents. It adds an MCP server named `copane` to the user configuration of Claude Code (`~/.claude.json`) and Codex (`~/.codex/config.toml`), and never changes or removes a `copane` server it did not add."
+          "markdownDescription": "How Copane makes its tools available to agents. It adds an MCP server named `copane` to the user configuration of Claude Code (`~/.claude.json`), Codex (`~/.codex/config.toml`) and GitHub Copilot (`~/.copilot/mcp-config.json`), and never changes or removes a `copane` server it did not add."
         },
         "copane.registration.claudeCode": {
           "type": "boolean",
@@ -403,6 +405,12 @@
           "default": true,
           "scope": "machine",
           "markdownDescription": "Register the `copane` MCP server with Codex, when Codex is installed."
+        },
+        "copane.registration.copilot": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine",
+          "markdownDescription": "Register the `copane` MCP server with GitHub Copilot (`~/.copilot/mcp-config.json`, or `$COPILOT_HOME/mcp-config.json`), which the Copilot CLI and Copilot chat in VS Code read, when Copilot is installed."
         },
         "copane.terminal.userTerminals": {
           "type": "string",
@@ -816,12 +824,12 @@
     "viewsWelcome": [
       {
         "view": "copane.sessions",
-        "contents": "No agent is connected to this window yet.\nStart Claude Code or Codex in this window, in its panel or in a terminal. Each session appears here with the browser tabs and terminals it uses, and you can pause it or step in at any time."
+        "contents": "No agent is connected to this window yet.\nStart Claude Code, Codex or GitHub Copilot in this window, in its chat or in a terminal. Each session appears here with the browser tabs and terminals it uses, and you can pause it or step in at any time."
       },
       {
         "view": "copane.sessions",
         "when": "!copane.setup.agentsReady",
-        "contents": "[Get Started](command:copane.openWalkthrough)\nTwo one-time steps: let agents use the integrated browser, and turn Copane on for Claude Code and Codex."
+        "contents": "[Get Started](command:copane.openWalkthrough)\nTwo one-time steps: let agents use the integrated browser, and turn Copane on for Claude Code, Codex and GitHub Copilot."
       },
       {
         "view": "copane.sessions",
@@ -858,12 +866,12 @@
       {
         "id": "copane.gettingStarted",
         "title": "Get Started with Copane",
-        "description": "Let Claude Code and Codex work in this window's browser tabs and terminals, next to you.",
+        "description": "Let Claude Code, Codex and GitHub Copilot work in this window's browser tabs and terminals, next to you.",
         "steps": [
           {
             "id": "intro",
             "title": "What Copane does",
-            "description": "Copane gives Claude Code, Codex and other MCP agents the VS Code window they run in: its integrated browser tabs and its terminals. You see every click and every command, and you can take over at any moment.\nTwo one-time steps follow: let agents use the integrated browser, and turn Copane on for your agents.",
+            "description": "Copane gives Claude Code, Codex, GitHub Copilot and other MCP agents the VS Code window they run in: its integrated browser tabs and its terminals. You see every click and every command, and you can take over at any moment.\nTwo one-time steps follow: let agents use the integrated browser, and turn Copane on for your agents.",
             "media": {
               "svg": "media/walkthrough/intro.svg",
               "altText": "A VS Code window with a browser tab and a terminal, both marked with the color and label of the agent session using them."
@@ -923,8 +931,8 @@
           },
           {
             "id": "agents",
-            "title": "Turn Copane on for Claude Code and Codex",
-            "description": "Copane adds an MCP server named copane to your user configuration of Claude Code (~/.claude.json) and Codex (~/.codex/config.toml), and keeps it current. Nothing else in those files changes.\n[Turn On](command:copane.registerAgents)\nIn a remote window that is the configuration on the remote machine, where the agents run. **Turn Off** in the Copane view's ... menu removes it again.",
+            "title": "Turn Copane on for your agents",
+            "description": "Copane adds an MCP server named copane to your user configuration of Claude Code (~/.claude.json), Codex (~/.codex/config.toml) and GitHub Copilot (~/.copilot/mcp-config.json, read by the Copilot CLI and by Copilot chat in VS Code), and keeps it current. Nothing else in those files changes.\n[Turn On](command:copane.registerAgents)\nIn a remote window that is the configuration on the remote machine, where the agents run. **Turn Off** in the Copane view's ... menu removes it again.",
             "when": "copane.setup.agents != 'none'",
             "completionEvents": [
               "onContext:copane.setup.agentsReady"
@@ -936,8 +944,8 @@
           },
           {
             "id": "agentsNone",
-            "title": "Install Claude Code or Codex",
-            "description": "Copane gives its tools to agents that speak MCP. Neither Claude Code nor Codex was found on this machine (or both are turned off in Copane's settings). Install one of them, then turn Copane on for it.\n[Find the Claude Code Extension](command:workbench.extensions.search?%22anthropic.claude-code%22)\n[Turn On](command:copane.registerAgents)\nOther MCP clients work too: run the server at ~/.copane/bin/mcp-server from them.",
+            "title": "Install an agent",
+            "description": "Copane gives its tools to agents that speak MCP. None of Claude Code, Codex and GitHub Copilot was found on this machine (or they are turned off in Copane's settings). Install one of them, then turn Copane on for it.\n[Find the Claude Code Extension](command:workbench.extensions.search?%22anthropic.claude-code%22)\n[Turn On](command:copane.registerAgents)\nOther MCP clients work too: run the server at ~/.copane/bin/mcp-server from them.",
             "when": "copane.setup.agents == 'none'",
             "completionEvents": [
               "onContext:copane.setup.agentsReady"
@@ -950,7 +958,7 @@
           {
             "id": "tryIt",
             "title": "Try it",
-            "description": "Start a **new** Claude Code or Codex session in this window (sessions that were already running do not see Copane's tools) and give it this prompt:\n“Use the copane tools: set your session title to \"Copane tour\", open https://example.com in a VS Code browser tab and tell me the page heading, then run node --version in a VS Code terminal and tell me what it printed.”\n[Copy Prompt](command:copane.walkthrough.copyPrompt)\nA browser tab opens on example.com and a terminal named after the session (Claude 1) runs the command, both marked in the session's color, and the session appears in the Copane view. Your agent may ask you to approve its tool calls.",
+            "description": "Start a **new** Claude Code, Codex or GitHub Copilot session in this window (sessions that were already running do not see Copane's tools) and give it this prompt:\n“Use the copane tools: set your session title to \"Copane tour\", open https://example.com in a VS Code browser tab and tell me the page heading, then run node --version in a VS Code terminal and tell me what it printed.”\n[Copy Prompt](command:copane.walkthrough.copyPrompt)\nA browser tab opens on example.com and a terminal named after the session (Claude 1) runs the command, both marked in the session's color, and the session appears in the Copane view. Your agent may ask you to approve its tool calls.",
             "completionEvents": [
               "onContext:copane.setup.sessionSeen"
             ],

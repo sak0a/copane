@@ -69,7 +69,7 @@ function pingWindow(instance: InstanceInfo, timeoutMs = 3000): Promise<{ ok: boo
 async function diagnose(): Promise<void> {
   const instances = readLiveInstances();
   const ancestry = await lookupAncestors();
-  const found = selectInstance({ instances, env: process.env, cwd: process.cwd(), ancestors: ancestry.pids, realpath: p => fs.realpathSync.native(p) });
+  const found = selectInstance({ instances, env: process.env, cwd: process.cwd(), ancestors: ancestry.pids, realpath: p => fs.realpathSync.native(p), readFile: p => fs.readFileSync(p, 'utf8') });
   let username: string;
   try {
     username = os.userInfo().username;
@@ -96,7 +96,7 @@ async function serve(options: { connect: boolean }): Promise<void> {
     env: process.env,
     cwd: process.cwd(),
     pid: process.pid,
-    sessionKey: sessionKeyFrom(process.env),
+    sessionKey: clientName => sessionKeyFrom(process.env, clientName),
     readInstances: options.connect ? () => readLiveInstances() : () => [],
     ancestors: options.connect ? () => ancestorPids() : async () => [],
     log,

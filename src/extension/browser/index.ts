@@ -1,5 +1,6 @@
 import { scopedLogger } from '../core/log';
 import type { BridgeServices } from '../core/services';
+import type { ToolRegistry } from '../core/tools';
 import { CertificateGate } from './certificates';
 import { registerBrowserCommands } from './commands';
 import { CredentialPrompts } from './credentials';
@@ -15,6 +16,10 @@ import { activateProfiles } from './profiles';
 export function activateBrowser(services: BridgeServices): void {
   const browser = new BrowserServiceImpl(services);
   services.browser = browser;
+  // Without the proposed browser API every browser tool can only fail, and tool definitions cost every
+  // conversation, so they are not listed (the instructions say how to enable it). `available` is read
+  // once: enabling the API takes a restart of VS Code, which activates the extension again.
+  const toolServices = browser.available ? services : withoutTools(services);
   const certificates = new CertificateGate(services);
   browser.certificateRefusal = url => certificates.refusalFor(url);
   // One owner of CDP `Fetch` per tab, serving request mocking and login prompts (in that order).
@@ -30,13 +35,20 @@ export function activateBrowser(services: BridgeServices): void {
     routes,
     credentials,
     interception,
-    services.tools.register(routes.tools()),
+    toolServices.tools.register(routes.tools()),
   );
-  const page = registerPageTools(services, browser, { interception });
-  registerTabTools(services, browser, page);
+  const page = registerPageTools(toolServices, browser, { interception });
+  registerTabTools(toolServices, browser, page);
   registerBrowserCommands(services, browser);
   // Handing a tab to the user (sign-ins, captchas, decisions): handoff.ts.
   const handoffs = new BrowserHandoffs(services, browser, page);
-  services.context.subscriptions.push(handoffs, services.tools.register(handoffs.tools()));
+  services.context.subscriptions.push(handoffs, toolServices.tools.register(handoffs.tools()));
+  // Registers nothing at all without the browser.
   services.context.subscriptions.push(...activateProfiles(services, browser));
+}
+
+/** `services` whose tool registry lists nothing registered through it; everything else is `services` itself. */
+function withoutTools(services: BridgeServices): BridgeServices {
+  const tools = Object.assign(Object.create(services.tools) as ToolRegistry, { register: () => ({ dispose() {} }) });
+  return new Proxy(services, { get: (target, key, receiver) => (key === 'tools' ? tools : Reflect.get(target, key, receiver)) });
 }

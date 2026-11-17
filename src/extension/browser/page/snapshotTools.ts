@@ -9,6 +9,7 @@ import { clip } from './ringBuffer';
 import { elementArgs, tabArg } from './schema';
 import { fullPageHeight, screenshotScale } from './screenshotMath';
 import { TOGGLE_BRIDGE_UI } from './scripts';
+import { compareDelivered, describeDelta, lastDelivered, setDelivered, type Delivered } from './snapshotDelta';
 import { buildTree, findInTree, renderText, renderTree, snapshotLines, textWindow, type AXNode, type RefNode, type Tree } from './snapshot';
 import { elementBox, resolveTarget, scrollIntoView, viewport, type ElementTarget } from './targets';
 
@@ -166,6 +167,14 @@ export function readResult(call: PageCall, capture: PageCapture, root: ElementTa
   }
 
   const output = renderTree(tree, options);
+  // A whole-page snapshot from the top: remembered as what this session was shown, and when the
+  // agent did not ask for it in full (offset 0), answered with what changed since it was last shown.
+  if (!root && output.shown && (args.offset ?? 0) === 0) {
+    const next: Delivered = { loaderId: capture.loaderId, url, maxChars, urls: Boolean(args.urls), ...output.shown };
+    const delta = args.offset === undefined ? compareDelivered(lastDelivered(call.refs), next) : ({ kind: 'full' } as const);
+    setDelivered(call.refs, next);
+    if (delta.kind !== 'full') return `${head}${describeDelta(delta, call.tab.id, next)}`;
+  }
   const body = output.text || (root ? '(this element has no accessible content)' : '(the page is empty)');
   const urlsNote = output.urlsOmitted ? '\n[Link targets are left out; pass urls: true to see them.]' : '';
   return `${head}${scope}- Snapshot of ${call.tab.id}:\n\`\`\`yaml\n${body}\n\`\`\`${urlsNote}`;
@@ -177,13 +186,13 @@ export function snapshotTools(env: PageEnv): ToolDefinition<any>[] {
       name: 'browser_snapshot',
       title: 'Read page',
       description:
-        'Reads the page as an accessibility snapshot with refs (e.g. [ref=e12]) for the action tools, including shadow DOM and iframes (cross-origin too).',
+        'Reads the page as an accessibility snapshot with refs (e.g. [ref=e12]) for the action tools, including shadow DOM and iframes (cross-origin too). Reading a page again returns only what changed since.',
       input: {
         mode: z.enum(['snapshot', 'text']).optional().describe('text: main content as markdown, no refs; cheapest to read.'),
         find: z.string().min(1).optional().describe('Only elements whose text contains this, and where they are.'),
         ...elementArgs,
         urls: z.boolean().optional().describe('Show all link targets.'),
-        offset: z.number().int().min(0).optional().describe('Continue a cut result from this character.'),
+        offset: z.number().int().min(0).optional().describe('Continue a cut result from this character. 0: the whole snapshot again, even if unchanged.'),
         maxChars: z.number().int().min(2000).max(MAX_SNAPSHOT_CHARS).optional().describe(`Default ${DEFAULT_SNAPSHOT_CHARS}.`),
         tab: tabArg,
       },

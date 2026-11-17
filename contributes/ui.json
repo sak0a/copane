@@ -30,12 +30,12 @@
   "viewsWelcome": [
     {
       "view": "copane.sessions",
-      "contents": "No agent is connected to this window yet.\nStart Claude Code or Codex in this window, in its panel or in a terminal. Each session appears here with the browser tabs and terminals it uses, and you can pause it or step in at any time."
+      "contents": "No agent is connected to this window yet.\nStart Claude Code, Codex or GitHub Copilot in this window, in its chat or in a terminal. Each session appears here with the browser tabs and terminals it uses, and you can pause it or step in at any time."
     },
     {
       "view": "copane.sessions",
       "when": "!copane.setup.agentsReady",
-      "contents": "[Get Started](command:copane.openWalkthrough)\nTwo one-time steps: let agents use the integrated browser, and turn Copane on for Claude Code and Codex."
+      "contents": "[Get Started](command:copane.openWalkthrough)\nTwo one-time steps: let agents use the integrated browser, and turn Copane on for Claude Code, Codex and GitHub Copilot."
     },
     {
       "view": "copane.sessions",

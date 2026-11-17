@@ -8,8 +8,6 @@ import { debugProfileTools } from './debug';
 import { ProfileManager } from './manager';
 import { profileTools } from './tools';
 
-export { PRECEDENCE } from './tools';
-
 export function activateProfiles(services: BridgeServices, browser: BrowserServiceImpl): vscode.Disposable[] {
   if (!browser.available) return [];
   const profiles = new ProfileManager(services, browser);

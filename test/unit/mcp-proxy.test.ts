@@ -27,12 +27,13 @@ let instances: InstanceInfo[];
 const windows: FakeWindow[] = [];
 const cleanups: Array<() => unknown> = [];
 
-async function openWindow(id: string, folders: string[], options: { startedAt?: number; extraTool?: boolean } = {}): Promise<FakeWindow> {
+async function openWindow(id: string, folders: string[], options: { startedAt?: number; extraTool?: boolean; browserTool?: boolean } = {}): Promise<FakeWindow> {
   const socketPath = process.platform === 'win32' ? `\\\\.\\pipe\\ab-proxy-${process.pid}-${id}-${Date.now()}` : path.join(dir, `${id}.sock`);
   const sessions = new SessionManager({ graceMs: () => 0 });
   const tools = new ToolRegistry();
   tools.register([defineTool({ name: 'whoami', description: 'x', input: {}, handler: (_a, ctx) => `${ctx.session.label} in ${id}` })]);
   if (options.extraTool) tools.register([defineTool({ name: 'extra', description: 'x', input: {}, handler: () => 'extra' })]);
+  if (options.browserTool) tools.register([defineTool({ name: 'browser_open', description: 'x', input: {}, handler: () => 'opened' })]);
   const windowInfo = { instanceId: id, workspaceName: path.basename(folders[0] ?? 'none'), workspaceFolders: folders, remoteName: null, platform: process.platform };
   const server = new BridgeServer({
     socketPath,
@@ -74,19 +75,21 @@ async function openWindow(id: string, folders: string[], options: { startedAt?: 
   return win;
 }
 
-async function agent(options: { cwd?: string; env?: NodeJS.ProcessEnv; ancestors?: number[]; initWaitMs?: number } = {}) {
+async function agent(
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; ancestors?: number[]; initWaitMs?: number; clientName?: string; sessionKey?: string | ((clientName: string) => string) } = {},
+) {
   const bridge = new BridgeClient({
     env: options.env ?? {},
     cwd: options.cwd ?? '/work/a',
     pid: 4242,
-    sessionKey: 'key-1',
+    sessionKey: options.sessionKey ?? 'key-1',
     readInstances: () => instances,
     ancestors: async () => options.ancestors ?? [],
     log: m => process.env.DBG && console.error(m),
     timing: { pollMs: 20, backgroundMs: 40, graceMs: 1500, callWaitAfterLossMs: 4000, callWaitMs: 150 },
   });
   const server = createProxyServer(bridge, { version: '0.0.0', initWaitMs: options.initWaitMs ?? 300 });
-  const client = new Client({ name: 'claude-code', version: '9.9.9' });
+  const client = new Client({ name: options.clientName ?? 'claude-code', version: '9.9.9' });
   let listChanged = 0;
   client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
     listChanged++;
@@ -149,6 +152,17 @@ describe('MCP server', () => {
     await until(() => listChanged() > 0, 'tools/list_changed');
     expect(await toolNames()).toEqual(['whoami', 'window_select', 'window_status']);
     expect((await call('whoami')).text).toBe('Claude 1 in 100');
+  });
+
+  it('window_status says how to enable the browser when the window lists no browser tools', async () => {
+    await openWindow('100', ['/work/a']);
+    const without = await agent();
+    expect((await without.call('window_status')).text).toMatch(/no browser_\* tools\. Ask the user to run the command "Copane: Enable Integrated Browser"/);
+    await openWindow('200', ['/work/b'], { browserTool: true });
+    const withBrowser = await agent({ cwd: '/work/b' });
+    const status = (await withBrowser.call('window_status')).text;
+    expect(status).toMatch(/Connected to VS Code window 200/);
+    expect(status).not.toMatch(/Enable Integrated Browser/);
   });
 
   it('waits for a window that is still starting at initialize', async () => {
@@ -284,7 +298,47 @@ describe('session key and instructions', () => {
   it('uses the explicit key, then the Claude Code session id, then a random one', () => {
     expect(sessionKeyFrom({ COPANE_SESSION: 'a', CLAUDE_CODE_SESSION_ID: 'b' })).toBe('a');
     expect(sessionKeyFrom({ CLAUDE_CODE_SESSION_ID: 'b' })).toBe('b');
+    expect(sessionKeyFrom({ COPILOT_AGENT_SESSION_ID: 'c' })).toBe('c');
     expect(sessionKeyFrom({})).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("with the client known, uses only that agent's own session id, never one inherited from another agent", () => {
+    const both = { CLAUDE_CODE_SESSION_ID: 'claude-id', COPILOT_AGENT_SESSION_ID: 'copilot-id' };
+    expect(sessionKeyFrom(both, 'claude-code')).toBe('claude-id');
+    expect(sessionKeyFrom(both, 'copilot-cli')).toBe('copilot-id');
+    expect(sessionKeyFrom({ ...both, COPANE_SESSION: 'x' }, 'copilot-cli')).toBe('x');
+    // A copilot started in a Claude Code shell, and a Claude Code started from Copilot.
+    expect(sessionKeyFrom({ CLAUDE_CODE_SESSION_ID: 'claude-id' }, 'copilot-cli')).toMatch(/^[0-9a-f-]{36}$/);
+    expect(sessionKeyFrom({ COPILOT_AGENT_SESSION_ID: 'copilot-id' }, 'claude-code')).toMatch(/^[0-9a-f-]{36}$/);
+    // Agents without a session id of their own do not take another agent's.
+    expect(sessionKeyFrom(both, 'codex-mcp-client')).toMatch(/^[0-9a-f-]{36}$/);
+    expect(sessionKeyFrom(both, 'Visual Studio Code')).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("chooses the key by the connected client's name", async () => {
+    const win = await openWindow('100', ['/work/a']);
+    const env = { CLAUDE_CODE_SESSION_ID: 'claude-id', COPILOT_AGENT_SESSION_ID: 'copilot-id' };
+    const copilot = await agent({ env, clientName: 'copilot-cli', sessionKey: name => sessionKeyFrom(env, name) });
+    expect((await copilot.call('whoami')).text).toContain('Copilot 1 in 100');
+    expect(copilot.bridge.sessionKey).toBe('copilot-id');
+    const claude = await agent({ env, clientName: 'claude-code', sessionKey: name => sessionKeyFrom(env, name) });
+    expect((await claude.call('whoami')).text).toBe('Claude 1 in 100');
+    expect(win.sessions.list().map(s => [s.id, s.label])).toEqual([
+      ['copilot-id', 'Copilot 1'],
+      ['claude-id', 'Claude 1'],
+    ]);
+  });
+
+  it('gives a Copilot session the window instructions once, with its first tool result', async () => {
+    await openWindow('100', ['/work/a']);
+    const copilot = await agent({ clientName: 'copilot-cli' });
+    const first = (await copilot.call('whoami')).text;
+    expect(first.startsWith('Copilot 1 in 100\n')).toBe(true);
+    expect(first).toContain("Copane's usage notes (shown once");
+    expect(first).toContain('Window instructions of 100.');
+    expect((await copilot.call('whoami')).text).toBe('Copilot 1 in 100');
+    const claude = await agent({ clientName: 'claude-code', sessionKey: 'key-2' });
+    expect((await claude.call('whoami')).text).toBe('Claude 1 in 100');
   });
 
   it('keeps the instructions under the length Claude Code shows', () => {

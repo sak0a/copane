@@ -110,6 +110,7 @@ if (running !== 'true') {
     '-e', `COPANE_HOME=${base}/home`,
     '-e', `CLAUDE_CONFIG_DIR=${base}/claude`,
     '-e', `CODEX_HOME=${base}/codex`,
+    '-e', `COPILOT_HOME=${base}/copilot`,
     '-e', `COPANE_UI_HOME=${uiHome}`,
     image, 'sleep', 'infinity',
   );

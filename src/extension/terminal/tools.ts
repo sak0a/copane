@@ -118,12 +118,33 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
     return formatClip(clipLines(lines, { maxChars }), from => readCall(t, from), { startLost });
   }
 
-  function newOutputBlock(t: Tracked, session: AgentSession, maxChars: number | undefined): string {
+  function newOutputBlock(t: Tracked, session: AgentSession, maxChars: number | undefined): string | undefined {
     const { lines, startLost } = manager.readNew(session, t);
-    if (lines.length === 0) return '(no new output)';
+    if (lines.length === 0) return undefined;
     // Cut new output is still part of the command's output, which can be paged from its start.
     const more = t.current ?? t.last ? readCall(t, 1) : `terminal_read {"terminal":"${t.id}","what":"screen"}`;
     return formatClip(clipLines(lines, { maxChars }), () => more, { startLost });
+  }
+
+  /** The visible screen (bounded by rows x cols), with what it is. */
+  function screenBlock(t: Tracked): string {
+    const screen = t.mirror.screen();
+    const lines = screen.lines.map(l => (l.length > 400 ? `${l.slice(0, 400)}…` : l));
+    return [
+      `Screen of ${t.id} "${t.name}" (${screen.cols}x${screen.rows}${screen.alternate ? ', full-screen program' : ''}; cursor at row ${screen.cursor.row + 1}, column ${screen.cursor.col + 1}):`,
+      lines.length ? lines.join('\n') : '(empty)',
+    ].join('\n');
+  }
+
+  /**
+   * New output since the session's last look, under `heading`. While a full-screen program shows,
+   * its screen instead (the program draws there, not into the output), after any lines printed
+   * before it started that the session has not seen.
+   */
+  function newOutputParts(t: Tracked, session: AgentSession, heading: string, maxChars?: number): string[] {
+    const block = newOutputBlock(t, session, maxChars);
+    if (!t.mirror.alternate) return [heading, block ?? '(no new output)'];
+    return [...(block ? [heading, block] : []), screenBlock(t)];
   }
 
   /** A finished execution this session has not been told about yet. */
@@ -179,6 +200,7 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
           manager.activity(t).summary,
           'Output so far:',
           block,
+          t.mirror.alternate ? screenBlock(t) : undefined,
           `Next: terminal_wait {"terminal":"${t.id}"} (until it ends, or for_text), terminal_read for new output, terminal_send to type, terminal_interrupt to stop it.`,
         ], ctx.session);
       },
@@ -201,11 +223,8 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
         await t.mirror.flush();
         const what = args.what ?? 'new';
         if (what === 'screen') {
-          const screen = t.mirror.screen();
-          const lines = screen.lines.map(l => (l.length > 400 ? `${l.slice(0, 400)}…` : l));
           return withNotes(t, [
-            `Screen of ${t.id} "${t.name}" (${screen.cols}x${screen.rows}${screen.alternate ? ', full-screen program' : ''}; cursor at row ${screen.cursor.row + 1}, column ${screen.cursor.col + 1}):`,
-            lines.length ? lines.join('\n') : '(empty)',
+            screenBlock(t),
             statusOf(t),
             manager.dimensionsAvailable ? undefined : 'Note: the real terminal size is not available (proposed API terminalDimensions not enabled), so a full-screen program may be laid out differently here.',
           ], ctx.session);
@@ -218,7 +237,7 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
           manager.markRead(ctx.session, t, execution);
           return withNotes(t, [`Output of \`${shortCommand(execution.commandLine)}\` in ${t.id}:`, formatClip(clip, from => readCall(t, from), { startLost }), statusOf(t)], ctx.session);
         }
-        return withNotes(t, [`New output in ${t.id}:`, newOutputBlock(t, ctx.session, args.max_chars), statusOf(t)], ctx.session);
+        return withNotes(t, [...newOutputParts(t, ctx.session, `New output in ${t.id}:`, args.max_chars), statusOf(t)], ctx.session);
       },
     }),
 
@@ -243,13 +262,15 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
         if (!pattern && !execution) {
           const ended = unreportedEnd(t, ctx.session);
           const headline = ended ? `Nothing is running in ${t.id} any more: ${finishedLine(t, ended, ctx.session)}` : `Nothing is running in ${t.id}.`;
-          return withNotes(t, [headline, 'New output:', newOutputBlock(t, ctx.session, args.max_chars), statusOf(t)], ctx.session);
+          return withNotes(t, [headline, ...newOutputParts(t, ctx.session, 'New output:', args.max_chars), statusOf(t)], ctx.session);
         }
         const mark = t.marks.get(ctx.session.id);
         let found = false;
         for (;;) {
           await t.mirror.flush();
-          if (pattern && pattern.test(t.mirror.linesSince(mark).lines.join('\n'))) {
+          // A full-screen program draws on its own screen, not into the output: look there too.
+          const screen = t.mirror.alternate ? `\n${t.mirror.screen().lines.join('\n')}` : '';
+          if (pattern && pattern.test(t.mirror.linesSince(mark).lines.join('\n') + screen)) {
             found = true;
             break;
           }
@@ -265,7 +286,7 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
         else if (!pattern && execution?.ended) headline = finishedLine(t, execution, ctx.session);
         else if (pattern) headline = `"${args.for_text}" did not appear within ${took}.${t.current ? '' : ' (Nothing is running in the terminal.)'}`;
         else headline = `Still running after waiting ${took}.`;
-        return withNotes(t, [headline, 'New output:', newOutputBlock(t, ctx.session, args.max_chars), statusOf(t)], ctx.session);
+        return withNotes(t, [headline, ...newOutputParts(t, ctx.session, 'New output:', args.max_chars), statusOf(t)], ctx.session);
       },
     }),
 
@@ -279,7 +300,6 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
         text: z.string().optional(),
         keys: z.array(z.string()).optional().describe('Pressed after the text, e.g. ["Down", "Enter"], ["Ctrl+C"], ["Escape"].'),
         wait_seconds: z.number().min(0).max(30).optional().describe('Longest wait for output to settle, default 2.'),
-        max_chars: maxCharsArg,
       },
       handler: async (args, ctx) => {
         const t = await existing(ctx, args.terminal);
@@ -304,7 +324,7 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
           if (gotOutput && Date.now() - t.mirror.lastWriteAt >= 500) break;
         }
         await t.mirror.flush();
-        return withNotes(t, [`Sent ${describeInput(args.text, args.keys)} to ${t.id}.`, 'Output since your last look:', newOutputBlock(t, ctx.session, args.max_chars), statusOf(t)], ctx.session);
+        return withNotes(t, [`Sent ${describeInput(args.text, args.keys)} to ${t.id}.`, ...newOutputParts(t, ctx.session, 'Output since your last look:'), statusOf(t)], ctx.session);
       },
     }),
 
@@ -312,7 +332,7 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
       name: 'terminal_interrupt',
       title: 'Interrupt a terminal command',
       description: 'Presses Ctrl+C in a terminal to stop its command, waits up to 5 s for it to end, and returns the last output.',
-      input: { terminal: terminalArg, max_chars: maxCharsArg },
+      input: { terminal: terminalArg },
       handler: async (args, ctx) => {
         const t = await existing(ctx, args.terminal);
         const execution = t.current;
@@ -324,7 +344,7 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
         if (!execution) headline = `Pressed Ctrl+C in ${t.id}; no command was running.`;
         else if (execution.ended) headline = `Interrupted. ${finishedLine(t, execution, ctx.session)}`;
         else headline = `Pressed Ctrl+C, but \`${shortCommand(execution.commandLine)}\` is still running after 5 s. Try again, send keys ["Ctrl+\\\\"], or close the terminal (terminal_close).`;
-        return withNotes(t, [headline, 'Output since your last look:', newOutputBlock(t, ctx.session, args.max_chars), statusOf(t)], ctx.session);
+        return withNotes(t, [headline, ...newOutputParts(t, ctx.session, 'Output since your last look:'), statusOf(t)], ctx.session);
       },
     }),
 
@@ -339,7 +359,6 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
         command: z.string().optional(),
         terminal: terminalArg,
         timeout_seconds: z.number().min(10).max(3600).optional().describe('Default 600.'),
-        max_chars: maxCharsArg,
       },
       handler: async (args, ctx) => {
         let t: Tracked;
@@ -363,13 +382,14 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
         await sleep(150);
         await t.mirror.flush();
         const { lines, startLost } = manager.linesSince(t, since);
-        const block = formatClip(clipLines(lines, { maxChars: args.max_chars }), from => readCall(t, from), { startLost });
+        const block = formatClip(clipLines(lines), from => readCall(t, from), { startLost });
         manager.markRead(ctx.session, t, execution?.ended ? execution : undefined);
         return withNotes(t, [
           note,
           describeOutcome(outcome, t, execution, waitedMs),
           `Output in ${t.id} since the request (only what the terminal displayed; input at hidden prompts is never visible to you):`,
           block,
+          t.mirror.alternate ? screenBlock(t) : undefined,
           statusOf(t),
         ], ctx.session);
       },

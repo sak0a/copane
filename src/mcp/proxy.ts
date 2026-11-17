@@ -56,7 +56,7 @@ export function buildInstructions(bridge: BridgeClient): string {
   if (!connection) {
     lines.push('The browser and terminal tools appear once this session is connected; no restart is needed.');
   }
-  lines.push('window_status shows which VS Code window this session uses and lists the others; window_select switches to another.');
+  lines.push('Wrong window? Call window_status, then window_select.');
   const text = lines.join('\n');
   return text.length > MAX_INSTRUCTIONS ? `${text.slice(0, MAX_INSTRUCTIONS - 1)}…` : text;
 }
@@ -100,7 +100,7 @@ export function createProxyServer(bridge: BridgeClient, options: ProxyOptions): 
     const args = (request.params.arguments ?? {}) as Record<string, unknown>;
     if (name === 'window_status') {
       await bridge.ensure(0);
-      return text(bridge.statusText());
+      return text(await statusText(bridge));
     }
     if (name === 'window_select') {
       if (typeof args.window !== 'string' || !args.window.trim()) return text('Pass `window`: a window id from window_status.', true);
@@ -112,6 +112,21 @@ export function createProxyServer(bridge: BridgeClient, options: ProxyOptions): 
 
   return server;
 }
+
+/**
+ * `window_status`: the connection, and why there are no browser_* tools when the window lists none
+ * (the extension does not list them while VS Code's integrated browser is not enabled for it).
+ */
+async function statusText(bridge: BridgeClient): Promise<string> {
+  const status = bridge.statusText();
+  if (!bridge.current) return status;
+  const tools = await bridge.listTools();
+  if (tools.length === 0 || tools.some(t => t.name.startsWith('browser_'))) return status;
+  return `${status}\n${BROWSER_NOT_ENABLED}`;
+}
+
+const BROWSER_NOT_ENABLED =
+  'The integrated browser is not enabled in this VS Code, so there are no browser_* tools. Ask the user to run the command "Copane: Enable Integrated Browser", then quit and start VS Code again (reloading the window is not enough).';
 
 function text(value: string, isError = false): CallToolResult {
   return { content: [{ type: 'text', text: value }], ...(isError ? { isError: true } : {}) };

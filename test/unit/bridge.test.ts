@@ -5,10 +5,11 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { BridgeServer } from '../../src/extension/core/bridgeServer';
+import { BridgeServer, dropsServerInstructions, USAGE_NOTES_HEADING, withUsageNotes } from '../../src/extension/core/bridgeServer';
+import { ToolError } from '../../src/extension/core/errors';
 import { nullLogger } from '../../src/extension/core/log';
-import { SessionManager } from '../../src/extension/core/sessions';
-import { defineTool, ToolRegistry } from '../../src/extension/core/tools';
+import { SessionManager, type SessionClient } from '../../src/extension/core/sessions';
+import { defineTool, image, text, ToolRegistry } from '../../src/extension/core/tools';
 import { RpcError, RpcPeer } from '../../src/shared/jsonrpc';
 import { ErrorCodes, Methods, PROTOCOL_VERSION, type CallToolResult, type HelloParams, type HelloResult } from '../../src/shared/protocol';
 
@@ -153,5 +154,78 @@ describe('RpcPeer', () => {
   it('answers unknown methods with an error instead of hanging', async () => {
     const peer = await connect();
     await expect(peer.request('nope')).rejects.toMatchObject({ code: ErrorCodes.methodNotFound });
+  });
+});
+
+describe('usage notes for clients that drop server instructions', () => {
+  const copilotHello = (key: string): HelloParams => ({ ...hello(key), client: { name: 'copilot-cli', version: '1.0.105', kind: 'copilot' } });
+  const call = (peer: RpcPeer, name: string) => peer.request<CallToolResult>(Methods.callTool, { name });
+  const texts = (r: CallToolResult) => r.content.filter(c => c.type === 'text').map(c => (c as { text: string }).text);
+
+  async function restart(needsUsageNotes?: (client: SessionClient) => boolean): Promise<void> {
+    server.dispose();
+    sessions.dispose();
+    sessions = new SessionManager({ graceMs: () => 60_000 });
+    if (!tools.list().some(t => t.name === 'shot')) tools.register([
+      defineTool({ name: 'shot', description: 'x', input: {}, handler: () => [text('a picture'), image('AAAA')] }),
+      defineTool({
+        name: 'fail',
+        description: 'x',
+        input: {},
+        handler: () => {
+          throw new ToolError('not_found', 'nope');
+        },
+      }),
+    ]);
+    server = new BridgeServer({ socketPath, token: 'secret', extensionVersion: '0.0.0', window: windowInfo, sessions, tools, log: nullLogger, instructions: () => 'hi', ...(needsUsageNotes ? { needsUsageNotes } : {}) });
+    await server.listen();
+  }
+
+  it('appends them once, to the first successful result, after its other parts', async () => {
+    await restart();
+    const peer = await connect();
+    await peer.request(Methods.hello, copilotHello('cop'));
+    const failed = await call(peer, 'fail');
+    expect(failed).toEqual({ content: [{ type: 'text', text: 'nope' }], isError: true });
+    const first = await call(peer, 'shot');
+    expect(first.content).toEqual([
+      { type: 'text', text: 'a picture' },
+      { type: 'image', data: 'AAAA', mimeType: 'image/png' },
+      { type: 'text', text: `${USAGE_NOTES_HEADING}\nhi` },
+    ]);
+    expect(first.isError).toBeUndefined();
+    expect(texts(await call(peer, 'shot'))).toEqual(['a picture']);
+  });
+
+  it('does not repeat them when the same session reconnects', async () => {
+    await restart();
+    const before = await connect();
+    await before.request(Methods.hello, copilotHello('cop'));
+    expect(texts(await call(before, 'whoami'))).toEqual(['Copilot 1', `${USAGE_NOTES_HEADING}\nhi`]);
+    const gone = closed(before);
+    before.close();
+    await gone;
+    const after = await connect();
+    await after.request(Methods.hello, copilotHello('cop'));
+    expect(texts(await call(after, 'whoami'))).toEqual(['Copilot 1']);
+  });
+
+  it('leaves other clients unchanged, and can be turned off', async () => {
+    await restart();
+    const claude = await connect();
+    await claude.request(Methods.hello, hello('cl'));
+    expect(await call(claude, 'shot')).toEqual({ content: [{ type: 'text', text: 'a picture' }, { type: 'image', data: 'AAAA', mimeType: 'image/png' }] });
+    await restart(() => false);
+    const copilot = await connect();
+    await copilot.request(Methods.hello, copilotHello('cop'));
+    expect(texts(await call(copilot, 'whoami'))).toEqual(['Copilot 1']);
+  });
+
+  it('applies to Copilot only, by client kind', () => {
+    expect(dropsServerInstructions({ name: 'copilot-cli', kind: 'copilot' })).toBe(true);
+    for (const kind of ['claude-code', 'codex', 'other'] as const) expect(dropsServerInstructions({ name: 'x', kind })).toBe(false);
+    const result: CallToolResult = { content: [{ type: 'text', text: 'r' }] };
+    expect(withUsageNotes(result, 'i')).toEqual({ content: [{ type: 'text', text: 'r' }, { type: 'text', text: `${USAGE_NOTES_HEADING}\ni` }] });
+    expect(result.content).toHaveLength(1);
   });
 });

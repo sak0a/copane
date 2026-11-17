@@ -14,12 +14,13 @@ session is using what, and can take over at any moment.
                                         thin proxy, no tool logic)                         browser / terminal modules)
 
 - **MCP server** (`src/mcp/`): spawned by the agent, one per agent session. Finds its window
-  (`discovery.ts`: terminal env var → extension-host ancestor → cwd inside a workspace folder → only
-  window), connects to that window's socket, sends `hello`, then forwards `tools/list` and `tools/call`.
+  (`discovery.ts`: terminal env var → extension-host ancestor → cwd inside a workspace folder → cwd in
+  a git worktree whose main checkout is in a workspace folder → only window), connects to that window's socket, sends `hello`, then forwards `tools/list` and `tools/call`.
   Registered with agents under the name `copane`, so tools appear as `mcp__copane__browser_click`.
 - **Bridge server** (`core/bridgeServer.ts`): one per window, in the extension host. Authenticates by a
   token from the instance file (`<bridge home>/instances/<pid>.json`, mode 0600). One connection = one
-  agent session.
+  agent session. A client known not to give its model the server's MCP `instructions` (Copilot CLI,
+  `dropsServerInstructions`) gets them once per session, appended to its first successful tool result.
 - **Wire protocol** (`src/shared/protocol.ts`): JSON-RPC, one object per line. Tool definitions live only
   in the extension, so the MCP server never needs to know them.
 - **Sessions** (`core/sessions.ts`): each connection presents a `sessionKey`; reconnecting with the same
@@ -66,8 +67,10 @@ argv.json editor. Not verified for real: Windows paths (`/c:/Users/...`), WSL it
 ## Browser rules
 
 - Built on the proposed `browser` API (`src/typings/vscode.proposed.browser.d.ts`) plus CDP through
-  `BrowserTab.startCDPSession()`. Without the proposal enabled, `browser.available` is false, browser
-  tools return a clear "not enabled" error and the UI offers to enable it.
+  `BrowserTab.startCDPSession()`. Without the proposal enabled, `browser.available` is false (read
+  once at activation: enabling takes a VS Code restart), no browser_* tools are listed (they could
+  only fail, and definitions cost every conversation), the instructions and `window_status` say how to
+  enable it, and the UI offers to.
 - Every tab of the window is listed, whoever opened it. A tab is `origin: agent` (opened by a session)
   or `origin: user`.
 - **Consent**: a session may use its own tabs and tabs of sessions that have ended freely. Reading or
@@ -195,10 +198,28 @@ argv.json editor. Not verified for real: Windows paths (`/c:/Users/...`), WSL it
     src/extension/terminal/ TerminalService, terminal_* tools
     src/extension/remote/  RemoteService: the user's machine as seen from a remote window
     src/extension/ui/      Sessions view, Agent Tabs panel view, status bar, user commands, browser-API setup
-    src/extension/registration/  registering the MCP server with Claude Code and Codex
+    src/extension/registration/  registering the MCP server with Claude Code, Codex and GitHub Copilot
     contributes/*.json     per-module manifest fragments, merged into package.json by the build
     scripts/               dev host and MCP test client
     poc/                   the original feasibility probe (reference only)
+
+## Registration
+
+`registration/` registers the MCP server as `copane` with each agent's user configuration, one file
+per agent: `claudeCode.ts` (`~/.claude.json`, through `claude mcp` when found, else a direct edit
+under Claude Code's proper-lockfile lock), `codex.ts` (`~/.codex/config.toml`, text-level TOML edit)
+and `copilot.ts` (`~/.copilot/mcp-config.json` or `$COPILOT_HOME/mcp-config.json`, read by the
+Copilot CLI and by Copilot harness sessions in VS Code). Copilot's file is edited directly as JSONC
+in one atomic read-modify-replace: `copilot mcp add` drops comments, and the CLI's own writer lock
+(`.mcp-writer.lock`, an OS-level lock on an empty file) cannot be taken from Node; Copilot writes the
+file only from its `mcp` commands, and the next check repairs a lost race. Copilot gives local servers
+little more than `PATH`, so the entry passes `COPANE_INSTANCE` and `COPANE_SESSION` as
+`${NAME:-}` references. Its comparison ignores what the user may customise (`tools`, `timeout`,
+`cwd`, the default part of those references) and an update keeps those keys. `index.ts` enumerates
+the agents (detection, settings `copane.registration.<agent>`, the dev-host guard that requires
+`CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `COPILOT_HOME` inside the dev host's folder); `plan.ts` decides
+from plain data what the startup check and Check and Repair do. In a remote window all of this
+happens on the remote side, where the agents run.
 
 ## Tool definitions cost context
 

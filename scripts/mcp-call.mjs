@@ -35,6 +35,7 @@ const home = join(process.platform === 'win32' ? process.env.TEMP : '/tmp', 'cop
 const env = { ...process.env, COPANE_HOME: home };
 delete env.COPANE_INSTANCE;
 delete env.CLAUDE_CODE_SESSION_ID;
+delete env.COPILOT_AGENT_SESSION_ID;
 if (options.session) env.COPANE_SESSION = options.session;
 if (options.instance) env.COPANE_INSTANCE = options.instance;
 

@@ -34,6 +34,31 @@ describe('clipLines', () => {
     expect(clip.text).toMatch(/characters cut/);
   });
 
+  it('collapses runs of 4+ identical lines and 3+ blank lines, with exact counts', () => {
+    const input = ['start', ...Array(10).fill('retrying...'), 'x', 'x', 'x', '', '', '', '', '', 'y', '', '', 'end'];
+    const clip = clipLines(input);
+    expect(clip.text).toBe(['start', 'retrying...', '[repeated 9 more times]', 'x', 'x', 'x', '[5 blank lines]', 'y', '', '', 'end'].join('\n'));
+    expect(clip).toMatchObject({ first: 1, last: input.length, total: input.length, omittedBefore: 0, omittedAfter: 0 });
+  });
+
+  it('keeps original line numbers for paging when runs are collapsed', () => {
+    const input = [...Array.from({ length: 50 }, (_, i) => `a${i + 1}`), ...Array(500).fill('same'), ...Array.from({ length: 50 }, (_, i) => `b${i + 1} ${'-'.repeat(30)}`)];
+    // The whole run is one short entry, so the end of the output fits with it.
+    const tail = clipLines(input, { maxChars: 2500 });
+    expect(tail.last).toBe(600);
+    expect(tail.text).toContain('same\n[repeated 499 more times]\nb1 ');
+    expect(tail.first).toBeLessThanOrEqual(51);
+    expect(tail.omittedBefore).toBe(tail.first - 1);
+    expect(tail.text.startsWith(`a${tail.first}\n`)).toBe(true);
+    // Paging from inside the run starts there and counts what is left of it.
+    const page = clipLines(input, { maxChars: 500, fromLine: 301 });
+    expect(page.first).toBe(301);
+    expect(page.text.startsWith('same\n[repeated 249 more times]\nb1 ')).toBe(true);
+    expect(page.omittedAfter).toBe(600 - page.last);
+    expect(input[page.last - 1]).toBe(page.text.split('\n').at(-1));
+    expect(formatClip(page, from => `read(${from})`)).toMatch(new RegExp(`Continue with read\\(${page.last + 1}\\)`));
+  });
+
   it('says "(no output)" for nothing', () => {
     expect(formatClip(clipLines([]), () => '')).toBe('(no output)');
   });

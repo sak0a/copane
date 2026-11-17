@@ -101,6 +101,7 @@ const MATCH: Record<InstanceMatch, string> = {
   env: 'started in an integrated terminal of this window',
   reconnect: 'reconnected after this window reloaded',
   cwd: 'working directory inside this workspace',
+  worktree: 'working directory in a git worktree of a repository open in this workspace',
   single: 'the only open window',
   explicit: 'chosen by the agent (window_select)',
 };
@@ -229,7 +230,7 @@ export function renderStatus(d: StatusData): string {
   }
 
   line('## Agent sessions in this window');
-  if (d.sessions.length === 0) line('- None connected. Start a new Claude Code session (chat or `claude` in a terminal) after registering; running sessions do not reload their MCP servers.');
+  if (d.sessions.length === 0) line('- None connected. Start a new agent session after registering (a Claude Code or Copilot chat, or `claude`, `codex` or `copilot` in a terminal); running sessions do not reload their MCP servers.');
   for (const s of d.sessions) {
     const how = s.matchedBy ? MATCH[s.matchedBy] : 'unknown';
     line(`- ${s.label}${s.title ? ` · ${s.title}` : ''} — ${s.client}, ${s.connected ? 'connected' : 'disconnected (grace period)'}; found this window: ${how}${s.pid ? `; pid ${s.pid}` : ''}${s.cwd ? `; cwd ${s.cwd}` : ''}`);
@@ -237,7 +238,7 @@ export function renderStatus(d: StatusData): string {
   line();
 
   line('## If an agent does not see the tools');
-  line('1. The agent must be started after registering: start a new Claude Code chat, or restart `claude` / `codex`. In Claude Code, `/mcp` lists the "copane" server and its state.');
+  line('1. The agent must be started after registering: start a new chat, or restart `claude` / `codex` / `copilot`. In Claude Code and the Copilot CLI, `/mcp` lists the "copane" server and its state.');
   line('2. The agent sees `window_status` and `window_select` even when it cannot reach a window; ask it to call `window_status`, which says why.');
   line('3. Several VS Code windows and an agent started outside any of them: the agent asks which window to use (window_select).');
   const t = d.titles ?? DEFAULT_TITLES;

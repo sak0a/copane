@@ -60,7 +60,7 @@ export interface PersistedTerminal {
 
 /** The session label a terminal name starts with: "Claude 2" in "Claude 2", "Claude 2: dev server", "Claude 2 (3)". */
 export function labelPrefix(name: string): string | undefined {
-  return /^((?:Claude|Codex|Agent) \d+)(?=$|: | \(\d+\)$)/.exec(name)?.[1];
+  return /^((?:Claude|Codex|Copilot|Agent) \d+)(?=$|: | \(\d+\)$)/.exec(name)?.[1];
 }
 
 /**

@@ -26,7 +26,7 @@ export const Methods = {
   toolsChanged: 'tools/changed',
 } as const;
 
-export type AgentKind = 'claude-code' | 'codex' | 'other';
+export type AgentKind = 'claude-code' | 'codex' | 'copilot' | 'other';
 
 export interface HelloParams {
   protocolVersion: number;
@@ -56,10 +56,12 @@ export interface HelloParams {
  * - `env`: `COPANE_INSTANCE` from an integrated terminal of the window.
  * - `reconnect`: the window this server was connected to was reloaded; same workspace folders.
  * - `cwd`: the working directory is inside one of the window's workspace folders.
+ * - `worktree`: the working directory is in a git worktree whose main checkout is in one of the
+ *   window's workspace folders (agents often work in a worktree outside every workspace folder).
  * - `single`: the only open window.
  * - `explicit`: the agent chose the window (`window_select`).
  */
-export type InstanceMatch = 'env' | 'ancestor' | 'cwd' | 'single' | 'explicit' | 'reconnect';
+export type InstanceMatch = 'env' | 'ancestor' | 'cwd' | 'worktree' | 'single' | 'explicit' | 'reconnect';
 
 export interface HelloResult {
   protocolVersion: number;

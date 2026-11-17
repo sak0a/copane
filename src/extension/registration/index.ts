@@ -1,5 +1,6 @@
 // Getting from "extension installed" to "the agent has the tools", and keeping it that way:
-// installs the MCP server launcher, registers it with Claude Code and Codex (after asking once),
+// installs the MCP server launcher, registers it with Claude Code, Codex and GitHub Copilot (after
+// asking once),
 // enables the integrated browser API, checks and repairs all of it, and reports its state in one place.
 //
 // Commands: copane.registerAgents (Turn On), copane.unregisterAgents (Turn Off),
@@ -34,6 +35,7 @@ import {
   type RegisteredCommand,
 } from './claudeCode';
 import { codexConfigFile, inspectCodexText, registerCodex, unregisterCodex } from './codex';
+import { copilotConfigFile, copilotHome, copilotSettingsFile, inspectCopilot, registerCopilot, unregisterCopilot } from './copilot';
 import { readTextIfExists, tildify, withFileLock, writeFileAtomic } from './files';
 import { appendHistory, readHistory, recentReAdds, type Trigger } from './history';
 import { installServer, readInstalledManifest, scriptPath, serverSpec, type ServerSpec } from './launcher';
@@ -43,7 +45,7 @@ import { unsupportedBrowserText } from './setup';
 import { renderStatus, type AgentStatus, type CheckResult, type StatusData } from './status';
 import { SetupTracker } from './walkthrough';
 
-type AgentId = 'claude-code' | 'codex';
+type AgentId = 'claude-code' | 'codex' | 'copilot';
 
 /** Machine-wide setup decisions, shared by all windows and VS Code builds using this bridge home. */
 interface SetupState {
@@ -63,7 +65,7 @@ interface SetupState {
 interface Agent {
   id: AgentId;
   name: string;
-  setting: 'claudeCode' | 'codex';
+  setting: 'claudeCode' | 'codex' | 'copilot';
   configFile: string;
   /** Why changes are refused (a development host without throwaway config). */
   blocked: string | undefined;
@@ -252,7 +254,7 @@ class Registration {
 
   /**
    * In a development host every config path must point into the host's throwaway folder
-   * (scripts/dev-host.mjs sets CLAUDE_CONFIG_DIR, CODEX_HOME and COPANE_ARGV_JSON there), so a
+   * (scripts/dev-host.mjs sets CLAUDE_CONFIG_DIR, CODEX_HOME, COPILOT_HOME and COPANE_ARGV_JSON there), so a
    * dev host can never change the real configuration of the machine it runs on.
    */
   private guard(file: string, variable: string): string | undefined {
@@ -274,6 +276,9 @@ class Registration {
     const located = () => locateClaudeCli(this.env, this.home, process.platform, bundled);
     const cli = () => located().cli;
     const codexFile = codexConfigFile(this.env, this.home);
+    const copilotDir = copilotHome(this.env, this.home);
+    const copilotFile = copilotConfigFile(this.env, this.home);
+    const copilotSettings = copilotSettingsFile(this.env, this.home);
     const spec = () => this.spec;
     return [
       {
@@ -328,6 +333,31 @@ class Registration {
         },
         register: replaceForeign => registerCodex({ configFile: codexFile }, spec(), { replaceForeign }),
         unregister: () => unregisterCodex({ configFile: codexFile }, spec()),
+      },
+      {
+        id: 'copilot',
+        name: 'GitHub Copilot',
+        setting: 'copilot',
+        configFile: copilotFile,
+        blocked: this.guard(copilotFile, 'COPILOT_HOME'),
+        detect: () => {
+          if (fs.existsSync(copilotDir)) return { detected: true, by: `config folder ${tildify(copilotDir, this.home)}` };
+          const found = (process.platform === 'win32' ? ['copilot.exe', 'copilot.cmd'] : ['copilot']).map(exe => findOnPath(this.env, exe)).find(Boolean);
+          if (found) return { detected: true, by: `copilot at ${found}` };
+          if (vscode.extensions.getExtension('github.copilot-chat')) return { detected: true, by: 'GitHub Copilot Chat extension' };
+          return { detected: false };
+        },
+        inspect: () => {
+          const result = inspectCopilot(copilotFile, spec(), copilotSettings);
+          const problems = result.disabled ? ['Copilot has the "copane" server turned off: run `copilot mcp enable copane`.'] : [];
+          const notes = [
+            'Edits the file directly, in one atomic step; comments, other servers and your own "tools" filter and "timeout" stay. Covers the Copilot CLI and Copilot chat in VS Code (Copilot harness).',
+            'The Copilot CLI shows Copane\'s instructions to the model only when started with --allow-all-mcp-server-instructions.',
+          ];
+          return { state: result.state, notes, problems };
+        },
+        register: replaceForeign => registerCopilot({ configFile: copilotFile }, spec(), { replaceForeign }),
+        unregister: () => unregisterCopilot({ configFile: copilotFile }, spec()),
       },
     ];
   }
@@ -510,7 +540,7 @@ class Registration {
       }
     }
     try {
-      const names = agents.map(a => a.name).join(' and ');
+      const names = joinNames(agents.map(a => a.name));
       const files = agents.map(a => tildify(a.configFile, this.home)).join(', ');
       const answer = await this.services.prompts.ask({
         message: `${this.titles.product}: let ${names} use this VS Code's browser tabs and terminals? This adds an MCP server named "copane" to ${files}.`,
@@ -710,7 +740,7 @@ class Registration {
     const anyRegistered = results.some(r => r.outcome.kind === 'changed' || r.outcome.kind === 'unchanged');
     const none = results.every(r => r.outcome.kind === 'skipped');
     const message = none
-      ? `${this.titles.product}: neither Claude Code nor Codex was found. Install one, then run "${this.titles.turnOn}".`
+      ? `${this.titles.product}: none of Claude Code, Codex and GitHub Copilot was found. Install one, then run "${this.titles.turnOn}".`
       : `${this.titles.product}: ${parts.join('; ')}.${anyRegistered ? ' New agent sessions get the tools; restart sessions that are already running.' : ''}`;
     void this.services.prompts.ask({ message, choices: ['Show Status'] }).then(choice => choice && vscode.commands.executeCommand('copane.showStatus'));
   }
@@ -948,7 +978,7 @@ class Registration {
         appHost: vscode.env.appHost,
         uiKind: vscode.env.uiKind === vscode.UIKind.Web ? 'web' : 'desktop',
         shell: vscode.env.shell,
-        env: Object.fromEntries(['COPANE_HOME', 'CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'ELECTRON_RUN_AS_NODE'].map(k => [k, this.env[k]])),
+        env: Object.fromEntries(['COPANE_HOME', 'CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'COPILOT_HOME', 'ELECTRON_RUN_AS_NODE'].map(k => [k, this.env[k]])),
       },
       window: {
         id,
@@ -1113,6 +1143,11 @@ function findOnPath(env: NodeJS.ProcessEnv, exe: string): string | undefined {
     }
   }
   return undefined;
+}
+
+/** "A", "A and B", "A, B and C". */
+function joinNames(names: string[]): string {
+  return names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
 }
 
 function isInsideDir(file: string, dir: string): boolean {

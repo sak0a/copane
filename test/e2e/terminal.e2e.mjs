@@ -183,6 +183,43 @@ test('a full-screen program shows its screen and takes keys', async () => {
   }
 });
 
+test('while a full-screen program runs, results show its screen and never repeat earlier output', async () => {
+  const a = await agent({ session: 'term-fullscreen-tokens' });
+  try {
+    const earlier = await a.ok('terminal_run', { command: 'for i in $(seq 1 40); do echo "earlier-output-$i"; done' });
+    assert.match(earlier, /earlier-output-40/);
+    const started = await a.ok('terminal_run', { command: node('fullscreen.mjs'), timeout_seconds: 2 });
+    assert.match(started, /Screen of term-\d+ .*full-screen program/);
+    assert.match(started, /FULLSCREEN DEMO/);
+    assert.doesNotMatch(started, /earlier-output/);
+    // A key the program ignores: the result is its screen, not an earlier command's output.
+    const sent = await a.ok('terminal_send', { keys: ['x'], wait_seconds: 1 });
+    assert.match(sent, /Screen of term-\d+ .*full-screen program/);
+    assert.match(sent, /FULLSCREEN DEMO\n\n {2}item one\n {2}item two/);
+    assert.doesNotMatch(sent, /earlier-output/);
+    const read = await a.ok('terminal_read', {});
+    assert.match(read, /FULLSCREEN DEMO/);
+    assert.doesNotMatch(read, /earlier-output/);
+    const waited = await a.ok('terminal_wait', { timeout_seconds: 1 });
+    assert.match(waited, /Still running/);
+    assert.doesNotMatch(waited, /earlier-output/);
+    const found = await a.ok('terminal_wait', { for_text: 'press q to quit', timeout_seconds: 5 });
+    assert.match(found, /appeared/);
+    // After it quits, only what is new: the line it printed, once, and no earlier output or screen.
+    const quit = await a.ok('terminal_send', { keys: ['q'] });
+    const done = await a.ok('terminal_wait', { timeout_seconds: 10 });
+    const after = quit + done;
+    assert.match(done, /exited with code 0/);
+    assert.equal(after.match(/left full screen/g)?.length, 1, after);
+    assert.doesNotMatch(after, /earlier-output|FULLSCREEN DEMO/);
+    const again = await a.ok('terminal_read', {});
+    assert.match(again, /no new output/);
+  } finally {
+    await closeAll(a);
+    await a.close();
+  }
+});
+
 test('hand-off: the user types a password the agent never sees', async () => {
   const a = await agent({ session: 'term-handoff' });
   try {
@@ -348,7 +385,9 @@ test('fast output does not stall the extension host, and the end of it is kept',
     assert.ok(slowest < 1500, `session_info took ${slowest} ms while a terminal printed fast`);
     const out = await running;
     assert.match(out, /exited with code 0/);
-    assert.match(out, /copane-fast-output\nfast-done/);
+    // The thousands of identical lines kept are collapsed into one with their count.
+    assert.match(out, /copane-fast-output\n\[repeated \d+ more times\]\nfast-done/);
+    assert.ok(out.length < 1000, `result is ${out.length} chars`);
   } finally {
     await closeAll(a);
     await a.close();

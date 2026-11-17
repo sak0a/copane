@@ -16,6 +16,15 @@ function data(over: Partial<StatusData> = {}): StatusData {
     agents: [
       { name: 'Claude Code', enabled: true, detected: true, detectedBy: 'claude at /bin/claude', configFile: '/u/.claude.json', state: { kind: 'ours', current: true, command: '/h/bin/mcp-server' }, notes: [] },
       { name: 'Codex', enabled: true, detected: true, detectedBy: 'codex', configFile: '/u/.codex/config.toml', state: { kind: 'foreign', command: 'npx other' }, notes: [] },
+      {
+        name: 'GitHub Copilot',
+        enabled: true,
+        detected: true,
+        detectedBy: 'copilot at /bin/copilot',
+        configFile: '/u/.copilot/mcp-config.json',
+        state: { kind: 'ours', current: false, command: '/h/bin/mcp-server', reason: 'it does not pass COPANE_INSTANCE through to the server' },
+        notes: ['PROBLEM: Copilot has the "copane" server turned off: run `copilot mcp enable copane`.'],
+      },
     ],
     sessions: [{ label: 'Claude 1', title: 'checkout', client: 'claude-code 2.1.323', connected: true, matchedBy: 'ancestor', pid: 7, cwd: '/w/shop' }],
     ...over,
@@ -31,6 +40,10 @@ describe('renderStatus', () => {
     expect(text).toMatch(/enabled in argv\.json, but VS Code has not been restarted/);
     expect(text).toMatch(/### Claude Code[\s\S]*registered ✓/);
     expect(text).toMatch(/### Codex[\s\S]*another server named "copane" is configured, not Copane's: npx other/);
+    expect(text).toMatch(/### GitHub Copilot\n- Installed: yes \(copilot at \/bin\/copilot\)\n- Config: \/u\/\.copilot\/mcp-config\.json\n- MCP server "copane": registered, but outdated/);
+    expect(text).toContain('- Out of date because it does not pass COPANE_INSTANCE through to the server');
+    expect(text).toContain('- PROBLEM: Copilot has the "copane" server turned off: run `copilot mcp enable copane`.');
+    expect(text).toMatch(/In Claude Code and the Copilot CLI, `\/mcp` lists the "copane" server/);
     expect(text).toContain('Self-test (started the way an agent would, from this window): ok ✓');
     expect(text).toContain('Claude 1 · checkout — claude-code 2.1.323, connected; found this window: started by an extension in this window');
   });
@@ -46,7 +59,7 @@ describe('renderStatus', () => {
     expect(text).toContain('NOT listening');
     expect(text).toContain('MISSING: agents cannot find this window');
     expect(text).toMatch(/remote window: argv\.json is on your local machine/);
-    expect(text).toMatch(/None connected\. Start a new Claude Code session/);
+    expect(text).toMatch(/None connected\. Start a new agent session/);
   });
 
   it('has what is needed to diagnose a Windows failure remotely', () => {

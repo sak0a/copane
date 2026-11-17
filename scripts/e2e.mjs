@@ -27,6 +27,7 @@ const devBase = join(process.platform === 'win32' ? process.env.TEMP : '/tmp', '
  */
 export const SUITES = {
   core: {},
+  'no-browser': { hostArgs: ['--no-proposed'] },
   registration: { notInCi: { win32: 'not adapted to Windows: it checks and runs the POSIX launcher (bin/mcp-server)' } },
   terminal: { notInCi: { win32: 'its commands need a POSIX shell; Windows terminals run PowerShell' } },
   ui: {},
@@ -51,6 +52,7 @@ export const SUITES = {
   'browser-prompts': {},
   'browser-change': {},
   codex: {},
+  copilot: {},
   remote: {
     notInCi: {
       linux: 'needs a remote dev host in a Docker container (scripts/remote-dev-host.mjs) and runs inside it',

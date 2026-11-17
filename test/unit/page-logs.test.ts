@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ConsoleLog, formatConsoleArgs, formatConsoleEntry, formatRemoteObject, levelAtLeast, shortLocation } from '../../src/extension/browser/page/consoleLog';
-import { filterNetwork, formatNetworkEntry, NetworkLog, urlMatcher } from '../../src/extension/browser/page/networkLog';
+import { filterNetwork, formatBody, formatNetworkEntry, mergeHeaders, NetworkLog, notableHeaders, pageOrigin, urlMatcher } from '../../src/extension/browser/page/networkLog';
+import { PRETTY_JSON_MAX, SERIALIZE } from '../../src/extension/browser/page/scripts';
 import { clip, formatBytes, formatMs, RingBuffer } from '../../src/extension/browser/page/ringBuffer';
 import { fullPageHeight, MAX_EDGE, MAX_PIXELS, screenshotScale } from '../../src/extension/browser/page/screenshotMath';
 import { normalizeUrl } from '../../src/extension/browser/page/navigationTools';
@@ -112,11 +113,76 @@ describe('network', () => {
     expect(() => urlMatcher('/[/')).toThrow(/Invalid regular expression/);
   });
 
+  it('prints URLs on the page origin as paths, keeping other origins and matching filters on the full URL', () => {
+    const log = new NetworkLog(100, seq());
+    log.onRequest(request('1', 'http://a.test/api/items?q=1'));
+    log.onResponse({ requestId: '1', response: { status: 200 } });
+    log.onFinished({ requestId: '1', timestamp: 1.25 });
+    log.onRequest(request('2', 'https://cdn.other.test/lib.js'));
+    log.onResponse({ requestId: '2', response: { status: 200 } });
+    log.onFinished({ requestId: '2', timestamp: 1.25 });
+    const [own, other] = log.entries.all();
+    const origin = pageOrigin('http://a.test/app/page.html#x');
+    expect(origin).toBe('http://a.test');
+    expect(pageOrigin('about:blank')).toBeUndefined();
+    expect(pageOrigin(undefined)).toBeUndefined();
+    expect(formatNetworkEntry(own!, 0, origin)).toBe('r1  GET 200 fetch  /api/items?q=1  (250 ms)');
+    expect(formatNetworkEntry(other!, 0, origin)).toBe('r2  GET 200 fetch  https://cdn.other.test/lib.js  (250 ms)');
+    expect(formatNetworkEntry(own!, 0)).toBe('r1  GET 200 fetch  http://a.test/api/items?q=1  (250 ms)');
+    expect(filterNetwork(log.entries.all(), { url: 'http://a.test/api' }).matched.map(e => e.id)).toEqual(['r1']);
+  });
+
+  it('merges the headers actually sent case-insensitively, without listing any twice', () => {
+    const log = new NetworkLog(100, seq());
+    log.onRequest({ ...request('1', 'http://a.test/api'), request: { url: 'http://a.test/api', method: 'GET', headers: { Accept: '*/*', 'User-Agent': 'UA', 'X-Mine': '1' } } });
+    log.onRequestExtra({ requestId: '1', headers: { accept: '*/*', 'user-agent': 'UA', cookie: 'a=b', ':method': 'GET' } });
+    expect(log.entries.all()[0]!.requestHeaders).toEqual({ 'X-Mine': '1', accept: '*/*', 'user-agent': 'UA', cookie: 'a=b', ':method': 'GET' });
+    expect(mergeHeaders({ A: '1', '…': 'more headers were cut' }, { a: '2' })).toEqual({ a: '2' });
+  });
+
+  it('leaves routine headers out of the details', () => {
+    const { shown, routine } = notableHeaders({ ':authority': 'a.test', ':path': '/', accept: '*/*', 'accept-encoding': 'gzip', 'sec-ch-ua': 'x', 'Sec-Fetch-Mode': 'cors', priority: 'u=1', cookie: 'a=b' });
+    expect(shown).toEqual([['accept', '*/*'], ['cookie', 'a=b']]);
+    expect(routine).toBe(6);
+    expect(notableHeaders(undefined)).toEqual({ shown: [], routine: 0 });
+  });
+
+  it('formats bodies: short JSON indented, long JSON compact before the cut', () => {
+    expect(formatBody('{"hello":"world"}', 4000)).toBe('  {\n    "hello": "world"\n  }');
+    expect(formatBody('not json {', 4000)).toBe('  not json {');
+    const long = JSON.stringify({ items: Array.from({ length: 200 }, (_, i) => ({ id: i, name: `item ${i}` })) }, null, 2);
+    const compact = JSON.stringify(JSON.parse(long));
+    expect(formatBody(long, 20_000)).toBe(`  ${compact}`);
+    expect(formatBody(long, 1000)).toBe(`  ${compact.slice(0, 1000)}\n  … (${compact.length - 1000} more characters; raise maxBodyChars to see more)`);
+    // Short JSON goes compact too when its indented form would not fit maxBodyChars.
+    const small = JSON.stringify({ list: Array.from({ length: 12 }, (_, i) => i) });
+    expect(formatBody(small, 100)).toBe(`  ${small}`);
+  });
+
   it('reports in-flight requests for network idle, ignoring long-lived ones', () => {
     const log = new NetworkLog(100, seq());
     log.onRequest({ ...request('1', 'http://a.test/sse'), type: 'EventSource', wallTime: Date.now() / 1000 });
     log.onRequest({ ...request('2', 'http://a.test/x'), wallTime: Date.now() / 1000 });
     expect(log.inflight(Date.now(), 10_000).map(e => e.id)).toEqual(['r2']);
+  });
+});
+
+describe('evaluate results (SERIALIZE)', () => {
+  const serialize = (value: unknown, maxChars = 20_000): string => (new Function(`return (${SERIALIZE});`)() as (this: unknown, max: number) => string).call(value, maxChars);
+
+  it('indents small values and makes large ones compact', () => {
+    expect(serialize({ a: 1, list: [1, 2] })).toBe('{\n  "a": 1,\n  "list": [\n    1,\n    2\n  ]\n}');
+    const big = { rows: Array.from({ length: 100 }, (_, i) => ({ id: i, label: `row ${i}` })) };
+    expect(JSON.stringify(big, null, 2).length).toBeGreaterThan(PRETTY_JSON_MAX);
+    expect(serialize(big)).toBe(JSON.stringify(big));
+  });
+
+  it('cuts at maxChars and marks cycles', () => {
+    const o: Record<string, unknown> = { name: 'loop' };
+    o.self = o;
+    expect(serialize(o)).toContain('"self": "(circular)"');
+    const cut = serialize({ s: 'x'.repeat(5000) }, 100);
+    expect(cut).toBe(`{"s":"${'x'.repeat(94)}\n… (cut: 5008 characters in total)`);
   });
 });
 

@@ -53,7 +53,7 @@ export function assessActivity(input: ActivityInput): Activity {
   if (input.alternate) {
     return {
       kind: 'full-screen',
-      summary: `A full-screen program owns the terminal (quiet for ${quietS} s). Read it with terminal_read { what: "screen" }, drive it with terminal_send keys (q quits most pagers), or interrupt it.`,
+      summary: `A full-screen program owns the terminal (quiet for ${quietS} s). Drive it with terminal_send keys (q quits most pagers; the result shows the screen), or interrupt it.`,
       secret,
     };
   }

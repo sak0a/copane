@@ -5,9 +5,10 @@ import { z } from 'zod';
 /** Without it, tools act on the session's current tab (said once, in instructions.ts). */
 export const tabArg = z.string().optional();
 
-export const refArg = z.string().optional().describe('From browser_snapshot.');
-export const selectorArg = z.string().optional().describe('CSS selector instead of ref; reaches into shadow DOM and iframes (one iframe: "#pay >>> button").');
-export const xArg = z.number().optional().describe('Viewport CSS px instead of ref/selector, e.g. on a canvas.');
+/** Where refs come from is said once, in instructions.ts. */
+export const refArg = z.string().optional();
+export const selectorArg = z.string().optional().describe('CSS; crosses shadow DOM and iframes ("#pay >>> button").');
+export const xArg = z.number().optional().describe('Viewport px, e.g. on a canvas.');
 export const yArg = z.number().optional();
 
 export const elementArgs = { ref: refArg, selector: selectorArg };

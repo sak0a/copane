@@ -29,37 +29,83 @@ function cutLong(line: string, limit: number): [string, boolean] {
   return [`${line.slice(0, head)} … [${line.length - limit} characters cut] … ${line.slice(-tail)}`, true];
 }
 
+/** Runs of at least this many identical lines show the line once and how often it repeats. */
+export const REPEAT_RUN = 4;
+/** Runs of at least this many blank lines show as one line with their count. */
+export const BLANK_RUN = 3;
+
+/** Consecutive lines shown as one entry: [from, to] are 0-based indexes into the input, inclusive. */
+interface Group {
+  text: string;
+  from: number;
+  to: number;
+  cut: boolean;
+}
+
+/** Groups `lines[from..]` (or up to `to`), collapsing runs of repeated and blank lines. */
+function group(lines: readonly string[], lineLimit: number, from: number): Group[] {
+  const out: Group[] = [];
+  for (let i = from; i < lines.length; ) {
+    const raw = lines[i]!;
+    let j = i + 1;
+    while (j < lines.length && lines[j] === raw) j++;
+    const blank = raw.trim() === '';
+    if (blank) while (j < lines.length && lines[j]!.trim() === '') j++;
+    const count = j - i;
+    if (blank && count >= BLANK_RUN) {
+      out.push({ text: `[${count} blank lines]`, from: i, to: j - 1, cut: false });
+    } else if (!blank && count >= REPEAT_RUN) {
+      const [line, cut] = cutLong(raw, lineLimit);
+      out.push({ text: `${line}\n[repeated ${count - 1} more times]`, from: i, to: j - 1, cut });
+    } else {
+      // Too short a run to collapse: each line on its own.
+      for (let k = i; k < j; k++) {
+        const [line, cut] = cutLong(lines[k]!, lineLimit);
+        out.push({ text: line, from: k, to: k, cut });
+      }
+    }
+    i = j;
+  }
+  return out;
+}
+
 /**
  * Keeps the end of `lines` within `maxChars`, or, with `fromLine` (1-based), the lines starting there.
  * Never returns an empty clip when there are lines: the last (or first) one is always included, cut.
+ * Runs of 4+ identical lines and of 3+ blank lines are collapsed (with their count); line numbers
+ * (`first`, `last`, `fromLine`) always count the original lines.
  */
 export function clipLines(lines: readonly string[], options: { maxChars?: number; fromLine?: number } = {}): Clip {
   const maxChars = Math.max(500, Math.min(options.maxChars ?? DEFAULT_MAX_CHARS, MAX_MAX_CHARS));
   const lineLimit = Math.min(MAX_LINE_CHARS, maxChars);
   const total = lines.length;
-  const picked: string[] = [];
+  const picked: Group[] = [];
   let used = 0;
-  let longLinesCut = 0;
-  const take = (raw: string): boolean => {
-    const [line, cut] = cutLong(raw, lineLimit);
-    const cost = line.length + 1;
+  const take = (g: Group): boolean => {
+    const cost = g.text.length + 1;
     if (picked.length > 0 && used + cost > maxChars) return false;
-    if (cut) longLinesCut++;
     used += cost;
-    picked.push(line);
+    picked.push(g);
     return true;
   };
+  const result = (start: number, end: number): Clip => ({
+    text: picked.map(g => g.text).join('\n'),
+    first: picked.length ? start + 1 : 0,
+    last: picked.length ? end + 1 : 0,
+    total,
+    omittedBefore: picked.length ? start : Math.min(start, total),
+    omittedAfter: picked.length ? total - end - 1 : total - Math.min(start, total),
+    longLinesCut: picked.filter(g => g.cut).length,
+  });
   if (options.fromLine !== undefined) {
-    const start = Math.max(1, Math.min(options.fromLine, total + 1));
-    for (let i = start - 1; i < total && take(lines[i]!); i++);
-    const first = picked.length ? start : 0;
-    const last = picked.length ? start + picked.length - 1 : 0;
-    return { text: picked.join('\n'), first, last, total, omittedBefore: start - 1, omittedAfter: total - (start - 1) - picked.length, longLinesCut };
+    const start = Math.max(1, Math.min(options.fromLine, total + 1)) - 1;
+    for (const g of group(lines, lineLimit, start)) if (!take(g)) break;
+    return result(start, picked.at(-1)?.to ?? start);
   }
-  for (let i = total - 1; i >= 0 && take(lines[i]!); i--);
+  const groups = group(lines, lineLimit, 0);
+  for (let i = groups.length - 1; i >= 0 && take(groups[i]!); i--);
   picked.reverse();
-  const first = picked.length ? total - picked.length + 1 : 0;
-  return { text: picked.join('\n'), first, last: picked.length ? total : 0, total, omittedBefore: total - picked.length, omittedAfter: 0, longLinesCut };
+  return result(picked[0]?.from ?? total, total - 1);
 }
 
 /**
