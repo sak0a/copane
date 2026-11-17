@@ -297,6 +297,10 @@ test('an emulated device in a background tab: regions in CSS px of the device', 
   const tab = await open('/plain.html');
   await a.ok('browser_emulate', { width: 400, height: 4000, deviceScaleFactor: 3 });
   try {
+    // The first frames after the emulation starts can still show the old layout (seen on the Linux CI
+    // runner: the heading counted as changed). Let it paint once before the baseline.
+    await sleep(1500);
+    await a.ok('browser_screenshot', {});
     const { text } = await change('none', { reload: true });
     const regions = regionsOf(text);
     assert.equal(regions.length, 1, text);

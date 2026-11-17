@@ -1,7 +1,7 @@
 import * as nodeFs from 'node:fs';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { elementSource, originalLocation } from '../../src/extension/browser/page/source';
 import { cacheStats, scriptMap } from '../../src/extension/browser/page/sourceFetch';
@@ -758,7 +758,7 @@ describe('elementSource', () => {
     const probe = { tag: 'button', react: { dev: true, depth: 0, chain: [{ name: 'App', stack: `Error: x\n    at exports.createElement (${mixed}:1:1)\n    at App (${mixed}:2:1)` }] }, grep: {} };
     const { call } = fakeCall({ roots: [root], probe, resources: { [mixed]: { body: 'a\nb\n//# sourceMappingURL=mixed.js.map' }, [`${mixed}.map`]: { body: map } } });
     const text = await elementSource(call, target(call));
-    expect(text.split('\n').slice(1)).toEqual(['1. App src/Good.tsx:1:1 (where the element is written)', 'Paths are relative to the workspace folder ' + JSON.stringify(root.split('/').pop()) + '.']);
+    expect(text.split('\n').slice(1)).toEqual(['1. App src/Good.tsx:1:1 (where the element is written)', 'Paths are relative to the workspace folder ' + JSON.stringify(basename(root)) + '.']);
   });
 
   it('lists data found nearer the element first (Svelte on the element, Vue on a shadow host)', async () => {
