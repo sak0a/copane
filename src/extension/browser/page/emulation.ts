@@ -310,6 +310,7 @@ export class EmulationManager implements PageHook, vscode.Disposable {
     }
     let data: string;
     let factor: number;
+    let fitsBudget = true;
     const notes: string[] = [];
     try {
       const frame = await screencastFrame(call, request.format, Math.round(vp.width * scale), Math.round(vp.height * scale));
@@ -321,6 +322,9 @@ export class EmulationManager implements PageHook, vscode.Disposable {
         const size = imageSize(Buffer.from(data, 'base64'));
         const { deviceWidth: dw, deviceHeight: dh } = frame.metadata ?? {};
         factor = (size?.width ?? vp.width * scale) / vp.width;
+        // VS Code draws a device larger than the editor scaled down to fit: the frame is then smaller
+        // than asked for, and a higher detail would not make it sharper.
+        fitsBudget = factor >= scale * 0.98;
         if (size && dw && dh && Math.abs(size.width / size.height - vp.width / vp.height) > 0.02 * (vp.width / vp.height)) {
           // A tab in the background is drawn at a fixed size without fitting the device to it: the frame
           // shows that whole area, with the emulated viewport at its top-left at 1:1.
@@ -328,6 +332,7 @@ export class EmulationManager implements PageHook, vscode.Disposable {
           const whole = (await screencastFrame(call, request.format, Math.round(dw * viewScale), Math.round(dh * viewScale))) ?? frame;
           data = whole.data;
           factor = (imageSize(Buffer.from(data, 'base64'))?.width ?? dw * viewScale) / dw;
+          fitsBudget = factor >= viewScale * 0.98;
           const shownW = Math.min(vp.width, dw);
           const shownH = Math.min(vp.height, dh);
           const cut = shownW < vp.width || shownH < vp.height;
@@ -352,7 +357,7 @@ export class EmulationManager implements PageHook, vscode.Disposable {
     }
     if (request.fullPage) notes.push('Only the viewport can be captured while a device is emulated; scroll with browser_scroll for the rest of the page.');
     const mapping = Math.abs(factor - 1) < 0.01 ? 'Image pixels are viewport CSS pixels, so a point in it can be passed as x/y to browser_click.' : `To click a point in it, divide its image coordinates by ${factor.toFixed(3)} and pass them as x/y to browser_click.`;
-    if (sharperAvailable(vp.width, vp.height, detail) && factor < 0.99) notes.push(SHARPER_NOTE);
+    if (fitsBudget && sharperAvailable(vp.width, vp.height, detail) && factor < 0.99) notes.push(SHARPER_NOTE);
     const mismatch = this.sizeMismatch(state.settings, vp);
     return [
       image(data, `image/${request.format}`),
