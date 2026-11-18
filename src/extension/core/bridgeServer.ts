@@ -19,6 +19,7 @@ import {
 import type { Disposable } from './events';
 import { scopedLogger, type Logger } from './log';
 import { describeSession, type AgentSession, type SessionClient, type SessionManager } from './sessions';
+import { resolveToolAlias, withAliasNote } from './toolAliases';
 import { disabledToolMessage, isToolEnabled, type ToolSelection } from './toolSelection';
 import type { ToolRegistry } from './tools';
 
@@ -174,16 +175,22 @@ export class BridgeServer implements Disposable {
       const current = requireSession();
       options.sessions.touch(current.id);
       const selection = options.toolSelection?.();
-      if (selection && !isToolEnabled(selection, params.name)) {
-        return { content: [{ type: 'text', text: disabledToolMessage(selection, params.name) }], isError: true };
+      // An old name of a merged tool (core/toolAliases.ts): call the new tool, under its settings too.
+      const alias = options.tools.has(params.name) ? undefined : resolveToolAlias(params.name, params.arguments);
+      const name = alias?.name ?? params.name;
+      const off = selection && [params.name, name].find(n => !isToolEnabled(selection, n));
+      if (selection && off) {
+        return { content: [{ type: 'text', text: disabledToolMessage(selection, off) }], isError: true };
       }
+      if (alias && 'error' in alias) return withAliasNote({ content: [{ type: 'text', text: alias.error }], isError: true }, alias.note);
       const started = Date.now();
-      const result = await options.tools.call(params.name, params.arguments, {
+      const called = await options.tools.call(name, alias ? alias.args : params.arguments, {
         session: current,
         signal: ctx.signal,
-        log: scopedLogger(options.log, `${current.label} ${params.name}`),
+        log: scopedLogger(options.log, `${current.label} ${name}`),
       });
-      options.log.debug(`${current.label} ${params.name} ${result.isError ? 'failed' : 'ok'} in ${Date.now() - started} ms`);
+      const result = alias ? withAliasNote(called, alias.note) : called;
+      options.log.debug(`${current.label} ${params.name}${alias ? ` (as ${name})` : ''} ${result.isError ? 'failed' : 'ok'} in ${Date.now() - started} ms`);
       // Once per session (the session object outlives reconnects with the same key), on success only.
       if (!result.isError && !this.notesGiven.has(current) && (options.needsUsageNotes ?? dropsServerInstructions)(current.client)) {
         this.notesGiven.add(current);

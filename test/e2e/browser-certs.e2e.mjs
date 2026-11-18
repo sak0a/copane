@@ -38,7 +38,7 @@ test('a declined certificate fails with the reason and is not asked again right 
     assert.ok(second.isError);
     assert.match(second.text, /asked a moment ago/);
     assert.equal((await shown(a)).length, before + 1, 'the user was asked exactly once');
-    await a.ok('browser_close_tab', {});
+    await a.ok('browser_tab', { action: 'close' });
   } finally {
     await a.close();
   }
@@ -58,8 +58,8 @@ test('"Always Trust" loads the page, saves the host, and later sessions are not 
     await b.ok('browser_open', { url: 'about:blank' });
     assert.match(await b.ok('browser_navigate', { url: server.url('localhost', unique()) }), /Self-signed fixture/);
     assert.equal((await shown(b)).length, before, 'a trusted host does not ask');
-    await a.ok('browser_close_tab', {});
-    await b.ok('browser_close_tab', {});
+    await a.ok('browser_tab', { action: 'close' });
+    await b.ok('browser_tab', { action: 'close' });
   } finally {
     await a.close();
     await b.close();
@@ -77,7 +77,7 @@ test('the "block" setting refuses without asking, even for a host in the trusted
     assert.ok(blocked.isError, blocked.text);
     assert.match(blocked.text, /certificate is not trusted/);
     assert.equal((await shown(a)).length, before, '"block" never asks');
-    await a.ok('browser_close_tab', {});
+    await a.ok('browser_tab', { action: 'close' });
   } finally {
     await a.close();
     await setSettings({});

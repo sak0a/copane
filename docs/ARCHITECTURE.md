@@ -56,7 +56,15 @@ session is using what, and can take over at any moment.
   them. Handlers get `{ session, signal, log }`, return text or content blocks, and throw `ToolError`
   for expected failures. A call with an argument name the tool does not take is refused, naming the
   valid ones (top-level names only; MCP's `_meta` is ignored); the advertised schema does not say
-  `additionalProperties: false`, to keep definitions short.
+  `additionalProperties: false`, to keep definitions short. Related actions share one tool with an
+  `action` argument only where their annotations agree enough: a merged tool carries the most
+  cautious hints of its parts, so read-only listing (`browser_list_tabs`) stays its own tool while
+  select/show/release/close are `browser_tab` (`destructiveHint`). Per-action arguments are checked
+  in the handler, with a message saying what to pass.
+- **Tool aliases** (`core/toolAliases.ts`, plain data): old names of merged tools, one table, kept
+  for one release. The bridge server maps a call to one (when no tool of that name is registered) to
+  the new call, applies `copane.tools.*` to the new name and the old one, and starts the result with
+  a line naming the new call. Never listed.
 - **Services** (`core/services.ts`): `BrowserService` and `TerminalService` are the only way modules
   see each other. The UI module renders from these plus `SessionManager`.
 

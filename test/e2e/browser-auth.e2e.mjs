@@ -36,7 +36,7 @@ async function withAgent(name, fn) {
   try {
     await a.ok('browser_open', { url: 'about:blank' });
     await fn(a);
-    await a.call('browser_close_tab', {});
+    await a.call('browser_tab', { action: 'close' });
   } finally {
     await a.close();
   }
@@ -143,7 +143,7 @@ test('a tab opened straight onto a protected page is loaded again so the user ca
     await a.ok('browser_open', { url: s.url('/basic/open') });
     await a.ok('browser_wait_for', { text: 'Basic ok', timeout: 15 });
     assert.equal(s.authorization('/basic/open'), `Basic ${SECRET_B64}`);
-    await a.ok('browser_close_tab', {});
+    await a.ok('browser_tab', { action: 'close' });
   } finally {
     await a.close();
   }
@@ -229,7 +229,7 @@ test('a saved login is used after a window reload without asking, and can be for
     await queue(b, ['Cancel']);
     assert.match(await b.ok('browser_navigate', { url: s.url('/basic/forgotten') }), /HTTP 401/);
     assert.equal((await shown(b)).length, 1, 'after forgetting, the user is asked again');
-    await b.ok('browser_close_tab', {});
+    await b.ok('browser_tab', { action: 'close' });
   } finally {
     await b.close();
   }

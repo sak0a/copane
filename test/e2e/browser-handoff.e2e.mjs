@@ -28,7 +28,7 @@ async function withAgent(name, url, fn) {
     const opened = await a.ok('browser_open', { url });
     const tabId = /Opened (tab-\d+)/.exec(opened)[1];
     await fn(a, tabId, opened);
-    await a.call('browser_close_tab', { tab: tabId });
+    await a.call('browser_tab', { action: 'close', tab: tabId });
   } finally {
     await a.close();
   }

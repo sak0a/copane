@@ -9,7 +9,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 /** Characters of all tool definitions together (about 3.6 characters per token). */
-const TOTAL_BUDGET = 28_400;
+const TOTAL_BUDGET = 27_300;
 /** Characters of any one tool definition. */
 const PER_TOOL_BUDGET = 1_800;
 /**
@@ -149,7 +149,7 @@ describe('tool definition budget', () => {
     // Every excluded name is a real tool, so a renamed tool cannot slip back into the profile unnoticed.
     expect([...CORE_PROFILE_EXCLUDES.keys()].filter(name => !full.tools.some(t => t.name === name))).toEqual([]);
     const names = kept.map(t => t.name);
-    for (const everyday of ['browser_open', 'browser_navigate', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_fill_form', 'browser_press_key', 'browser_scroll', 'browser_wait_for', 'browser_screenshot', 'browser_evaluate', 'browser_console_messages', 'browser_network_requests', 'browser_list_tabs', 'browser_request_user_input', 'browser_handle_dialog', 'terminal_run', 'terminal_read', 'terminal_send', 'terminal_wait', 'terminal_request_user_input', 'window_status', 'window_select']) {
+    for (const everyday of ['browser_open', 'browser_navigate', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_fill_form', 'browser_press_key', 'browser_scroll', 'browser_wait_for', 'browser_screenshot', 'browser_evaluate', 'browser_console_messages', 'browser_network_requests', 'browser_list_tabs', 'browser_tab', 'browser_request_user_input', 'browser_handle_dialog', 'terminal_run', 'terminal_read', 'terminal_send', 'terminal_wait', 'terminal_request_user_input', 'window_status', 'window_select']) {
       expect(names).toContain(everyday);
     }
     expect(total).toBeLessThan(full.total * 0.7);

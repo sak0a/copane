@@ -620,7 +620,7 @@ describe('hookGeometry', () => {
     expect(hookGeometry('Screenshot … To click a point in it, divide its image coordinates by 0.750 and pass them as x/y to browser_click.')).toEqual({ scale: 0.75, viewport: undefined });
     expect(
       hookGeometry(
-        'Screenshot of the viewport in tab-3 (1024×768 px; viewport 400×4000 CSS px), emulating 400×4000. Image pixels are viewport CSS pixels, so a point in it can be passed as x/y to browser_click. tab-3 is in the background, where VS Code draws it in a 1024×768 px area without fitting the device: the emulated viewport is the top-left 400×768 px of the image, and the rest of it is cut off. Bring the tab to the front with browser_show_tab for a complete picture.',
+        'Screenshot of the viewport in tab-3 (1024×768 px; viewport 400×4000 CSS px), emulating 400×4000. Image pixels are viewport CSS pixels, so a point in it can be passed as x/y to browser_click. tab-3 is in the background, where VS Code draws it in a 1024×768 px area without fitting the device: the emulated viewport is the top-left 400×768 px of the image, and the rest of it is cut off. Bring the tab to the front with browser_tab {"action":"show"} for a complete picture.',
       ),
     ).toEqual({ scale: 1, viewport: { width: 400, height: 768 } });
     expect(hookGeometry('Screenshot of something else.')).toBeUndefined();
@@ -725,7 +725,7 @@ describe('formatChange', () => {
     const text = formatChange(report({ crashed: true, errors: ['[exception] Uncaught RangeError: Maximum call stack size exceeded  (/src/loop.ts:3:9)'] }));
     expect(text).toBe(
       [
-        'The page in tab-2 crashed after the change (renderer gone). Reload it with browser_history (action "reload") once the cause is fixed.',
+        'The page in tab-2 crashed after the change (renderer gone). Reload it with browser_navigate {"action":"reload"} once the cause is fixed.',
         '- 1 new error before the crash:',
         '  [exception] Uncaught RangeError: Maximum call stack size exceeded  (/src/loop.ts:3:9)',
       ].join('\n'),
@@ -811,7 +811,7 @@ describe('more report texts', () => {
     const text = formatStuck({ tabId: 'tab-2', step: 'taking the screenshot', waitedMs: 17_000, update: 'a hot update (Vite: /src/app.js)', errors: ['Uncaught TypeError: boom'], failures: [] });
     expect(text).toBe(
       [
-        'tab-2 did not respond while taking the screenshot (waited 17 s): it may be stuck in a long-running script, or VS Code is not drawing it right now. Try again; bring it to the front with browser_show_tab, or reload it with browser_history if it stays stuck.',
+        'tab-2 did not respond while taking the screenshot (waited 17 s): it may be stuck in a long-running script, or VS Code is not drawing it right now. Try again; bring it to the front with browser_tab {"action":"show"}, or reload it with browser_navigate {"action":"reload"} if it stays stuck.',
         '- Seen before that: a hot update (Vite: /src/app.js).',
         '- Seen before that: 1 new error:',
         '  Uncaught TypeError: boom',

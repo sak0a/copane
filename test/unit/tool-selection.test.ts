@@ -38,14 +38,14 @@ describe('tool selection', () => {
   });
 
   it('a refused call says which setting turned the tool off and what to do instead', () => {
-    expect(disabledToolMessage({ profile: 'core' }, 'terminal_interrupt')).toBe(
-      'terminal_interrupt is turned off in this VS Code window by the user\'s setting "copane.tools.profile": "core". Use terminal_send with keys ["Ctrl+C"].',
+    expect(disabledToolMessage({ profile: 'core' }, 'session_info')).toBe(
+      'session_info is turned off in this VS Code window by the user\'s setting "copane.tools.profile": "core". window_status shows your session label and the window.',
     );
     expect(disabledToolMessage({ disabled: ['browser_route'] }, 'browser_route')).toBe(
       'browser_route is turned off in this VS Code window by the user\'s setting "copane.tools.disabled". Continue without it; if the task cannot be done without it, tell the user.',
     );
-    // An alternative that is itself off is not suggested.
-    expect(disabledToolMessage({ profile: 'core', disabled: ['terminal_send'] }, 'terminal_interrupt')).not.toContain('terminal_send');
+    // An alternative naming a tool no setting turns off is always suggested.
+    expect(disabledToolMessage({ profile: 'core', disabled: ['window_status'] }, 'session_info')).toContain('window_status shows');
     // It never tells the agent to change the setting itself.
     for (const name of CORE_PROFILE_EXCLUDES.keys()) expect(disabledToolMessage({ profile: 'core' }, name).replace(name, '')).not.toMatch(/setting.*(change|enable)|turn (it )?on/i);
   });

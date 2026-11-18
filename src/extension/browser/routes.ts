@@ -2,7 +2,7 @@
 // a network error, be held back, or go out with changed headers, to see how a page copes.
 //
 // Rules belong to the session that set them and to one tab. They end when that session releases the
-// tab (browser_release_tab), when another session takes control of the tab, when the session ends,
+// tab (browser_tab release), when another session takes control of the tab, when the session ends,
 // when the tab closes, or when the user removes them (command). An idle lease alone does not end them,
 // so a rule survives while the agent edits code between page loads; the UI shows that a tab has rules.
 // Only the session controlling a tab can add rules to it, so at any time one session's rules apply.

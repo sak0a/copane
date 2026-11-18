@@ -163,7 +163,7 @@ export function formatPerf(p: PerfInput): string {
       lines.push(`Interactions: slowest ${s.event}${s.target ? ` on ${s.target}` : ''} took ${ms(s.duration)} (input delay ${ms(s.inputDelay)}, handlers ${ms(s.processing)}, until painted ${ms(s.presentation)}); ${i.slow} interaction${i.slow === 1 ? '' : 's'} took 104 ms or more. INP is at least ${ms(s.duration)}.`);
     }
   } else if (p.background && i.hadInput && !i.firstInput) {
-    lines.push('Interactions: not reported yet. The browser reports them once it paints the tab, which it rarely does while the tab is in the background; bring it to the front (browser_show_tab) and check again. Long tasks below include slow event handlers.');
+    lines.push('Interactions: not reported yet. The browser reports them once it paints the tab, which it rarely does while the tab is in the background; bring it to the front (browser_tab {"action":"show"}) and check again. Long tasks below include slow event handlers.');
   } else {
     lines.push(`Interactions: none took 104 ms or more${i.firstInput ? ` (first input: ${i.firstInput.event}, delay ${ms(i.firstInput.delay)})` : ' (none happened yet)'}. The browser keeps only slower ones, so INP is below ~100 ms for what was done here.`);
   }

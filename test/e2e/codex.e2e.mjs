@@ -132,7 +132,7 @@ test('real Codex session: tools work, images and long results come through, Code
     const run = await codexExec(
       `Use only the copane MCP tools, nothing else. 1) session_info. 2) browser_open ${site.url}/long.html, then browser_screenshot. ` +
         `3) browser_snapshot with maxChars 60000 and tell me the last line of its result. 4) terminal_run: echo codex-was-here > ${marker}. ` +
-        '5) browser_release_tab. Then reply with your session label only.',
+        '5) browser_tab with action release. Then reply with your session label only.',
       ['-c', 'mcp_servers.copane.default_tools_approval_mode="approve"'],
     );
     const label = JSON.parse(run.call('session_info').result.content[0].text).you.label;

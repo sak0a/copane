@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- **Fewer tools, smaller tool list. Breaking: tool names changed, update permission allowlists.**
+  `browser_select_tab`, `browser_show_tab`, `browser_release_tab` and `browser_close_tab` are now
+  one tool, `browser_tab` with `action` (`select`, `show`, `release`, `close`); `browser_list_tabs`
+  stays a separate read-only tool. `browser_history` is now `browser_navigate` with `action`
+  (`back`, `forward`, `reload`) instead of `url`. `terminal_interrupt` is now `terminal_send` with
+  keys `["Ctrl+C"]`, which still waits for the command to end and says whether it did; it is
+  refused while the user holds the terminal. The old names still work for this release (not listed;
+  each result names the new call) and will be removed in the next one. Allowlists such as
+  `mcp__copane__browser_close_tab` need the new names, and `copane.tools.disabled` entries naming
+  old tools apply only to calls made under the old name. 45 → 40 tools; the `core` profile has 28.
+- **Tool settings.** `copane.tools.profile` (`core` leaves out the specialised tools, about a third
+  fewer characters) and `copane.tools.disabled` choose which tools agents get;
+  `copane.usageNotesInResults` turns off the usage notes Copilot sessions get with their first
+  result. A tool call with an unknown argument is refused with the valid names instead of the
+  argument being dropped silently.
+- **Smaller results by default.** Terminal output over 12,000 characters (was 20,000) keeps its
+  start and its end and names the `terminal_read` call for the cut lines; polling a running command
+  repeats less. `browser_screenshot` defaults to 1280 px / 0.8 MP (`detail: "high"` for the previous
+  size), says how image pixels map to page coordinates for every kind of shot, and takes `path` to
+  also save the image inside the project for agents whose client does not pass images on. Console
+  and network lists cover the current page and its redirects (`allPages` for earlier ones). Audit
+  caveats and the sign-in hint are given in full once per session.
+- **VS Code's own chat.** Opt-in `copane.vscodeChat.serverDefinition` offers Copane to VS Code chat
+  as a server that always uses this window (experimental, not verified with a signed-in Copilot).
+  Each chat conversation of VS Code's MCP client gets its own Copane session.
 - **GitHub Copilot** is a third agent Copane registers with: the `copane` entry in
   `~/.copilot/mcp-config.json` (or `$COPILOT_HOME`), which the Copilot CLI and Copilot chat in VS
   Code read. Edited in place keeping comments, other servers and your own `tools` filter; passes
@@ -12,8 +37,8 @@
   `copilot --resume`, and get Copane's usage notes once with their first tool result, because the
   Copilot CLI does not pass MCP server instructions to the model by default. An agent running in a
   git worktree finds the window that has the main checkout open.
-- **Fewer tokens.** Without the integrated browser no `browser_*` tools are listed (13 tools instead
-  of 44). Reading a page again with `browser_snapshot` returns only what changed (`offset: 0` for
+- **Fewer tokens.** Without the integrated browser no `browser_*` tools are listed (12 tools instead
+  of 40). Reading a page again with `browser_snapshot` returns only what changed (`offset: 0` for
   the whole page). Full-screen terminal programs no longer re-send old scrollback and results show
   their screen; repeated and blank terminal lines are collapsed with a count. Network lists print
   paths of the page's own origin, request details merge duplicate headers and leave out routine

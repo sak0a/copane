@@ -158,7 +158,7 @@ test('repeated polls of a running command do not repeat its name and hints', asy
     assert.match(done, /poll-done/);
     // The full suggestions came once for this terminal; a second running command gets the short form.
     const again = await a.ok('terminal_run', { command: 'sleep 3', timeout_seconds: 1 });
-    assert.match(again, /Next: terminal_wait, terminal_read, terminal_send or terminal_interrupt\./);
+    assert.match(again, /Next: terminal_wait, terminal_read or terminal_send \(keys \["Ctrl\+C"\] stops it\)\./);
     await a.ok('terminal_wait', { timeout_seconds: 10 });
   } finally {
     await closeAll(a);
@@ -189,7 +189,7 @@ test('a long-running server keeps running; wait for text, read, interrupt', asyn
     const log = await a.ok('terminal_wait', { terminal: id, for_text: 'GET /hello', timeout_seconds: 10 });
     assert.match(log, /GET \/hello/);
     assert.doesNotMatch(log, /Listening on/, 'only output since the last look');
-    const stopped = await a.ok('terminal_interrupt', { terminal: id });
+    const stopped = await a.ok('terminal_send', { terminal: id, keys: ['Ctrl+C'] });
     assert.match(stopped, /Interrupted\. .*exited with code 130/);
     assert.match(stopped, /shutting down/);
   } finally {
@@ -203,10 +203,33 @@ test('Ctrl+C stops a command', async () => {
   try {
     const out = await a.ok('terminal_run', { command: 'sleep 100', timeout_seconds: 1 });
     assert.match(out, /still running/);
+    // Ctrl+C alone waits for the command to end and says so.
     const sent = await a.ok('terminal_send', { keys: ['Ctrl+C'] });
-    assert.match(sent, /Sent Ctrl\+C/);
-    const waited = await a.ok('terminal_wait', { timeout_seconds: 10 });
-    assert.match(waited, /`sleep 100` exited with code 130/);
+    assert.match(sent, /^Interrupted\. .*`sleep 100` exited with code 130/s);
+    const idle = await a.ok('terminal_send', { keys: ['Ctrl+C'] });
+    assert.match(idle, /^Pressed Ctrl\+C in term-\d+; no command was running\./);
+    // With other keys it is plain input.
+    await a.ok('terminal_run', { command: 'sleep 100', timeout_seconds: 1 });
+    const mixed = await a.ok('terminal_send', { keys: ['Ctrl+C', 'Enter'] });
+    assert.match(mixed, /^Sent Ctrl\+C, Enter to term-\d+\./);
+    assert.doesNotMatch(mixed, /Interrupted/);
+    await until(async () => /is idle at the prompt/.test(await a.ok('terminal_wait', { timeout_seconds: 2 })), 'the terminal to be idle');
+  } finally {
+    await closeAll(a);
+    await a.close();
+  }
+});
+
+test('an old tool name still works and names the new call (terminal_interrupt)', async () => {
+  const a = await agent({ session: 'term-alias' });
+  try {
+    assert.ok(!(await a.tools()).some(t => t.name === 'terminal_interrupt'), 'old names are not listed');
+    await a.ok('terminal_run', { command: 'sleep 100', timeout_seconds: 1 });
+    const stopped = await a.ok('terminal_interrupt', {});
+    assert.match(stopped, /^\(terminal_interrupt is now terminal_send \{"keys":\["Ctrl\+C"\]\}: call that from now on; the old name will be removed\.\)\nInterrupted\. .*`sleep 100` exited with code 130/s);
+    const wrong = await a.call('terminal_interrupt', { text: 'y' });
+    assert.ok(wrong.isError);
+    assert.match(wrong.text, /terminal_interrupt has no argument "text"; nothing was done\./);
   } finally {
     await closeAll(a);
     await a.close();

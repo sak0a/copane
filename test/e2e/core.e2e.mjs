@@ -91,9 +91,9 @@ test('copane.tools.profile and copane.tools.disabled change the list of a connec
       assert.ok(names.includes(kept), `${kept} is missing`);
     }
 
-    const interrupt = await a.call('terminal_interrupt', {});
-    assert.ok(interrupt.isError);
-    assert.equal(interrupt.text, 'terminal_interrupt is turned off in this VS Code window by the user\'s setting "copane.tools.profile": "core". Use terminal_send with keys ["Ctrl+C"].');
+    const info = await a.call('session_info', {});
+    assert.ok(info.isError);
+    assert.equal(info.text, 'session_info is turned off in this VS Code window by the user\'s setting "copane.tools.profile": "core". window_status shows your session label and the window.');
     const close = await a.call('terminal_close', {});
     assert.ok(close.isError);
     assert.match(close.text, /^terminal_close is turned off in this VS Code window by the user's setting "copane\.tools\.disabled"\./);

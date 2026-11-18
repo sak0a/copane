@@ -30,7 +30,7 @@ const exported = new Map();
 
 let previous;
 async function open(url) {
-  if (previous) await a.call('browser_close_tab', { tab: previous });
+  if (previous) await a.call('browser_tab', { action: 'close', tab: previous });
   const text = await a.ok('browser_open', { url, background: true });
   const id = /Opened (tab-\d+)/.exec(text)?.[1];
   assert.ok(id, `no tab id in: ${text}`);
@@ -310,7 +310,7 @@ test('audit performance: load timing, vitals, requests, long tasks, render-block
   assert.match(text, /Render-blocking: \/slow\.css\?ms=400 4\d\d ms/);
   assert.match(text, /not comparable with Lighthouse/);
   // In front, the tab is painted and its interactions are reported (in the background they may not be).
-  await a.ok('browser_show_tab');
+  await a.ok('browser_tab', { action: 'show' });
   await a.ok('browser_click', { selector: '#heavy' });
   const after = await a.ok('browser_audit', { type: 'performance' });
   assert.match(after, /Interactions: slowest click on <button#heavy>[^\n]*handlers 2\d\d ms/);
@@ -340,7 +340,7 @@ test('exported tests run green in Playwright (with --playwright <dir>)', async (
 });
 
 test('cleanup: close the last tab', async () => {
-  if (previous) await a.ok('browser_close_tab', { tab: previous });
+  if (previous) await a.ok('browser_tab', { action: 'close', tab: previous });
 });
 
 try {

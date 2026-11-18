@@ -192,7 +192,7 @@ describe('formatPerf', () => {
   it('says when a background tab has not reported its interactions yet', () => {
     const text = formatPerf({ tabId: 'tab-1', url: 'http://localhost:3000/', browser: 'Chromium 150', reloaded: false, background: true, timings: { ...timings, interactions: { slow: 0, hadInput: true } }, network });
     expect(text).toContain('Interactions: not reported yet.');
-    expect(text).toContain('browser_show_tab');
+    expect(text).toContain('browser_tab {"action":"show"}');
   });
 
   it('falls back to resource timing when the network log started late', () => {

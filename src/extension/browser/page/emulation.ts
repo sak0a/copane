@@ -185,7 +185,7 @@ export class EmulationManager implements PageHook, vscode.Disposable {
     if (next.device?.mobile) lines.push('Clicks are sent as taps; hover menus, right-click, modifier clicks and dragging do not work while mobile is on.');
     if (throttleChanged && isThrottling(next)) {
       lines.push(
-        `It covers the page and its cross-origin frames${next.network?.offline ? ', which see navigator.onLine false' : ''}; responses mocked with browser_route are not slowed and still arrive offline. Your tools keep working. Reload (browser_history) to see a ${next.network ? 'slow or offline' : 'slow'} page load.`,
+        `It covers the page and its cross-origin frames${next.network?.offline ? ', which see navigator.onLine false' : ''}; responses mocked with browser_route are not slowed and still arrive offline. Your tools keep working. Reload (browser_navigate {"action":"reload"}) to see a ${next.network ? 'slow or offline' : 'slow'} page load.`,
       );
     }
     lines.push(
@@ -332,7 +332,7 @@ export class EmulationManager implements PageHook, vscode.Disposable {
           const shownH = Math.min(vp.height, dh);
           const cut = shownW < vp.width || shownH < vp.height;
           notes.push(
-            `${call.tab.id} is in the background, where VS Code draws it in a ${Math.round(dw)}×${Math.round(dh)} px area without fitting the device: the emulated viewport is the top-left ${Math.round(shownW * factor)}×${Math.round(shownH * factor)} px of the image${cut ? ', and the rest of it is cut off' : ''}. Bring the tab to the front with browser_show_tab for a complete picture.`,
+            `${call.tab.id} is in the background, where VS Code draws it in a ${Math.round(dw)}×${Math.round(dh)} px area without fitting the device: the emulated viewport is the top-left ${Math.round(shownW * factor)}×${Math.round(shownH * factor)} px of the image${cut ? ', and the rest of it is cut off' : ''}. Bring the tab to the front with browser_tab {"action":"show"} for a complete picture.`,
           );
         }
       }

@@ -82,7 +82,7 @@ export interface ChangeReport {
 
 export function formatChange(r: ChangeReport): string {
   if (r.crashed) {
-    const lines = [`The page in ${r.tabId} crashed after the change (renderer gone). Reload it with browser_history (action "reload") once the cause is fixed.`];
+    const lines = [`The page in ${r.tabId} crashed after the change (renderer gone). Reload it with browser_navigate {"action":"reload"} once the cause is fixed.`];
     if (r.errors.length) lines.push(`- ${count(r.errors.length + r.moreErrors, 'new error')} before the crash:`, ...r.errors.map(e => `  ${e}`), ...more(r.moreErrors, 'browser_console_messages'));
     if (r.failures.length) lines.push(`- ${count(r.failures.length + r.moreFailures, 'new failed request')} before the crash:`, ...r.failures.map(e => `  ${e}`), ...more(r.moreFailures, 'browser_network_requests'));
     if (r.devServerLost) lines.push(lostLine(r.devServerLost));
@@ -163,7 +163,7 @@ export function formatNoUpdate(r: { tabId: string; how: 'nothing' | 'silent'; li
 /** The tab stopped answering during the check. */
 export function formatStuck(r: { tabId: string; step: string; waitedMs: number; update?: string; errors: string[]; failures: string[] }): string {
   const lines = [
-    `${r.tabId} did not respond while ${r.step} (waited ${formatMs(r.waitedMs)}): it may be stuck in a long-running script, or VS Code is not drawing it right now. Try again; bring it to the front with browser_show_tab, or reload it with browser_history if it stays stuck.`,
+    `${r.tabId} did not respond while ${r.step} (waited ${formatMs(r.waitedMs)}): it may be stuck in a long-running script, or VS Code is not drawing it right now. Try again; bring it to the front with browser_tab {"action":"show"}, or reload it with browser_navigate {"action":"reload"} if it stays stuck.`,
   ];
   if (r.update) lines.push(`- Seen before that: ${r.update}.`);
   if (r.errors.length) lines.push(`- Seen before that: ${count(r.errors.length, 'new error')}:`, ...r.errors.map(e => `  ${e}`));

@@ -267,6 +267,32 @@ describe('tool selection (copane.tools.*)', () => {
     expect(await peer.request<CallToolResult>(Methods.callTool, { name: 'wait', arguments: { ms: 1 } })).toEqual({ content: [{ type: 'text', text: 'done' }] });
   });
 
+  it('answers an old name of a merged tool through the new tool, unlisted, under the new tool\'s settings', async () => {
+    const texts = (r: CallToolResult) => r.content.filter(c => c.type === 'text').map(c => (c as { text: string }).text);
+    tools.register([
+      defineTool({ name: 'terminal_send', description: 'x', input: { terminal: z.string().optional(), keys: z.array(z.string()).optional() }, handler: args => `sent ${JSON.stringify(args)}` }),
+    ]);
+    await restart();
+    const peer = await connect();
+    await peer.request(Methods.hello, hello('a'));
+    expect(await names(peer)).not.toContain('terminal_interrupt');
+    const note = '(terminal_interrupt is now terminal_send {"keys":["Ctrl+C"]}: call that from now on; the old name will be removed.)';
+    expect(texts(await peer.request<CallToolResult>(Methods.callTool, { name: 'terminal_interrupt', arguments: { terminal: 'term-1' } }))).toEqual([
+      `${note}\nsent {"terminal":"term-1","keys":["Ctrl+C"]}`,
+    ]);
+    // Arguments the old tool did not take are refused, as they would have been.
+    const wrong = await peer.request<CallToolResult>(Methods.callTool, { name: 'terminal_interrupt', arguments: { text: 'y' } });
+    expect(wrong.isError).toBe(true);
+    expect(texts(wrong)[0]).toMatch(/^\(terminal_interrupt is now [^\n]*\nterminal_interrupt has no argument "text"; nothing was done\. Its arguments are "terminal"\./);
+    // The new tool turned off: refused, naming it.
+    selection = { disabled: ['terminal_send'] };
+    expect(texts(await peer.request<CallToolResult>(Methods.callTool, { name: 'terminal_interrupt', arguments: {} }))[0]).toMatch(/^terminal_send is turned off/);
+    // The old name turned off by name: refused too.
+    selection = { disabled: ['terminal_interrupt'] };
+    expect(texts(await peer.request<CallToolResult>(Methods.callTool, { name: 'terminal_interrupt', arguments: {} }))[0]).toMatch(/^terminal_interrupt is turned off/);
+    selection = {};
+  });
+
   it('tells connected peers when told the selection changed', async () => {
     await restart();
     const peer = await connect();

@@ -345,7 +345,7 @@ export async function keepPageActive(call: PageCall): Promise<void> {
  */
 export async function ensureReady(call: PageCall, timeoutMs = 10_000): Promise<void> {
   const { state } = call;
-  if (state.crashed) throw new ToolError('failed', `The page in ${call.tab.id} crashed. Reload it with browser_history (action "reload").`);
+  if (state.crashed) throw new ToolError('failed', `The page in ${call.tab.id} crashed. Reload it with browser_navigate {"action":"reload"}.`);
   // A tab that was just opened starts on an empty document ("" or about:blank) until its first
   // navigation commits; reading it before then would show an empty page.
   const expectsNavigation = () => (state.url === '' || state.url === 'about:blank') && call.tab.url !== '' && !call.tab.url.startsWith('about:');
@@ -357,7 +357,7 @@ export async function ensureReady(call: PageCall, timeoutMs = 10_000): Promise<v
     if (err instanceof ToolError && err.code === 'timeout') {
       throw new ToolError(
         'timeout',
-        `${call.tab.id} is not responding to scripts. It may be showing a dialog that opened before the bridge was watching it (call browser_handle_dialog to dismiss it), or be stuck in a long-running script (try again shortly, or reload it with browser_history).`,
+        `${call.tab.id} is not responding to scripts. It may be showing a dialog that opened before the bridge was watching it (call browser_handle_dialog to dismiss it), or be stuck in a long-running script (try again shortly, or reload it with browser_navigate {"action":"reload"}).`,
       );
     }
     throw err;

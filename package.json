@@ -299,7 +299,7 @@
           ],
           "enumDescriptions": [
             "Every tool.",
-            "The everyday tools only: browsing, reading and acting on pages, tabs, dialogs, hand-off to you, and terminals. Leaves out the dev and test extras (emulate, route, audit, check change, inspect, export test, profiles) and rarely used tools (hover, drag, upload file, downloads, show tab, terminal interrupt, session info), about a third of what the tool list costs."
+            "The everyday tools only: browsing, reading and acting on pages, tabs, dialogs, hand-off to you, and terminals. Leaves out the dev and test extras (emulate, route, audit, check change, inspect, export test, profiles) and rarely used tools (hover, drag, upload file, downloads, session info), about a third of what the tool list costs."
           ],
           "default": "full",
           "markdownDescription": "Which tools agents get. Every tool's definition is part of every conversation, and some agents (GitHub Copilot, Codex) load all of them up front; VS Code allows 128 tools per request across all MCP servers. `core` keeps the everyday tools. Connected agents get the new list right away (their next request cannot reuse its prompt cache). `window_status` and `window_select` are always there."

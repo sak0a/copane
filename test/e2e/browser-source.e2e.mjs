@@ -29,7 +29,7 @@ const sizes = [];
 
 let previous;
 async function open(url) {
-  if (previous) await a.call('browser_close_tab', { tab: previous });
+  if (previous) await a.call('browser_tab', { action: 'close', tab: previous });
   const text = await a.ok('browser_open', { url, background: true });
   const id = /Opened (tab-\d+)/.exec(text)?.[1];
   assert.ok(id, `no tab id in: ${text}`);
@@ -97,7 +97,7 @@ test('React 19: _debugStack through the source map; library components are count
   assert.match(text, /\n1 library component left out \(node_modules\)\./);
   // After a reload (a new document, so the maps are loaded again), the page's own requests are in the
   // tab's network log, and the bridge's loads of scripts and maps are not.
-  await a.ok('browser_history', { action: 'reload' });
+  await a.ok('browser_navigate', { action: 'reload' });
   await inspect({ selector: '#add' }, 'React 19 after reload');
   const log = await a.ok('browser_network_requests', { includeStatic: true });
   assert.match(log, /bundle\.js/);

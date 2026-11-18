@@ -100,7 +100,7 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
     return new ToolError(
       'busy',
       `${t.id} is busy: \`${shortCommand(c.commandLine)}\` (started by ${by(session, c.agentSession)}) has been running for ${formatDuration(Date.now() - c.startedAt)}. ` +
-        `Wait for it (terminal_wait), give it input (terminal_send), stop it (terminal_interrupt), or omit \`terminal\` to run in a free terminal of your own.`,
+        `Wait for it (terminal_wait), give it input (terminal_send), stop it (terminal_send keys ["Ctrl+C"]), or omit \`terminal\` to run in a free terminal of your own.`,
     );
   }
 
@@ -130,11 +130,29 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
     return `${what} ${activityOf(t, execution, session)}`;
   }
 
+  /**
+   * terminal_send with keys ["Ctrl+C"] alone: stop the running command, wait (bounded) for it to end
+   * and say whether it did, with the last output. Once its own tool, terminal_interrupt.
+   */
+  async function interrupt(t: Tracked, ctx: ToolContext, waitSeconds: number): Promise<string> {
+    const execution = t.current;
+    const waitMs = Math.max(300, waitSeconds * 1000);
+    t.terminal.sendText('\x03', false);
+    if (execution) await raceTimeout(execution.done, waitMs, ctx.signal);
+    else await sleep(300);
+    await t.mirror.flush();
+    let headline: string;
+    if (!execution) headline = `Pressed Ctrl+C in ${t.id}; no command was running.`;
+    else if (execution.ended) headline = `Interrupted. ${finishedLine(t, execution, ctx.session)}`;
+    else headline = `Pressed Ctrl+C, but \`${shortCommand(execution.commandLine)}\` is still running after ${+(waitMs / 1000).toFixed(1)} s. Try again, send keys ["Ctrl+\\\\"], or close the terminal (terminal_close).`;
+    return withNotes(t, [headline, ...newOutputParts(t, ctx.session, 'Output since your last look:'), statusOf(t, ctx.session)], ctx.session);
+  }
+
   /** The suggestions after a command that is still running: in full once per session and terminal. */
   function nextLine(t: Tracked, session: AgentSession): string {
-    if (t.hintsShown.has(session.id)) return `Next: terminal_wait, terminal_read, terminal_send or terminal_interrupt.`;
+    if (t.hintsShown.has(session.id)) return `Next: terminal_wait, terminal_read or terminal_send (keys ["Ctrl+C"] stops it).`;
     t.hintsShown.add(session.id);
-    return `Next: terminal_wait {"terminal":"${t.id}"} (until it ends, or for_text), terminal_read for new output, terminal_send to type, terminal_interrupt to stop it.`;
+    return `Next: terminal_wait {"terminal":"${t.id}"} (until it ends, or for_text), terminal_read for new output, terminal_send to type, or with keys ["Ctrl+C"] to stop it.`;
   }
 
   function statusOf(t: Tracked, session?: AgentSession): string {
@@ -228,7 +246,7 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
       title: 'Run a command in a terminal',
       description:
         'Runs a shell command in a VS Code terminal the user can watch (default: your current one, opened when needed) and returns its output and exit code. ' +
-        'A command still running after timeout_seconds keeps running: continue with terminal_wait, terminal_read, terminal_send or terminal_interrupt.',
+        'A command still running after timeout_seconds keeps running: continue with terminal_wait, terminal_read or terminal_send (keys ["Ctrl+C"] stops it).',
       input: {
         command: z.string().min(1).describe("As typed at the prompt of the terminal's shell."),
         terminal: terminalArg,
@@ -348,12 +366,13 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
       name: 'terminal_send',
       title: 'Type into a terminal',
       description:
-        'Types text and/or presses keys in a terminal, to answer a prompt or drive a menu or full-screen program, and returns the output that followed. Text is typed as is; add keys ["Enter"] to submit. Never type secrets you were not given.',
+        'Types text and/or presses keys in a terminal, to answer a prompt or drive a menu or full-screen program, and returns the output that followed. Text is typed as is; add keys ["Enter"] to submit. ' +
+        'keys ["Ctrl+C"] alone stops the running command and says whether it ended. Never type secrets you were not given.',
       input: {
         terminal: terminalArg,
         text: z.string().optional(),
-        keys: z.array(z.string()).optional().describe('Pressed after the text, e.g. ["Down", "Enter"], ["Ctrl+C"], ["Escape"].'),
-        wait_seconds: z.number().min(0).max(30).optional().describe('Longest wait for output to settle, default 2.'),
+        keys: z.array(z.string()).optional().describe('Pressed after the text, e.g. ["Down", "Enter"], ["Escape"].'),
+        wait_seconds: z.number().min(0).max(30).optional().describe('Longest wait for output to settle, default 2; with Ctrl+C alone, for the command to end, default 5.'),
       },
       handler: async (args, ctx) => {
         const t = await existing(ctx, args.terminal);
@@ -366,6 +385,7 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
           throw err;
         }
         if (!data) throw new ToolError('invalid_input', 'Nothing to send: pass `text`, `keys` or both.');
+        if (data === '\x03') return interrupt(t, ctx, args.wait_seconds ?? 5);
         if (!t.marks.has(ctx.session.id)) t.marks.set(ctx.session.id, t.mirror.mark());
         const sentAt = Date.now();
         const before = t.mirror.received;
@@ -379,26 +399,6 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
         }
         await t.mirror.flush();
         return withNotes(t, [`Sent ${describeInput(args.text, args.keys)} to ${t.id}.`, ...newOutputParts(t, ctx.session, 'Output since your last look:'), statusOf(t, ctx.session)], ctx.session);
-      },
-    }),
-
-    defineTool({
-      name: 'terminal_interrupt',
-      title: 'Interrupt a terminal command',
-      description: 'Presses Ctrl+C in a terminal to stop its command, waits up to 5 s for it to end, and returns the last output.',
-      input: { terminal: terminalArg },
-      handler: async (args, ctx) => {
-        const t = await existing(ctx, args.terminal);
-        const execution = t.current;
-        t.terminal.sendText('\x03', false);
-        if (execution) await raceTimeout(execution.done, 5000, ctx.signal);
-        else await sleep(300);
-        await t.mirror.flush();
-        let headline: string;
-        if (!execution) headline = `Pressed Ctrl+C in ${t.id}; no command was running.`;
-        else if (execution.ended) headline = `Interrupted. ${finishedLine(t, execution, ctx.session)}`;
-        else headline = `Pressed Ctrl+C, but \`${shortCommand(execution.commandLine)}\` is still running after 5 s. Try again, send keys ["Ctrl+\\\\"], or close the terminal (terminal_close).`;
-        return withNotes(t, [headline, ...newOutputParts(t, ctx.session, 'Output since your last look:'), statusOf(t, ctx.session)], ctx.session);
       },
     }),
 

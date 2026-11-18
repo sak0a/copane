@@ -30,7 +30,7 @@ export function buildInstructions(services: BridgeServices, enabled: (tool: stri
         'Open your own tabs with browser_open.',
         'Using a tab the user opened asks them first; if they decline or pause a tab, do not retry: use your own tab or ask in chat.',
         'A tab another session drives can be read but not acted on.',
-        'Call browser_release_tab when you are done driving a tab.',
+        'When you are done driving a tab, call browser_tab {"action":"release"}.',
       ]),
       paragraph('Pages: ', [
         'browser_snapshot gives refs (e.g. "e12") for the action tools; its mode "text" is cheapest for reading, and find locates something on a long page.',

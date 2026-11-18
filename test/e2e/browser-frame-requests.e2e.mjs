@@ -32,7 +32,7 @@ async function withAgent(name, fn) {
   try {
     await a.ok('browser_open', { url: 'about:blank', background: true });
     await fn(a);
-    await a.call('browser_close_tab', {});
+    await a.call('browser_tab', { action: 'close' });
   } finally {
     await a.close();
   }

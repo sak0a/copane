@@ -28,7 +28,7 @@ const a = await agent({ session: 'browser-frames-a' });
 let previous;
 /** Opens a background tab (closing the previous case's), waits until it has loaded; returns its id. */
 async function open(url) {
-  if (previous) await a.call('browser_close_tab', { tab: previous });
+  if (previous) await a.call('browser_tab', { action: 'close', tab: previous });
   const text = await a.ok('browser_open', { url, background: true });
   const id = /Opened (tab-\d+)/.exec(text)?.[1];
   assert.ok(id, `no tab id in: ${text}`);
@@ -315,9 +315,9 @@ test('two sessions on one tab keep their own refs inside frames', async () => {
     const theirs = await b.ok('browser_snapshot', { tab });
     const myRef = refOf(mine, 'button "Innermost button"');
     const theirRef = refOf(theirs, 'button "Innermost button"');
-    await a.ok('browser_release_tab', { tab }).catch(() => {});
+    await a.ok('browser_tab', { action: 'release', tab }).catch(() => {});
     assert.match(await b.ok('browser_click', { tab, ref: theirRef }), /It is now button "Innermost clicked"/);
-    await b.ok('browser_release_tab', { tab }).catch(() => {});
+    await b.ok('browser_tab', { action: 'release', tab }).catch(() => {});
     // Each session resolves only its own refs; the role changed underneath, which both see as stale.
     const r = await a.call('browser_click', { tab, ref: myRef });
     assert.match(r.text, /has changed: it was button "Innermost button"/);

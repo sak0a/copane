@@ -85,6 +85,10 @@ export class ToolRegistry {
     };
   }
 
+  has(name: string): boolean {
+    return this.tools.has(name);
+  }
+
   list(): WireTool[] {
     return [...this.tools.values()].map(t => t.wire);
   }

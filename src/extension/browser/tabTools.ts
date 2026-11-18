@@ -50,7 +50,7 @@ export function registerTabTools(services: BridgeServices, browser: BrowserServi
           if (tabs.length === 0) return 'No browser tabs are open. Open one with browser_open.';
           const current = browser.currentTabOf(ctx.session.id);
           const lines = tabs.map(t => `${t.id === current ? '* ' : '  '}${formatTab(t, services, ctx.session)}`);
-          return `${lines.join('\n')}\n${current ? `* = your current tab (${current}).` : 'You have no current tab: pass `tab`, or call browser_select_tab or browser_open.'}`;
+          return `${lines.join('\n')}\n${current ? `* = your current tab (${current}).` : 'You have no current tab: pass `tab`, or call browser_tab {"action":"select"} or browser_open.'}`;
         },
       }),
       defineTool({
@@ -86,83 +86,84 @@ export function registerTabTools(services: BridgeServices, browser: BrowserServi
           return `Opened ${formatTab(tab, services, ctx.session)}${after}`;
         },
       }),
+      // One tool for the state-changing tab actions; listing stays its own read-only tool, so clients
+      // can let it run without asking (it is frequent and harmless) while closing still asks.
       defineTool({
-        name: 'browser_select_tab',
-        title: 'Switch to a browser tab',
-        description: 'Makes a tab your current one (for a tab the user opened, asks them first). Does not bring it to the front.',
-        input: { tab: z.string().describe('e.g. "tab-3".') },
-        annotations: { idempotentHint: true },
-        handler: async (args, ctx) => {
-          await requireBrowser();
-          const { tab } = await browser.acquire(ctx.session, args.tab, 'read', ctx.signal);
-          const holder = tab.controlledBy && tab.controlledBy !== ctx.session.id ? services.sessions.get(tab.controlledBy) : undefined;
-          const note = holder ? `\n${sessionDisplayName(holder)} controls it right now: you can read it, and act once they release it.` : '';
-          return `${tab.id} is now your current tab.\n${formatTab(tab, services, ctx.session)}${note}`;
-        },
-      }),
-      defineTool({
-        name: 'browser_show_tab',
-        title: 'Show browser tab to the user',
-        description: 'Brings a browser tab to the front so the user sees it (focus stays). Only when you want the user to look at it.',
-        input: { tab: tabArg },
-        handler: async (args, ctx) => {
-          await requireBrowser();
-          const id = browser.resolveId(ctx.session, args.tab);
-          await browser.revealTab(id);
-          return `${id} is in front now.`;
-        },
-      }),
-      defineTool({
-        name: 'browser_release_tab',
-        title: 'Release browser tab',
-        description: 'Ends your control of a tab you are done driving, so the user and other sessions can act in it. You can still read it.',
+        name: 'browser_tab',
+        title: 'Select, show, release or close a browser tab',
+        description:
+          'Acts on one browser tab. select: make `tab` your current tab (a tab the user opened asks them first). show: bring a tab to the front for the user to look at (focus stays). ' +
+          "release: end your control of a tab, or of `all` you control, so the user and other sessions can act; you can still read it. close: close a tab (yours, an ended session's, or the user's with their permission).",
         input: {
+          action: z.enum(TAB_ACTIONS),
           tab: tabArg,
-          all: z.boolean().optional().describe('Every tab you control.'),
+          all: z.boolean().optional(),
         },
-        annotations: { idempotentHint: true },
-        handler: async (args, ctx) => {
-          await requireBrowser();
-          if (args.all) {
-            const released = services.tabLeases.releaseAllOf(ctx.session.id);
-            const extra = browser.runReleaseHooks(ctx.session.id, browser.listTabs().map(t => t.id));
-            return [released.length ? `Released ${released.join(', ')}.` : 'You did not control any tab.', ...extra].join(' ');
-          }
-          const id = browser.resolveId(ctx.session, args.tab);
-          const holder = services.tabLeases.holder(id);
-          const extra = browser.runReleaseHooks(ctx.session.id, [id]);
-          if (holder?.sessionId !== ctx.session.id) return [`You did not control ${id}; nothing to release.`, ...extra].join(' ');
-          browser.releaseTab(id, ctx.session.id);
-          return [`Released ${id}.`, ...extra].join(' ');
-        },
-      }),
-      defineTool({
-        name: 'browser_close_tab',
-        title: 'Close browser tab',
-        description: "Closes a browser tab: yours, an ended session's, or (with their permission) the user's.",
-        input: { tab: tabArg },
         annotations: { destructiveHint: true },
         handler: async (args, ctx) => {
           await requireBrowser();
-          const id = browser.resolveId(ctx.session, args.tab);
-          const rel = browser.relationOf(ctx.session, id);
-          if (rel === 'other-session') {
-            const owner = services.sessions.get(describe(id).openedBy ?? '');
-            throw new ToolError('access_denied', `${id} belongs to ${owner ? sessionDisplayName(owner) : 'another agent session'}; only it (or the user) can close it.`);
+          const problem = tabActionProblem(args);
+          if (problem) throw new ToolError('invalid_input', problem);
+          switch (args.action) {
+            case 'select': {
+              const { tab } = await browser.acquire(ctx.session, args.tab!, 'read', ctx.signal);
+              const holder = tab.controlledBy && tab.controlledBy !== ctx.session.id ? services.sessions.get(tab.controlledBy) : undefined;
+              const note = holder ? `\n${sessionDisplayName(holder)} controls it right now: you can read it, and act once they release it.` : '';
+              return `${tab.id} is now your current tab.\n${formatTab(tab, services, ctx.session)}${note}`;
+            }
+            case 'show': {
+              const id = browser.resolveId(ctx.session, args.tab);
+              await browser.revealTab(id);
+              return `${id} is in front now.`;
+            }
+            case 'release': {
+              if (args.all) {
+                const released = services.tabLeases.releaseAllOf(ctx.session.id);
+                const extra = browser.runReleaseHooks(ctx.session.id, browser.listTabs().map(t => t.id));
+                return [released.length ? `Released ${released.join(', ')}.` : 'You did not control any tab.', ...extra].join(' ');
+              }
+              const id = browser.resolveId(ctx.session, args.tab);
+              const holder = services.tabLeases.holder(id);
+              const extra = browser.runReleaseHooks(ctx.session.id, [id]);
+              if (holder?.sessionId !== ctx.session.id) return [`You did not control ${id}; nothing to release.`, ...extra].join(' ');
+              browser.releaseTab(id, ctx.session.id);
+              return [`Released ${id}.`, ...extra].join(' ');
+            }
+            case 'close': {
+              const id = browser.resolveId(ctx.session, args.tab);
+              const rel = browser.relationOf(ctx.session, id);
+              if (rel === 'other-session') {
+                const owner = services.sessions.get(describe(id).openedBy ?? '');
+                throw new ToolError('access_denied', `${id} belongs to ${owner ? sessionDisplayName(owner) : 'another agent session'}; only it (or the user) can close it.`);
+              }
+              // Same checks as acting in the tab: consent for user tabs, pause, and the lease.
+              await browser.acquire(ctx.session, id, 'control', ctx.signal);
+              const { title } = describe(id);
+              await browser.closeTab(id);
+              const current = browser.currentTabOf(ctx.session.id);
+              return `Closed ${id} ("${title}").${current ? '' : ' You have no current tab now.'}`;
+            }
           }
-          // Same checks as acting in the tab: consent for user tabs, pause, and the lease.
-          await browser.acquire(ctx.session, id, 'control', ctx.signal);
-          const { title } = describe(id);
-          await browser.closeTab(id);
-          const current = browser.currentTabOf(ctx.session.id);
-          return `Closed ${id} ("${title}").${current ? '' : ' You have no current tab now.'}`;
         },
       }),
     ]),
   );
 }
 
-/** "localhost:3000" → "http://localhost:3000"; anything with a scheme is left alone. */
+const TAB_ACTIONS = ['select', 'show', 'release', 'close'] as const;
+
+/**
+ * Why a browser_tab call cannot be done as asked, or undefined. `all` belongs to release only, so a
+ * close never acts on more tabs than the one meant; select needs the tab to switch to.
+ */
+export function tabActionProblem(args: { action: (typeof TAB_ACTIONS)[number]; tab?: string; all?: boolean }): string | undefined {
+  if (args.action === 'select' && !args.tab) return 'browser_tab {"action":"select"} needs `tab`, the id of the tab to switch to (e.g. "tab-3"; browser_list_tabs shows them). Nothing was done.';
+  if (args.all !== undefined && args.action !== 'release') return `\`all\` goes only with {"action":"release"}; browser_tab {"action":"${args.action}"} acts on one tab: pass \`tab\`, or omit it for your current tab. Nothing was done.`;
+  if (args.all && args.tab) return 'browser_tab {"action":"release"} takes `tab` or `all`, not both. Nothing was done.';
+  return undefined;
+}
+
+/** "localhost:3000" →"http://localhost:3000"; anything with a scheme is left alone. */
 export function normalizeUrl(url: string): string {
   const u = url.trim();
   if (/^[a-z][a-z0-9+.-]*:/i.test(u) && !/^(localhost|[\w.-]+):\d+(\/|$)/i.test(u)) return u;

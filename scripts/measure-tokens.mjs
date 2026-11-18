@@ -87,7 +87,7 @@ for (const [i, url] of pages.entries()) {
   out.pages.push({ url, navigate: nav.length, snapshot: snap.length, cut: shown ? `${Math.round((Number(shown[1]) / Number(shown[2])) * 100)}%` : undefined });
   console.log(`  ${url}\n    navigate result ${nav.length} chars ≈ ${tok(nav)} tok | snapshot ${snap.length} chars ≈ ${tok(snap)} tok${shown ? ` (cut, shows ${out.pages.at(-1).cut})` : ''}`);
 }
-if (kind === 'copane') await call('browser_close_tab', {}).catch(() => {});
+if (kind === 'copane') await call('browser_tab', { action: 'close' }).catch(() => {});
 
 // ---------------------------------------------------------------- tasks
 if (argv.includes('--tasks') && kind === 'copane') {
@@ -210,7 +210,7 @@ if (argv.includes('--tasks') && kind === 'copane') {
     } catch (err) {
       t.failed = `error: ${err.message}`;
     }
-    await call('browser_close_tab', {}).catch(() => {});
+    await call('browser_tab', { action: 'close' }).catch(() => {});
     out.tasks.push({ name, calls: t.calls, chars: t.chars, failed: t.failed });
     console.log(`  task ${name}: ${t.calls} calls, results ${t.chars} chars ≈ ${tok({ length: t.chars })} tok${t.failed ? `  FAILED (${t.failed})` : ''}`);
   }

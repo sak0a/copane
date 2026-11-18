@@ -42,7 +42,7 @@ export function agentFilePath(env: PageEnv, ctx: ToolContext, path: string, rule
   return { file, shown: base ? relative(base, file) : file };
 }
 
-export function writeAgentFile(target: AgentFile, data: string): void {
+export function writeAgentFile(target: AgentFile, data: string | Uint8Array): void {
   mkdirSync(dirname(target.file), { recursive: true });
   writeFileSync(target.file, data);
 }

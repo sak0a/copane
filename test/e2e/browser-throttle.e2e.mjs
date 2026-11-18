@@ -56,7 +56,7 @@ test('network and CPU throttling reach the page and its cross-origin frame; the 
 
     // The user sees it: the tab's label in the views and the editor title button.
     assert.equal(await emulationLabel(a, tab), 'Slow 4G · CPU 4×');
-    await a.ok('browser_show_tab', {});
+    await a.ok('browser_tab', { action: 'show' });
     assert.ok((await until(() => titleActions().find(l => /End Agent's Device Emulation and Throttling/.test(l)), 'the reset button')));
     assert.match(await a.ok('browser_emulate', {}), /emulates Slow 4G network .*, CPU 4× slower\./);
 
@@ -66,7 +66,7 @@ test('network and CPU throttling reach the page and its cross-origin frame; the 
     const c2 = await cpu(a);
     assert.ok(c2.page < baseline.page * 1.8 && c2.frame < baseline.frame * 1.8, JSON.stringify({ baseline, c2 }));
     assert.equal(await emulationLabel(a, tab), null);
-    await a.ok('browser_close_tab', {});
+    await a.ok('browser_tab', { action: 'close' });
   } finally {
     await a.close();
   }
@@ -93,7 +93,7 @@ test('offline: requests fail, navigator.onLine is false in page and frame, and t
     await a.ok('browser_emulate', { network: 'none' });
     assert.equal(await a.ok('browser_evaluate', { function: '() => document.getElementById("online").textContent' }), 'online');
     assert.equal((await net(a)).page.ok, true);
-    await a.ok('browser_close_tab', {});
+    await a.ok('browser_tab', { action: 'close' });
   } finally {
     await a.close();
   }
@@ -127,7 +127,7 @@ test('combines with device emulation; network, CPU and device end on their own a
     assert.match(await a.ok('browser_emulate', { reset: true }), /back to normal/);
     assert.ok((await net(a)).page.ms < 400);
     assert.ok((await cpu(a)).page < baseline.page * 1.8);
-    await a.ok('browser_close_tab', {});
+    await a.ok('browser_tab', { action: 'close' });
   } finally {
     await a.close();
   }
@@ -150,7 +150,7 @@ test('mocked responses (browser_route) are not slowed and still arrive offline; 
     assert.equal((await page(a, `() => measure(2)`)).ok, false);
     await a.ok('browser_route', { action: 'remove' });
     await a.ok('browser_emulate', { reset: true });
-    await a.ok('browser_close_tab', {});
+    await a.ok('browser_tab', { action: 'close' });
   } finally {
     await a.close();
   }
@@ -168,7 +168,7 @@ test('a performance audit says it was measured under throttling', async () => {
     assert.match(reloaded, /Throttled \(browser_emulate\): Slow 4G network .* and CPU 4× slower\. These numbers were measured under it/);
     assert.match(reloaded, /with the throttling above/);
     await a.ok('browser_emulate', { reset: true });
-    await a.ok('browser_close_tab', {});
+    await a.ok('browser_tab', { action: 'close' });
   } finally {
     await a.close();
   }
@@ -179,7 +179,7 @@ test('throttling ends when the session releases the tab, and when the user reset
   try {
     const tab = tabOf(await a.ok('browser_open', { url: server.url('/') }));
     await a.ok('browser_emulate', { network: 'offline', cpu: 4 });
-    await a.ok('browser_release_tab', { tab });
+    await a.ok('browser_tab', { action: 'release', tab });
     await until(async () => (await emulationLabel(a, tab)) === null, 'emulation to end on release');
     const r = await net(a, tab);
     assert.deepEqual([r.page.ok, r.frame.ok, r.online, r.frameOnline], [true, true, true, true], JSON.stringify(r));
@@ -192,7 +192,7 @@ test('throttling ends when the session releases the tab, and when the user reset
     assert.ok((await net(a, tab)).frame.ms < 400);
     assert.ok((await cpu(a, tab)).page < baseline.page * 1.8);
     assert.match(await a.ok('browser_emulate', { tab }), /had ended: the user reset it/);
-    await a.ok('browser_close_tab', { tab });
+    await a.ok('browser_tab', { action: 'close', tab });
   } finally {
     await a.close();
   }
@@ -240,7 +240,7 @@ test('after the extension host restarts, no tab stays throttled or offline (also
       assert.ok(s);
     }
     assert.deepEqual(JSON.parse(await a.ok('debug_extension_eval', { code: `return services.context.workspaceState.get('copane.browser.throttledTabs') ?? {};` })), {});
-    for (const tab of [managed, raw]) await a.call('browser_close_tab', { tab });
+    for (const tab of [managed, raw]) await a.call('browser_tab', { action: 'close', tab });
   } finally {
     await a.close();
   }

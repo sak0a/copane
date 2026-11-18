@@ -15,8 +15,9 @@ export interface ToolSelection {
 /**
  * The tools the `core` profile leaves out, each with what an agent can do instead (shown when it calls
  * one anyway), or `''` when there is nothing comparable. The everyday loop stays: open, navigate,
- * snapshot, click, type, fill, press, scroll, wait, screenshot, evaluate, console, network, tabs,
- * history, dialogs (a page can block on them), hand-off to the user, and every terminal basic.
+ * snapshot, click, type, fill, press, scroll, wait, screenshot, evaluate, console, network, tabs (with
+ * show), back/forward/reload, dialogs (a page can block on them), hand-off to the user, and every
+ * terminal basic (with Ctrl+C through terminal_send).
  */
 export const CORE_PROFILE_EXCLUDES: ReadonlyMap<string, string> = new Map([
   // Dev and test extras: each serves one specialised task and they are the largest definitions.
@@ -32,8 +33,6 @@ export const CORE_PROFILE_EXCLUDES: ReadonlyMap<string, string> = new Map([
   ['browser_drag', ''], // drag and drop only
   ['browser_upload_file', ''], // file inputs only
   ['browser_downloads', 'Action results already report downloads they start, with the saved path.'],
-  ['browser_show_tab', 'Tell the user in chat which tab to look at.'],
-  ['terminal_interrupt', 'Use terminal_send with keys ["Ctrl+C"].'],
   ['session_info', 'window_status shows your session label and the window.'],
 ]);
 
