@@ -262,6 +262,16 @@ test('a tab an agent hands to the user is lifted out of the collapsed run while 
   await until(async () => /A1\* A2\*/.test(await strip()), 'A2 back in the run');
 });
 
+test('collapsing a session with no tab to pin is saved for a reload too', async () => {
+  const USER = `tg-e2e-user-${RUN}`;
+  const saved = () => extEval(`return services.context.workspaceState.get('copane.ui.tabGroups')?.collapsed ?? []`);
+  await command('copane.ui.collapseSessionTabs', USER);
+  await until(async () => (await saved()).includes(USER), 'the collapsed flag of a session without tabs to be saved');
+  await command('copane.ui.expandSessionTabs', USER);
+  await until(async () => !(await saved()).includes(USER), 'expanding it to be saved');
+  assert.deepEqual((await uiState()).tabGroups.collapsed, [ALPHA]);
+});
+
 test('after a window reload the collapsed session is collapsed again and the other one is not', async () => {
   const pinnedBefore = (await uiState()).tabGroups.pinnedByUs.slice().sort();
   await sleep(800);

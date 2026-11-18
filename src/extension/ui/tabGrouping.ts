@@ -236,7 +236,11 @@ export class TabGrouping implements vscode.Disposable {
 
   private change(update: (snap: Snapshot) => GroupingState): Promise<void> {
     return this.run(async () => {
+      const before = JSON.stringify(this.state);
       this.state = update(this.snapshot());
+      // Saved here too: a session with no tab to pin or unpin changes only its collapsed flag, which
+      // reconcile would not see as a change.
+      if (JSON.stringify(this.state) !== before) this.persist();
       await this.reconcile();
     });
   }
