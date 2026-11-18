@@ -11,14 +11,15 @@ import { panelAsText } from './panelModel';
 import type { FixtureTerminals } from './sources';
 import type { UiState } from './state';
 import type { StatusBar } from './statusBar';
+import type { TabGrouping } from './tabGrouping';
 import type { SessionsTree } from './tree';
 
-export function registerUiDebugTools(services: BridgeServices, state: UiState, statusBar: StatusBar, tree: SessionsTree, panel: TabsPanel, fixtures: FixtureTerminals): vscode.Disposable {
+export function registerUiDebugTools(services: BridgeServices, state: UiState, statusBar: StatusBar, tree: SessionsTree, panel: TabsPanel, fixtures: FixtureTerminals, grouping: TabGrouping): vscode.Disposable {
   return services.tools.register([
     defineTool({
       name: 'debug_ui_state',
       description:
-        'Development only. Shows what the Copane UI currently renders: the Sessions tree as text, every row (id, label, description, icon, contextValue), the status bar item, the view badge, the attention list, and the Agent Tabs panel view (`panel`: text, rows, description, visible). `activeTerminal` is the active terminal (name, shell pid); `sessionsSelection` the selected Sessions rows. Reflects the last coalesced update, so poll for changes.',
+        'Development only. Shows what the Copane UI currently renders: the Sessions tree as text, every row (id, label, description, icon, contextValue), the status bar item, the view badge, the attention list, and the Agent Tabs panel view (`panel`: text, rows, description, visible). `activeTerminal` is the active terminal (name, shell pid); `sessionsSelection` the selected Sessions rows; `favicons` the site icon of each listed tab (key, or why it is refused); `tabGroups` the collapsed sessions, the tabs Copane pinned and each tab as the tab grouping sees it (owner, pinned, group, index). Reflects the last coalesced update, so poll for changes.',
       input: {},
       annotations: { readOnlyHint: true },
       handler: async () => {
@@ -45,6 +46,8 @@ export function registerUiDebugTools(services: BridgeServices, state: UiState, s
             activeTerminal: terminal ? { name: terminal.name, pid: terminalPid ?? null } : null,
             sessionsViewVisible: tree.view.visible,
             sessionsSelection: tree.view.selection.map(h => h.id),
+            favicons: state.iconStates(),
+            tabGroups: grouping.debugState(),
           }),
         ];
       },

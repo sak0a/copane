@@ -229,6 +229,13 @@ export interface BrowserService {
    * while that is the window's default store by default. Set by login profiles.
    */
   sessionProfile?(sessionId: string): { name: string; label: string; setBy: 'user' | 'agent' | 'setting' } | undefined;
+  /**
+   * The site icon VS Code's browser shows on the tab's editor tab, as the `data:` URI VS Code gives it
+   * (page content, unchecked: the UI validates it); undefined while it shows its default globe. Read
+   * from VS Code, so it costs no page evaluation or request. Changes fire `onDidChange`. Not part of
+   * `BrowserTabInfo` so it never ends up in tool results. Optional so fakes stay valid.
+   */
+  tabIcon?(tabId: string): string | undefined;
 }
 
 // ---------------------------------------------------------------- Terminals

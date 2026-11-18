@@ -45,7 +45,7 @@ export class SessionsTree implements vscode.TreeDataProvider<NodeHandle>, vscode
   getTreeItem(element: NodeHandle): vscode.TreeItem {
     const node = this.state.model.nodes.get(element.id);
     if (!node) return new vscode.TreeItem('(gone)'); // only while a refresh is in flight
-    return toTreeItem(node, node.children.length ? (this.expanded.get(node.id) ?? true) : undefined);
+    return toTreeItem(node, node.children.length ? (this.expanded.get(node.id) ?? true) : undefined, key => this.state.imageUri(key));
   }
 
   /** Selects and reveals the row of a node, e.g. after the user picked it from the status bar. */
@@ -89,7 +89,8 @@ export class SessionsTree implements vscode.TreeDataProvider<NodeHandle>, vscode
   }
 }
 
-export function toTreeItem(node: ViewNode, expanded: boolean | undefined): vscode.TreeItem {
+/** `image`: the `data:` URI of a site icon key (`ViewIcon.image`), undefined when it is gone. */
+export function toTreeItem(node: ViewNode, expanded: boolean | undefined, image?: (key: string) => string | undefined): vscode.TreeItem {
   const item = new vscode.TreeItem(
     node.label,
     expanded === undefined ? vscode.TreeItemCollapsibleState.None : expanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed,
@@ -98,9 +99,16 @@ export function toTreeItem(node: ViewNode, expanded: boolean | undefined): vscod
   item.description = node.description;
   const tooltip = new vscode.MarkdownString(node.tooltip, true);
   item.tooltip = tooltip;
-  item.iconPath = new vscode.ThemeIcon(node.icon.id, node.icon.color ? new vscode.ThemeColor(node.icon.color) : undefined);
+  const uri = node.icon.image ? image?.(node.icon.image) : undefined;
+  // A checked `data:` URI (favicon.ts): rendered as an image, never fetched; else the codicon.
+  item.iconPath = uri ? dataUri(uri) : new vscode.ThemeIcon(node.icon.id, node.icon.color ? new vscode.ThemeColor(node.icon.color) : undefined);
   item.contextValue = node.contextValue;
   item.accessibilityInformation = { label: node.accessibilityLabel };
   if (node.command) item.command = { command: node.command.command, title: node.command.title, arguments: node.command.args };
   return item;
+}
+
+/** A `data:` URI as VS Code itself builds one (everything after "data:" is the path). */
+function dataUri(uri: string): vscode.Uri {
+  return vscode.Uri.from({ scheme: 'data', path: uri.slice('data:'.length) });
 }

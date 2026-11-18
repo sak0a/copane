@@ -194,6 +194,40 @@ argv.json editor. Not verified for real: Windows paths (`/c:/Users/...`), WSL it
   Code's modal dialog when clicked (`core/promptStatus.ts`, command `copane.answerQuestion`). Only
   the user can answer it: the command takes no arguments and only shows the dialog.
 
+- **Site icons in the views** (`ui/favicon.ts`, setting `copane.ui.favicons`): tab rows show the icon
+  VS Code's browser already shows on the editor tab. `BrowserTab.icon` is a `data:` Uri of what the
+  page's own network stack loaded (verified on 1.146: the server's bytes and declared type, even a
+  scripted SVG or an 80 KB PNG) or `ThemeIcon('globe')`; `services.browser.tabIcon` passes it on (not in
+  `BrowserTabInfo`, so never in tool results). So Copane evaluates nothing in the page, sends no CDP
+  command and makes no request: no interference with page tools, dialogs, navigation, hand-offs,
+  `browser_route` mocks or HAR logs, and only tabs the views list are looked at. The UI checks it as
+  page content: ≤ 32 KB decoded, type sniffed from the bytes (PNG, ICO, GIF, JPEG, WebP, SVG), SVG
+  refused with scripts, event handlers, foreign content, entities or references outside itself;
+  re-encoded as base64 and cached by URI (32 entries, entries of tabs no longer listed dropped). Tree
+  views draw a `data:` icon as a CSS background image (the workbench CSP allows `data:` and `https:`;
+  remote URIs are never passed). Waiting and paused tabs keep their warning icons.
+
+- **Collapsing a session's tabs** (`ui/tabGroups.ts` plans, pure; `ui/tabGrouping.ts` runs it):
+  there is no API for tab groups (microsoft/vscode#100335), and closing a browser editor destroys
+  its page, so a collapsed session's tabs are *pinned*, one contiguous run per session. Verified on
+  1.146: `workbench.action.pinEditor` / `unpinEditor` with the editor's resource
+  (`vscode-browser:/<viewId>`) act on that tab in whichever group it is, without activating,
+  focusing or reloading it; the tab bar updates before the command returns. Pinned tabs sort in pin
+  order and an unpinned tab lands right after the pinned area, so pin / unpin in the right order also
+  moves tabs. With an unknown resource the commands act on the **active** editor, so each operation
+  first checks the tab is still open. Browser editors have no input in `window.tabGroups`; pin state
+  and position are matched by label (title or host) like `columnOf`, and are "unknown" when two tabs
+  share a label (such tabs are not pinned unless Copane pinned them). Only tabs Copane pinned are
+  ever unpinned; a tab the user unpins leaves the group (`optedOut`); a tab with a pending hand-off
+  is lifted out while it waits. State (collapsed session ids, pinned and opted-out **tab ids**) is
+  in workspace state: tab ids, not view ids, because a tab an agent held at a window reload is
+  replaced by a new one with a new view id (`replaceStuck`). For 20 s after activation a tab Copane
+  pinned that is unpinned is taken as a pin the reload lost and pinned again. Ownership is
+  `tabOwner` (the Agent Tabs panel's rule). A second `FileDecorationProvider` for the scheme adds
+  "Collapsed with <session>'s tabs" to the tab's hover (VS Code joins decoration tooltips with " • ");
+  a compact pinned tab shows no badge. The editor tab menu uses `resourceScheme == vscode-browser &&
+  resourceFilename in copane.ui.collapsibleTabs` (view ids), verified to apply to browser editors.
+
 ## Terminal rules
 
 - Agent terminals are real integrated terminals, named and colored after their session, visible to

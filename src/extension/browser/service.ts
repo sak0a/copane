@@ -332,6 +332,12 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
     this.changeEmitter.fire();
   }
 
+  tabIcon(tabId: string): string | undefined {
+    // A Uri for a site icon, a ThemeIcon ("globe") otherwise; duck-typed, the API's shape may still change.
+    const icon = this.find(normalizeTabId(tabId))?.tab.icon as Partial<vscode.Uri> | undefined;
+    return icon && typeof icon === 'object' && icon.scheme === 'data' && typeof icon.path === 'string' ? dataUriText(icon as vscode.Uri) : undefined;
+  }
+
   // ------------------------------------------------------------------ Used by the tools and commands of this module
 
   /** Lets another part of this module add fields to every BrowserTabInfo. Call `notifyChanged` when they change. */
@@ -1016,6 +1022,11 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
   assertAvailable(): void {
     if (!this.available) throw new ToolError('unavailable', NOT_ENABLED);
   }
+}
+
+/** A `data:` Uri as text (VS Code keeps everything after "data:" in its path). */
+function dataUriText(uri: vscode.Uri): string {
+  return `data:${uri.path}${uri.query ? `?${uri.query}` : ''}${uri.fragment ? `#${uri.fragment}` : ''}`;
 }
 
 /** Accepts "tab-3", "3" and " tab-3 ". */

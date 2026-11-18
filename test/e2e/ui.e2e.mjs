@@ -118,6 +118,75 @@ test('pausing the tab as the user shows it, counts it and blocks the agent; resu
   }, 'the tab to be resumed');
 });
 
+/** The icon a workbench row draws, by the start of its aria label, in the Sessions view and the Agent Tabs panel. */
+const rowIcons = prefix =>
+  dom(`(() => {
+    const icon = id => {
+      const r = [...(document.getElementById(id)?.querySelectorAll('.monaco-list-row') ?? [])].find(r => r.getAttribute('aria-label')?.startsWith(${JSON.stringify(prefix)}));
+      const el = r?.querySelector('.custom-view-tree-node-item-icon');
+      return el ? (getComputedStyle(el).backgroundImage.match(/^url\\("(data:[^;,]+)/)?.[1] ?? [...el.classList].find(c => c.startsWith('codicon-'))) : null;
+    };
+    return { sessions: icon('workbench.view.extension.copane'), panel: icon('workbench.view.extension.copaneTabs') };
+  })()`);
+
+const setFavicons = value =>
+  user.ok('debug_extension_eval', { code: `await vscode.workspace.getConfiguration('copane.ui').update('favicons', ${JSON.stringify(value)}, vscode.ConfigurationTarget.Global); return null;` });
+
+test("a tab's site icon is shown in the Sessions view and the panel; unsafe or oversized ones are not", async () => {
+  await setFavicons(undefined);
+  const icons = {};
+  for (const [kind, title] of [['png', 'UI Icon Png'], ['svg', 'UI Icon Svg'], ['script-svg', 'UI Icon Script'], ['big-png', 'UI Icon Big']]) {
+    icons[kind] = /tab-\d+/.exec(await alpha.ok('browser_open', { url: pages.url(title, { icon: kind }), background: true }))?.[0];
+  }
+  const tabRow = (s, t) => row(s, `session:${ALPHA}/tab:${t}`);
+  const s = await until(async () => {
+    const s = await state();
+    return [icons.png, icons.svg, icons['script-svg'], icons['big-png']].every(t => s.favicons[t]) && s;
+  }, 'VS Code to report the four site icons');
+  assert.equal(s.favicons[icons.png].mime, 'image/png');
+  assert.equal(s.favicons[icons.svg].mime, 'image/svg+xml');
+  assert.match(s.favicons[icons['script-svg']].refused, /script/);
+  assert.match(s.favicons[icons['big-png']].refused, /larger than 32 KB/);
+  assert.equal(tabRow(s, icons.png).icon.image, s.favicons[icons.png].key);
+  assert.equal(tabRow(s, icons.svg).icon.image, s.favicons[icons.svg].key);
+  assert.equal(tabRow(s, icons['script-svg']).icon.image, undefined);
+  assert.equal(tabRow(s, icons['big-png']).icon.image, undefined);
+  assert.equal(tabRow(s, tabId).icon.image, undefined, 'a page without an icon keeps the globe');
+  assert.equal(s.favicons[tabId], undefined);
+  assert.equal(s.panel.rows.find(r => r.id === `tab:${icons.png}`).icon.image, s.favicons[icons.png].key);
+
+  // Drawn as images from data: URIs in both views; the refused ones keep their codicon.
+  await command('copane.tabs.focus');
+  await command('workbench.view.extension.copane');
+  await until(async () => {
+    const png = await rowIcons('Browser tab UI Icon Png');
+    return png.sessions === 'data:image/png' && png.panel === 'data:image/png';
+  }, 'the PNG icon drawn in both views');
+  assert.deepEqual(await rowIcons('Browser tab UI Icon Svg'), { sessions: 'data:image/svg+xml', panel: 'data:image/svg+xml' });
+  assert.equal((await rowIcons('Browser tab UI Icon Script')).sessions, 'codicon-globe');
+  assert.equal((await rowIcons('Browser tab UI Icon Big')).sessions, 'codicon-globe');
+
+  // The icon follows the page: a page without one brings the globe back.
+  await alpha.ok('browser_navigate', { tab: icons.png, url: pages.url('UI Icon Gone') });
+  await until(async () => {
+    const s = await state();
+    return tabRow(s, icons.png)?.label === 'UI Icon Gone' && !tabRow(s, icons.png).icon.image && !s.favicons[icons.png];
+  }, 'the icon to go with the navigation');
+
+  // The setting turns icons off everywhere.
+  await setFavicons(false);
+  const off = await until(async () => {
+    const s = await state();
+    return !tabRow(s, icons.svg).icon.image && s;
+  }, 'icons to turn off');
+  assert.deepEqual(off.favicons, {});
+  await until(async () => (await rowIcons('Browser tab UI Icon Svg')).sessions === 'codicon-globe', 'the globe in the workbench');
+  await setFavicons(undefined);
+  await until(async () => !!tabRow(await state(), icons.svg).icon.image, 'icons to come back');
+
+  for (const t of Object.values(icons)) await command('copane.ui.closeTab', t);
+});
+
 test('a terminal waiting for the user turns the status bar into a warning until it is handled', async () => {
   await user.ok('debug_ui_fixtures', {
     terminals: [{ id: 'fx-e2e', name: 'deploy', ownedBy: ALPHA, state: 'waiting-for-user', currentCommand: 'npm login', userInputRequest: 'Log in to npm' }],

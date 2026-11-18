@@ -32,6 +32,7 @@ export const SUITES = {
   terminal: { notInCi: { win32: 'its commands need a POSIX shell; Windows terminals run PowerShell' } },
   ui: {},
   'ui-panel': {},
+  'ui-tab-groups': {},
   'browser-tabs': {},
   'browser-page': {},
   'browser-frames': {},

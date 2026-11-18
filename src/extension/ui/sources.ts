@@ -76,6 +76,12 @@ export class UiSources {
     return out;
   }
 
+  /** The site icon VS Code shows for a tab (unchecked `data:` URI), if any. */
+  tabIcon(tabId: string): string | undefined {
+    if (!this.browserAvailable || !this.services.browser.tabIcon) return undefined;
+    return this.safe('read a tab icon', () => this.services.browser.tabIcon?.(tabId), undefined);
+  }
+
   terminals(): TerminalInfo[] {
     const real = this.safe('list terminals', () => this.services.terminals?.list() ?? [], []);
     return this.fixtures ? [...real, ...this.fixtures.list()] : real;

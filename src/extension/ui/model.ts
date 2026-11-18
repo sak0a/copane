@@ -15,6 +15,10 @@ export interface UiInput {
   graceSeconds: number;
   /** The login profile each session's new tabs open in, when it is not the default store (by session id). */
   sessionProfiles?: ReadonlyMap<string, { label: string; setBy: 'user' | 'agent' | 'setting' }>;
+  /** Key of the checked site icon of each tab that has one (favicon.ts), by tab id; absent when icons are off. */
+  tabIcons?: ReadonlyMap<string, string>;
+  /** Collapsed sessions (tabGrouping.ts), with how many of their tabs are collapsed, by session id. */
+  collapsedSessions?: ReadonlyMap<string, number>;
 }
 
 export interface ViewIcon {
@@ -22,6 +26,11 @@ export interface ViewIcon {
   id: string;
   /** Theme color id, e.g. "terminal.ansiBlue". */
   color?: string;
+  /**
+   * Key of a checked site icon (favicon.ts) shown instead of the codicon; `id` and `color` are the
+   * fallback while it cannot be resolved. A key, not the image, so models and their diffs stay small.
+   */
+  image?: string;
 }
 
 export interface ViewCommand {
@@ -106,10 +115,10 @@ export function buildViewModel(input: UiInput): ViewModel {
     const sessionTabs = tabs.filter(t => tabBelongsTo(t, session.id));
     const sessionTerminals = terminals.filter(t => terminalBelongsTo(t, session.id));
     const children = [
-      ...sessionTabs.map(t => tabNode(t, session, name)),
+      ...sessionTabs.map(t => tabNode(t, session, name, input.tabIcons?.get(t.id))),
       ...sessionTerminals.map(t => terminalNode(t, session)),
     ];
-    roots.push(sessionNode(session, sessionTabs, sessionTerminals, children, input.graceSeconds, input.sessionProfiles?.get(session.id)));
+    roots.push(sessionNode(session, sessionTabs, sessionTerminals, children, input.graceSeconds, input.sessionProfiles?.get(session.id), input.collapsedSessions?.get(session.id)));
   }
 
   const nodes = new Map<string, ViewNode>();
@@ -186,6 +195,8 @@ function sessionNode(
   children: ViewNode[],
   graceSeconds: number,
   profile?: { label: string; setBy: 'user' | 'agent' | 'setting' },
+  /** Set while the session's tabs are collapsed: how many are. */
+  collapsed?: number,
 ): ViewNode {
   const waitingTerminals = terminals.filter(t => t.state === 'waiting-for-user').length;
   const waitingTabs = tabs.filter(t => t.request).length;
@@ -211,6 +222,9 @@ function sessionNode(
     ]
       .filter(isString)
       .join(' '),
+    collapsed !== undefined
+      ? `$(fold) Its browser tabs are collapsed: ${collapsed ? `${plural(collapsed, 'tab is', 'tabs are')} pinned at the left of the editor tab bar, shown by site icon` : 'none is open right now'}; new ones join them. Expand them to see their titles again.`
+      : undefined,
     profile
       ? `New tabs open in the login profile **${md(profile.label)}** (${{ user: 'chosen by you', agent: 'chosen by the agent', setting: 'your setting for agent sessions' }[profile.setBy]}).`
       : undefined,
@@ -223,6 +237,7 @@ function sessionNode(
     session.connected ? 'connected' : 'disconnected',
     tabs.some(t => !t.paused) ? 'hasUnpausedTabs' : undefined,
     paused ? 'hasPausedTabs' : undefined,
+    collapsed !== undefined ? 'collapsed' : tabs.length ? 'collapsible' : undefined,
   ];
   return {
     // A different id while the session has no rows under it: VS Code keeps a former leaf collapsed
@@ -230,7 +245,10 @@ function sessionNode(
     id: sessionNodeId(session.id, children.length > 0),
     kind: 'session',
     label: session.label,
-    description: [session.title, state, profile ? `profile ${profile.label}` : undefined].filter(isString).join(' · ') || undefined,
+    description:
+      [session.title, state, collapsed !== undefined ? (collapsed ? `${plural(collapsed, 'tab')} collapsed` : 'tabs collapsed') : undefined, profile ? `profile ${profile.label}` : undefined]
+        .filter(isString)
+        .join(' · ') || undefined,
     tooltip,
     icon: { id: session.connected ? 'circle-filled' : 'circle-outline', color: session.color.themeColor },
     contextValue: flags.filter(isString).join(' '),
@@ -240,6 +258,7 @@ function sessionNode(
       session.connected ? 'connected' : 'disconnected, waiting to reconnect',
       waitingTerminals ? `${plural(waitingTerminals, 'terminal')} waiting for you` : undefined,
       waitingTabs ? `${plural(waitingTabs, 'tab')} waiting for you` : undefined,
+      collapsed !== undefined ? `${collapsed ? plural(collapsed, 'tab') : 'tabs'} collapsed` : undefined,
       contents || 'no tabs or terminals',
     ]
       .filter(isString)
@@ -261,7 +280,7 @@ export function tabState(tab: BrowserTabInfo, sessionId: string): TabState {
   return 'idle';
 }
 
-function tabNode(tab: BrowserTabInfo, session: AgentSession, name: (id: string | undefined) => string | undefined): ViewNode {
+function tabNode(tab: BrowserTabInfo, session: AgentSession, name: (id: string | undefined) => string | undefined, image: string | undefined): ViewNode {
   const state = tabState(tab, session.id);
   const host = hostOf(tab.url);
   const label = tabTitle(tab) || host || tab.url || 'New tab';
@@ -307,14 +326,15 @@ function tabNode(tab: BrowserTabInfo, session: AgentSession, name: (id: string |
     label,
     description,
     tooltip: [`$(globe) **${md(label)}**`, md(tab.url), `${opened} ${control}`, tab.profile ? `$(account) ${md(tab.profile.description)}` : undefined].filter(isString).join('\n\n'),
+    // The site's icon stands in for the globe; a tab that needs the user keeps its warning icon.
     icon:
       state === 'waiting-for-user'
         ? { id: 'bell-dot', color: WARNING }
         : state === 'paused'
         ? { id: 'debug-pause', color: WARNING }
         : state === 'controlling'
-          ? { id: 'globe', color: session.color.themeColor }
-          : { id: 'globe' },
+          ? withImage({ id: 'globe', color: session.color.themeColor }, image)
+          : withImage({ id: 'globe' }, image),
     contextValue: flags.filter(isString).join(' '),
     accessibilityLabel: [`Browser tab ${label}`, stateText, profileMark(tab, session.id), relation, `used by ${session.label}`].filter(isString).join(', '),
     command: { command: Cmd.revealTab, title: 'Show Tab', args: [tab.id] },
@@ -545,7 +565,7 @@ export function chromeSignature(model: ViewModel): string {
 export function treeAsText(model: ViewModel): string {
   const lines: string[] = [];
   const walk = (node: ViewNode, depth: number) => {
-    const icon = node.icon.color ? `${node.icon.id}:${node.icon.color}` : node.icon.id;
+    const icon = (node.icon.color ? `${node.icon.id}:${node.icon.color}` : node.icon.id) + (node.icon.image ? ` ${node.icon.image}` : '');
     lines.push(`${'  '.repeat(depth)}${node.label}${node.description ? ` — ${node.description}` : ''}  [${icon}]`);
     for (const child of node.children) walk(child, depth + 1);
   };
@@ -554,6 +574,11 @@ export function treeAsText(model: ViewModel): string {
 }
 
 // ------------------------------------------------------------------------------------- helpers
+
+/** A codicon with a site icon to show instead, when there is one. */
+export function withImage(icon: ViewIcon, image: string | undefined): ViewIcon {
+  return image ? { ...icon, image } : icon;
+}
 
 /** The page title without the " (url)" suffix the browser adds to some titles. */
 export function tabTitle(tab: { title: string; url: string }): string {
