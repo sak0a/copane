@@ -7,6 +7,7 @@ import { findTerminalRunning } from './agentTerminal';
 import { Cmd } from './ids';
 import { hostOf, plural, sessionNodeId, tabTitle, tabBelongsTo, tabState, terminalBelongsTo, type AttentionItem, type ViewNode } from './model';
 import type { UiState } from './state';
+import type { TabGrouping } from './tabGrouping';
 import type { SessionsTree } from './tree';
 
 type Ref = ViewNode['ref'];
@@ -19,7 +20,7 @@ class TargetGone extends Error {
 
 const AGENT_APPS: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex', copilot: 'GitHub Copilot' };
 
-export function registerUiCommands(services: BridgeServices, state: UiState, tree: SessionsTree): vscode.Disposable[] {
+export function registerUiCommands(services: BridgeServices, state: UiState, tree: SessionsTree, grouping: TabGrouping): vscode.Disposable[] {
   const { sessions } = services;
   const sources = state.sources;
   const tabs = () => sources.tabs();
@@ -109,10 +110,10 @@ export function registerUiCommands(services: BridgeServices, state: UiState, tre
     return picked?.id;
   }
 
-  async function pickSession(placeHolder: string): Promise<string | undefined> {
-    const list = sessions.list();
+  async function pickSession(placeHolder: string, filter: (s: AgentSession) => boolean = () => true, none = 'No agent session is connected to this window.'): Promise<string | undefined> {
+    const list = sessions.list().filter(filter);
     if (!list.length) {
-      void vscode.window.showInformationMessage('No agent session is connected to this window.');
+      void vscode.window.showInformationMessage(sessions.list().length ? none : 'No agent session is connected to this window.');
       return undefined;
     }
     const picked = await vscode.window.showQuickPick(
@@ -270,12 +271,63 @@ export function registerUiCommands(services: BridgeServices, state: UiState, tre
     });
   }
 
+  // ----------------------------------------------------------------------------- collapsing tabs
+
+  /**
+   * The session a collapse / expand command is about: a Sessions row, a tab row or tab id (the session
+   * the tab is shown under), a session id, or a browser editor's resource (its tab's context menu).
+   */
+  const sessionOf = (arg: unknown): string | undefined => {
+    if (arg instanceof vscode.Uri) {
+      const found = grouping.ownerOfResource(arg);
+      if (!found) throw new TargetGone();
+      if (!found.sessionId) throw new Error('No agent session uses this tab, so there are no session tabs to collapse or expand.');
+      return found.sessionId;
+    }
+    const ref = refOf(arg);
+    if (!ref) return undefined;
+    const id = ref.sessionId ?? (ref.tabId ? grouping.ownerOfTab(ref.tabId) : undefined);
+    if (!id) throw new Error('No agent session uses this tab, so there are no session tabs to collapse or expand.');
+    return id;
+  };
+
+  const tabsOf = (sessionId: string) => grouping.tabCounts().get(sessionId) ?? 0;
+
+  /** Tells the user what happened: briefly in the status bar, or in a notification when collapsing shows nothing. */
+  const tell = (message: string, note?: string): string => {
+    const text = note ? `${message} ${note}` : message;
+    if (note) void vscode.window.showInformationMessage(text);
+    else vscode.window.setStatusBarMessage(`$(fold) ${message}`, 5000);
+    return text;
+  };
+
+  async function collapseSession(sessionId: string): Promise<string> {
+    const session = sessions.get(sessionId);
+    if (!session) throw new TargetGone();
+    const note = await grouping.prepareSizing();
+    await grouping.collapse(sessionId);
+    const n = grouping.collapsedSessions().get(sessionId) ?? 0;
+    return tell(
+      n
+        ? `${session.label}'s ${plural(n, 'tab')} collapsed into pinned tabs at the left of the tab bar; new ones join them.`
+        : `${session.label}'s tabs are collapsed; it has none open now, and new ones are pinned at the left of the tab bar.`,
+      note,
+    );
+  }
+
+  async function expandSession(sessionId: string): Promise<string> {
+    const session = sessions.get(sessionId);
+    if (!session) throw new TargetGone();
+    await grouping.expand(sessionId);
+    return tell(`${session.label}'s tabs are expanded again.`);
+  }
+
   // ----------------------------------------------------------------------------- registration
 
   const command = (id: string, fn: (...args: any[]) => unknown) =>
     vscode.commands.registerCommand(id, async (...args: unknown[]) => {
       try {
-        await fn(...args);
+        return await fn(...args);
       } catch (err) {
         if (err instanceof TargetGone) vscode.window.setStatusBarMessage(`$(info) ${err.message}`, 4000);
         else report(err);
@@ -364,6 +416,34 @@ export function registerUiCommands(services: BridgeServices, state: UiState, tre
     command(Cmd.showSessionInView, async (arg?: unknown) => {
       const id = refOf(arg)?.sessionId ?? (await pickSession('Show which agent session?'));
       if (id) await showSessionInView(id);
+    }),
+    command(Cmd.collapseSessionTabs, async (arg?: unknown) => {
+      const id =
+        sessionOf(arg) ??
+        (await pickSession("Collapse the browser tabs of which agent session? They are pinned at the left of the tab bar, as their site icons.", s => !grouping.isCollapsed(s.id) && tabsOf(s.id) > 0, 'No agent session with browser tabs is expanded.'));
+      return id ? collapseSession(id) : undefined;
+    }),
+    command(Cmd.expandSessionTabs, async (arg?: unknown) => {
+      const id = sessionOf(arg) ?? (await pickSession('Expand the browser tabs of which agent session?', s => grouping.isCollapsed(s.id), 'No agent session has its tabs collapsed.'));
+      return id ? expandSession(id) : undefined;
+    }),
+    command(Cmd.collapseOtherSessions, async (arg?: unknown) => {
+      const id = sessionOf(arg) ?? (await pickSession("Show only the browser tabs of which agent session? The other sessions' tabs are collapsed.", s => tabsOf(s.id) > 0, 'No agent session has browser tabs.'));
+      if (!id) return undefined;
+      const session = sessions.get(id);
+      if (!session) throw new TargetGone();
+      const note = await grouping.prepareSizing();
+      await grouping.collapseOthers(id);
+      const others = [...grouping.collapsedSessions().keys()].map(s => sessions.get(s)?.label).filter(Boolean);
+      return tell(others.length ? `Only ${session.label}'s tabs are expanded; ${others.join(', ')} collapsed.` : `${session.label} is the only session with browser tabs; nothing to collapse.`, others.length ? note : undefined);
+    }),
+    command(Cmd.expandAllSessions, async () => {
+      await grouping.expandAll();
+      return tell("Every agent session's tabs are expanded.");
+    }),
+    command(Cmd.groupTabsBySession, async () => {
+      await grouping.groupBySession();
+      return tell("Browser tabs are grouped by agent session, side by side in each editor group, after any pinned tabs.");
     }),
   ];
 }

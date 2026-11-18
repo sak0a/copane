@@ -29,6 +29,14 @@ export const Cmd = {
   /** The agent's own terminal when it runs in one of this window (a `claude` CLI), else its row in the Sessions view. */
   showSession: 'copane.ui.showSession',
   showSessionInView: 'copane.ui.showSessionInView',
+  /** Collapse a session's browser tabs into a run of pinned (compact) tabs, or expand them again (tabGrouping.ts). */
+  collapseSessionTabs: 'copane.ui.collapseSessionTabs',
+  expandSessionTabs: 'copane.ui.expandSessionTabs',
+  /** Every session's tabs side by side in the tab bar, nothing collapsed. */
+  groupTabsBySession: 'copane.ui.groupTabsBySession',
+  /** "Show only this session's tabs": collapse every other session, expand this one. */
+  collapseOtherSessions: 'copane.ui.collapseOtherSessions',
+  expandAllSessions: 'copane.ui.expandAllSessions',
 } as const;
 
 /** Commands owned by other modules that the UI links to. They may not exist in every build. */
@@ -43,4 +51,8 @@ export const ExternalCmd = {
 export const ContextKey = {
   browserUnavailable: 'copane.ui.browserUnavailable',
   hasSessions: 'copane.ui.hasSessions',
+  /** View ids (the file name of `vscode-browser:/<viewId>`) of browser tabs of sessions that are not collapsed: `resourceFilename in copane.ui.collapsibleTabs`. */
+  collapsibleTabs: 'copane.ui.collapsibleTabs',
+  /** View ids of browser tabs of collapsed sessions. */
+  collapsedTabs: 'copane.ui.collapsedTabs',
 } as const;

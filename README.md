@@ -230,6 +230,31 @@ agent uses, marked with its session's color and label: click one to bring it to 
 row's buttons to pause or release the agent, close the tab, or go to the session (the agent's own
 terminal if it runs in one of this window, otherwise its row in the Sessions view).
 
+#### Collapsing a session's tabs
+
+With several agents at work the editor tab bar fills up. **Collapse** a session's browser tabs (the
+fold button on its row in Sessions, the right-click menu of one of its editor tabs, or *Copane:
+Collapse Agent Session's Browser Tabs*): Copane pins them together at the left of the tab bar, and
+with compact pinned tabs each shows only its site icon (about 28 px). Hover one to see its title and
+session. The pages keep running and agents keep using them; new tabs of that session join the
+group. **Expand** brings their titles back, next to each other. *Show Only This Agent Session's
+Browser Tabs* collapses every other session; *Group Browser Tabs by Agent Session* puts each
+session's tabs side by side without collapsing anything; *Expand All* undoes everything.
+
+VS Code has no real tab groups for extensions, so this is built on pinned tabs:
+
+- Small only with `workbench.editor.pinnedTabSizing` set to `compact`, which applies to *all* pinned
+  tabs, your own too. The first collapse asks whether to set it; the answer is kept in
+  `copane.ui.collapsedTabSizing`. Copane never changes that setting without it.
+- Tabs you pinned yourself are never unpinned by Copane. If you unpin a collapsed tab, it leaves the
+  group and stays where you put it.
+- There is no group label or fold arrow in the tab bar; the group is the run of icons, and a
+  collapsed tab cannot be closed with Cmd/Ctrl+W or a middle click (VS Code protects pinned tabs).
+  Close it from its row or its context menu.
+- A tab an agent hands to you (sign-in, captcha) leaves the group while it waits, so you can see
+  it, and goes back afterwards.
+- Collapsed sessions are remembered per window and restored after a reload.
+
 A session is identified by Claude Code's conversation id, so it keeps its identity when the window
 reloads (the server reconnects by itself and calls wait for the window to come back) and when you
 resume the conversation with `claude --resume`. Sub-agents of a conversation share its session.
@@ -422,6 +447,10 @@ Copane's entries and nothing else, and Copane does not add them back until you r
 | Copane: Open Browser Tab in Login Profile… | Opens a tab in a separate login store. |
 | Copane: Set Login Profile for Agent Session… | Chooses the login store a session's new tabs use. |
 | Copane: Forget Saved Browser Logins | Removes logins saved with *Log In and Remember*. |
+| Copane: Collapse / Expand Agent Session's Browser Tabs | Pins a session's tabs together as compact icons at the left of the tab bar, or brings them back. |
+| Copane: Show Only This Agent Session's Browser Tabs | Collapses every other session's tabs. |
+| Copane: Group Browser Tabs by Agent Session | Puts each session's tabs side by side, nothing collapsed. |
+| Copane: Expand All Agent Sessions' Browser Tabs | Undoes every collapse. |
 
 ## Settings
 
@@ -436,6 +465,7 @@ Copane's entries and nothing else, and Copane does not add them back until you r
 | `copane.browser.loginPrompts` | `true` | Ask you for site and proxy logins in tabs an agent drives. |
 | `copane.browser.agentDownloads` | `ask` | Whether agents' actions may download files: `ask`, `allow`, `deny`. |
 | `copane.browser.certificateErrors` | `ask` | What to do for agents on a site with an untrusted certificate: `ask` or `block`. |
+| `copane.ui.collapsedTabSizing` | `ask` | Whether collapsing a session's tabs may set `workbench.editor.pinnedTabSizing` to `compact` (applies to all pinned tabs): `ask` once, `compact`, or `keep` your size. |
 | `copane.sessionGraceSeconds` | `20` | How long a disconnected session keeps its tabs and terminals, so it can reconnect after a reload. |
 | `copane.tools.profile` | `full` | Which tools agents get. `core` keeps the everyday ones (pages, tabs, dialogs, hand-off, terminals) and leaves out the dev and test extras (`browser_emulate`, `browser_route`, `browser_audit`, `browser_check_change`, `browser_inspect`, `browser_export_test`, `browser_profiles`) and rarely used tools (`browser_hover`, `browser_drag`, `browser_upload_file`, `browser_downloads`, `session_info`): 28 instead of 40 tools, about a third less context in every conversation. Useful for agents that load every tool up front (Copilot, Codex) and for VS Code's limit of 128 tools per request. Connected agents get the new list at once. |
 | `copane.tools.disabled` | `[]` | Tool names agents do not get, on top of the profile, e.g. `["browser_route"]`. A call to one is refused with a message saying so. `window_status` and `window_select` always stay; unknown names are ignored. |

@@ -271,6 +271,36 @@
         "icon": "$(list-tree)"
       },
       {
+        "command": "copane.ui.collapseSessionTabs",
+        "title": "Collapse Agent Session's Browser Tabs",
+        "category": "Copane",
+        "icon": "$(fold)"
+      },
+      {
+        "command": "copane.ui.expandSessionTabs",
+        "title": "Expand Agent Session's Browser Tabs",
+        "category": "Copane",
+        "icon": "$(unfold)"
+      },
+      {
+        "command": "copane.ui.collapseOtherSessions",
+        "title": "Show Only This Agent Session's Browser Tabs",
+        "category": "Copane",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "copane.ui.expandAllSessions",
+        "title": "Expand All Agent Sessions' Browser Tabs",
+        "category": "Copane",
+        "icon": "$(unfold)"
+      },
+      {
+        "command": "copane.ui.groupTabsBySession",
+        "title": "Group Browser Tabs by Agent Session",
+        "category": "Copane",
+        "icon": "$(group-by-ref-type)"
+      },
+      {
         "command": "copane.openWalkthrough",
         "title": "Get Started",
         "category": "Copane",
@@ -468,6 +498,26 @@
           "default": "keep",
           "description": "What happens to an agent session's terminals when the session ends (after the reconnect grace period)."
         },
+        "copane.ui.favicons": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show each site's icon on its browser tab rows in the Sessions and Agent Tabs views, instead of a generic globe or state icon. The icon is the one VS Code's browser already shows on the editor tab; Copane loads nothing for it. Icons over 32 KB, in other formats, or SVGs with scripts or outside references are not shown."
+        },
+        "copane.ui.collapsedTabSizing": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "compact",
+            "keep"
+          ],
+          "enumDescriptions": [
+            "The first time you collapse a session's tabs while pinned tabs are not compact, ask whether to make them compact.",
+            "When collapsing a session's tabs, set `#workbench.editor.pinnedTabSizing#` to `compact` in your user settings if it is not.",
+            "Never change `#workbench.editor.pinnedTabSizing#`: collapsed tabs keep the size pinned tabs have."
+          ],
+          "default": "ask",
+          "markdownDescription": "Copane collapses an agent session's browser tabs by pinning them at the left of the tab bar. They take little room only when `#workbench.editor.pinnedTabSizing#` is `compact`, a setting that applies to all pinned tabs in VS Code, your own too. Whether Copane may set it."
+        },
         "copane.vscodeChat.serverDefinition": {
           "type": "boolean",
           "default": false,
@@ -603,6 +653,26 @@
           "when": "copane.ui.hasSessions"
         },
         {
+          "command": "copane.ui.collapseSessionTabs",
+          "when": "copane.ui.hasSessions && !copane.ui.browserUnavailable"
+        },
+        {
+          "command": "copane.ui.expandSessionTabs",
+          "when": "copane.ui.hasSessions && !copane.ui.browserUnavailable"
+        },
+        {
+          "command": "copane.ui.collapseOtherSessions",
+          "when": "copane.ui.hasSessions && !copane.ui.browserUnavailable"
+        },
+        {
+          "command": "copane.ui.expandAllSessions",
+          "when": "copane.ui.hasSessions && !copane.ui.browserUnavailable"
+        },
+        {
+          "command": "copane.ui.groupTabsBySession",
+          "when": "copane.ui.hasSessions && !copane.ui.browserUnavailable"
+        },
+        {
           "command": "copane.walkthrough.copyPrompt",
           "when": "false"
         }
@@ -694,6 +764,16 @@
           "group": "3_close@1"
         },
         {
+          "command": "copane.ui.collapseSessionTabs",
+          "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/ && viewItem =~ /\\bcollapsible\\b/",
+          "group": "inline@8"
+        },
+        {
+          "command": "copane.ui.expandSessionTabs",
+          "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/ && viewItem =~ /\\bcollapsed\\b/",
+          "group": "inline@8"
+        },
+        {
           "command": "copane.ui.endSession",
           "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/",
           "group": "inline@9"
@@ -707,6 +787,21 @@
           "command": "copane.ui.resumeSessionTabs",
           "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/ && viewItem =~ /\\bhasPausedTabs\\b/",
           "group": "2_control@2"
+        },
+        {
+          "command": "copane.ui.collapseSessionTabs",
+          "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/ && viewItem =~ /\\bcollapsible\\b/",
+          "group": "3_tabs@1"
+        },
+        {
+          "command": "copane.ui.expandSessionTabs",
+          "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/ && viewItem =~ /\\bcollapsed\\b/",
+          "group": "3_tabs@1"
+        },
+        {
+          "command": "copane.ui.collapseOtherSessions",
+          "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/ && viewItem =~ /\\b(collapsible|collapsed)\\b/",
+          "group": "3_tabs@2"
         },
         {
           "command": "copane.ui.endSession",
@@ -786,6 +881,16 @@
           "group": "1_copane"
         },
         {
+          "command": "copane.ui.groupTabsBySession",
+          "when": "view == copane.sessions && copane.ui.hasSessions && !copane.ui.browserUnavailable",
+          "group": "3_tabs@1"
+        },
+        {
+          "command": "copane.ui.expandAllSessions",
+          "when": "view == copane.sessions && copane.ui.hasSessions && !copane.ui.browserUnavailable",
+          "group": "3_tabs@2"
+        },
+        {
           "command": "copane.registerAgents",
           "when": "view == copane.sessions",
           "group": "8_setup@1"
@@ -814,6 +919,28 @@
           "command": "copane.openWalkthrough",
           "when": "view == copane.sessions",
           "group": "8_setup@0"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "copane.ui.collapseSessionTabs",
+          "when": "resourceScheme == vscode-browser && resourceFilename in copane.ui.collapsibleTabs",
+          "group": "copane@1"
+        },
+        {
+          "command": "copane.ui.expandSessionTabs",
+          "when": "resourceScheme == vscode-browser && resourceFilename in copane.ui.collapsedTabs",
+          "group": "copane@1"
+        },
+        {
+          "command": "copane.ui.collapseOtherSessions",
+          "when": "resourceScheme == vscode-browser && resourceFilename in copane.ui.collapsibleTabs",
+          "group": "copane@2"
+        },
+        {
+          "command": "copane.ui.collapseOtherSessions",
+          "when": "resourceScheme == vscode-browser && resourceFilename in copane.ui.collapsedTabs",
+          "group": "copane@2"
         }
       ]
     },

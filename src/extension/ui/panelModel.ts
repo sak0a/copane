@@ -8,11 +8,13 @@ import { profileMark, tabMarks } from './tabMarks';
 import type { BrowserTabInfo } from '../core/services';
 import type { AgentSession } from '../core/sessions';
 import { Cmd } from './ids';
-import { hostOf, md, plural, tabBelongsTo, tabTitle, type ViewIcon, type ViewNode } from './model';
+import { hostOf, md, plural, tabBelongsTo, tabTitle, withImage, type ViewIcon, type ViewNode } from './model';
 
 export interface PanelInput {
   sessions: readonly AgentSession[];
   tabs: readonly BrowserTabInfo[];
+  /** Key of the checked site icon of each tab that has one, by tab id (see `UiInput.tabIcons`). */
+  tabIcons?: ReadonlyMap<string, string>;
 }
 
 export interface PanelModel {
@@ -65,7 +67,7 @@ export function buildPanelModel(input: PanelInput): PanelModel {
 
   // The session's title only on the first row of its band: repeated on every row it is noise, and the
   // label and color already say whose the following rows are.
-  const roots = rows.map(({ tab, owner }, i) => tabRow(tab, owner, input.sessions, i === 0 || rows[i - 1]!.owner.id !== owner.id));
+  const roots = rows.map(({ tab, owner }, i) => tabRow(tab, owner, input.sessions, i === 0 || rows[i - 1]!.owner.id !== owner.id, input.tabIcons?.get(tab.id)));
   const sessionCount = new Set(rows.map(r => r.owner.id)).size;
   return {
     roots,
@@ -74,7 +76,7 @@ export function buildPanelModel(input: PanelInput): PanelModel {
   };
 }
 
-function tabRow(tab: BrowserTabInfo, owner: AgentSession, sessions: readonly AgentSession[], firstOfSession: boolean): ViewNode {
+function tabRow(tab: BrowserTabInfo, owner: AgentSession, sessions: readonly AgentSession[], firstOfSession: boolean, image?: string): ViewNode {
   const state = panelTabState(tab);
   const host = hostOf(tab.url);
   const label = tabTitle(tab) || host || tab.url || 'New tab';
@@ -98,7 +100,10 @@ function tabRow(tab: BrowserTabInfo, owner: AgentSession, sessions: readonly Age
     .filter(isString)
     .join(' · ');
 
-  const icon: ViewIcon = { id: STATE_ICON[state], color: owner.color.themeColor };
+  // The site's icon replaces the state shape while the agent has or controls the tab (the description
+  // says which); a tab paused by or waiting for the user keeps its sign.
+  const base: ViewIcon = { id: STATE_ICON[state], color: owner.color.themeColor };
+  const icon = state === 'controlling' || state === 'idle' ? withImage(base, image) : base;
   const control = {
     controlling: `**${md(owner.label)} is controlling it.**`,
     idle: `${md(owner.label)} is not controlling it right now.`,
@@ -150,7 +155,7 @@ function tabRow(tab: BrowserTabInfo, owner: AgentSession, sessions: readonly Age
 
 /** Renders the panel as text (debug tool output and tests). */
 export function panelAsText(model: PanelModel): string {
-  return model.roots.map(n => `${n.label} — ${n.description}  [${n.icon.id}:${n.icon.color}]`).join('\n');
+  return model.roots.map(n => `${n.label} — ${n.description}  [${n.icon.id}:${n.icon.color}${n.icon.image ? ` ${n.icon.image}` : ''}]`).join('\n');
 }
 
 function truncate(value: string, max: number): string {

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Site icons.** The Sessions view and the Agent Tabs panel show each tab's site icon (the one
+  VS Code's browser already shows; size-limited, unsafe SVGs refused, nothing extra loaded).
+  Setting `copane.ui.favicons` turns it off.
+- **Collapse a session's browser tabs** in the editor tab bar: they are pinned together as compact
+  site icons and new ones join them; expand, "Show Only This Session's Tabs", "Group Browser Tabs
+  by Agent Session" and "Expand All" from the Sessions view, the tab's context menu or the palette.
+  Survives a window reload; asks once before setting `workbench.editor.pinnedTabSizing`
+  (`copane.ui.collapsedTabSizing`). VS Code has no real tab groups, so there is no group label and
+  a collapsed tab is still one 28 px icon.
 - **Fewer tools, smaller tool list. Breaking: tool names changed, update permission allowlists.**
   `browser_select_tab`, `browser_show_tab`, `browser_release_tab` and `browser_close_tab` are now
   one tool, `browser_tab` with `action` (`select`, `show`, `release`, `close`); `browser_list_tabs`

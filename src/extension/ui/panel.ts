@@ -32,7 +32,7 @@ export class TabsPanel implements vscode.TreeDataProvider<NodeHandle>, vscode.Di
   getTreeItem(element: NodeHandle): vscode.TreeItem {
     const node = this.state.panel.nodes.get(element.id);
     if (!node) return new vscode.TreeItem('(gone)'); // only while a refresh is in flight
-    return toTreeItem(node, undefined);
+    return toTreeItem(node, undefined, key => this.state.imageUri(key));
   }
 
   private apply(update: PanelUpdate): void {

@@ -3,7 +3,8 @@
 import * as vscode from 'vscode';
 import type { BridgeServices } from '../core/services';
 import { Coalescer } from './coalescer';
-import { buildViewModel, chromeSignature, diffModels, type UiInput, type ViewModel } from './model';
+import { FaviconCache, type FaviconCheck } from './favicon';
+import { buildViewModel, chromeSignature, diffModels, tabBelongsTo, type UiInput, type ViewModel } from './model';
 import { buildPanelModel, type PanelModel } from './panelModel';
 import type { UiSources } from './sources';
 
@@ -32,6 +33,14 @@ export class UiState implements vscode.Disposable {
   private readonly panelEmitter = new vscode.EventEmitter<PanelUpdate>();
   private readonly coalescer: Coalescer;
   private readonly subscriptions: Array<{ dispose(): void }> = [];
+  private readonly favicons = new FaviconCache();
+  /** The checked site icon (or why it is not shown) of each listed tab, as of the last rebuild. */
+  private iconChecks = new Map<string, FaviconCheck>();
+  /** Icons refused, already logged (by reason and URI length), so a refresh does not log them again. */
+  private readonly loggedRefusals = new Set<string>();
+
+  /** The collapsed sessions (tabGrouping.ts), set once that exists. */
+  private collapsedSessions: (() => ReadonlyMap<string, number>) | undefined;
 
   readonly onDidUpdate = this.emitter.event;
   readonly onDidUpdatePanel = this.panelEmitter.event;
@@ -47,9 +56,20 @@ export class UiState implements vscode.Disposable {
     this.subscriptions.push(
       ...sources.subscribe(() => this.coalescer.schedule()),
       vscode.workspace.onDidChangeConfiguration(e => {
-        if (e.affectsConfiguration('copane.sessionGraceSeconds')) this.coalescer.schedule();
+        if (e.affectsConfiguration('copane.sessionGraceSeconds') || e.affectsConfiguration('copane.ui.favicons')) this.coalescer.schedule();
       }),
     );
+  }
+
+  /** Where the views read which sessions are collapsed; rebuilds with it. */
+  setCollapsedSessions(provider: () => ReadonlyMap<string, number>): void {
+    this.collapsedSessions = provider;
+    this.refresh();
+  }
+
+  /** Rebuilds soon (coalesced), for a change no source event reports. */
+  refresh(): void {
+    this.coalescer.schedule();
   }
 
   get model(): ViewModel {
@@ -72,15 +92,66 @@ export class UiState implements vscode.Disposable {
     return this.currentPanel;
   }
 
+  /** The `data:` URI of a site icon key in the current models (see `ViewIcon.image`). */
+  imageUri(key: string): string | undefined {
+    return this.favicons.uriOf(key);
+  }
+
+  /** The site icon state of each listed tab: its key, or why it is not shown (debug tool). */
+  iconStates(): Record<string, { key: string; mime: string; bytes: number } | { refused: string }> {
+    const out: Record<string, { key: string; mime: string; bytes: number } | { refused: string }> = {};
+    for (const [tabId, c] of this.iconChecks) out[tabId] = c.ok ? { key: c.key, mime: c.mime, bytes: c.bytes } : { refused: c.reason };
+    return out;
+  }
+
   input(): UiInput {
+    const sessions = this.services.sessions.list();
+    const tabs = this.sources.tabs();
     return {
-      sessions: this.services.sessions.list(),
-      tabs: this.sources.tabs(),
+      sessions,
+      tabs,
+      tabIcons: this.tabIcons(tabs, sessions),
       terminals: this.sources.terminals(),
       browserAvailable: this.sources.browserAvailable,
       graceSeconds: Math.max(0, vscode.workspace.getConfiguration('copane').get<number>('sessionGraceSeconds', 20)),
-      sessionProfiles: this.sources.sessionProfiles(this.services.sessions.list().map(s => s.id)),
+      sessionProfiles: this.sources.sessionProfiles(sessions.map(s => s.id)),
+      collapsedSessions: this.collapsedSessions?.(),
     };
+  }
+
+  /**
+   * Site icons of the tabs the views list (tabs some session uses), read from what VS Code already shows
+   * and checked once per distinct icon (cached). Tabs no longer listed drop out of the cache.
+   */
+  private tabIcons(tabs: UiInput['tabs'], sessions: UiInput['sessions']): Map<string, string> | undefined {
+    const checks = new Map<string, FaviconCheck>();
+    const inUse = new Set<string>();
+    const enabled = vscode.workspace.getConfiguration('copane.ui').get<boolean>('favicons', true);
+    if (enabled) {
+      for (const tab of tabs) {
+        if (!sessions.some(s => tabBelongsTo(tab, s.id))) continue;
+        const uri = this.sources.tabIcon(tab.id);
+        if (!uri) continue;
+        inUse.add(uri);
+        const check = this.favicons.get(uri);
+        checks.set(tab.id, check);
+        if (!check.ok) this.logRefusal(tab.id, check.reason, uri.length);
+      }
+    }
+    this.favicons.retain(inUse);
+    this.iconChecks = checks;
+    if (!enabled) return undefined;
+    const keys = new Map<string, string>();
+    for (const [tabId, c] of checks) if (c.ok) keys.set(tabId, c.key);
+    return keys;
+  }
+
+  private logRefusal(tabId: string, reason: string, length: number): void {
+    const key = `${reason}|${length}`;
+    if (this.loggedRefusals.has(key)) return;
+    if (this.loggedRefusals.size > 200) this.loggedRefusals.clear();
+    this.loggedRefusals.add(key);
+    this.services.log.info(`UI: the site icon of ${tabId} is not shown (${reason}); the views show the generic icon.`);
   }
 
   private rebuild(): void {
