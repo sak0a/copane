@@ -345,7 +345,7 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
     this.changeEmitter.fire();
   }
 
-  /** Runs when a session releases tabs with browser_release_tab (whether or not its lease was still held). Returns a sentence for the agent, if any. */
+  /** Runs when a session releases tabs with browser_tab {"action":"release"} (whether or not its lease was still held). Returns a sentence for the agent, if any. */
   addReleaseHook(hook: (sessionId: string, tabIds: string[]) => string | undefined): vscode.Disposable {
     this.releaseHooks.push(hook);
     return { dispose: () => removeItem(this.releaseHooks, hook) };

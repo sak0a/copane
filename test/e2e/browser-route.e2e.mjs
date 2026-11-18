@@ -34,7 +34,7 @@ test('a mocked response is what the page gets, and is marked as mocked in the ne
     assert.match(detail, new RegExp(`Not a real network response: mocked by ${id}`));
     assert.match(detail, /"error": "boom"/);
     assert.match(await a.ok('browser_route', { action: 'list' }), new RegExp(`${id}  any \\*/api/cart\\*  → 500, application/json, 16 B  \\(1 hit\\)`));
-    await a.ok('browser_close_tab', {});
+    await a.ok('browser_tab', { action: 'close' });
   } finally {
     await a.close();
   }
@@ -69,7 +69,7 @@ test('network errors, delays, changed request headers and one-shot rules', async
     const bad = await a.call('browser_route', { action: 'add', url: 'api/cart', status: 500, fail: 'refused' });
     assert.ok(bad.isError);
     assert.match(bad.text, /either a response \(status, headers, body\) or fail, not both/);
-    await a.ok('browser_close_tab', {});
+    await a.ok('browser_tab', { action: 'close' });
   } finally {
     await a.close();
   }
@@ -89,11 +89,11 @@ test("a session's rules apply only to its tab, other sessions see them, and rele
     assert.ok(steal.isError);
     assert.match(steal.text, /is being controlled by Claude \d+/);
 
-    assert.match(await a.ok('browser_release_tab', {}), new RegExp(`^Released ${tabA}\\. Your request rules there \\(${id}\\) were removed\\.$`));
+    assert.match(await a.ok('browser_tab', { action: 'release' }), new RegExp(`^Released ${tabA}\\. Your request rules there \\(${id}\\) were removed\\.$`));
     assert.match((await loadCart(a)).shown, /^status 200/);
     assert.doesNotMatch(await b.ok('browser_list_tabs', {}), /request rule/);
-    await a.ok('browser_close_tab', { tab: tabA });
-    await b.ok('browser_close_tab', { tab: tabB });
+    await a.ok('browser_tab', { action: 'close', tab: tabA });
+    await b.ok('browser_tab', { action: 'close', tab: tabB });
   } finally {
     await a.close();
     await b.close();
@@ -109,7 +109,7 @@ test('the user can remove the rules of a tab, and the agent is told', async () =
     const { click, shown } = await loadCart(a);
     assert.match(shown, /^status 200/);
     assert.match(click, new RegExp(`The user removed your request rules on ${tab} \\(m\\d+\\)`));
-    await a.ok('browser_close_tab', {});
+    await a.ok('browser_tab', { action: 'close' });
   } finally {
     await a.close();
   }
@@ -126,9 +126,9 @@ test('rules end with their session', async () => {
     // The session ends after its reconnect grace period (20 s).
     await until(async () => !/request rule/.test(await b.ok('browser_list_tabs', {})), 'the rules to end with the session', { timeoutMs: 40_000, intervalMs: 1000 });
     // The ended session's tab is free to use, and its requests reach the server again.
-    await b.ok('browser_select_tab', { tab });
+    await b.ok('browser_tab', { action: 'select', tab });
     assert.match((await loadCart(b)).shown, /^status 200/);
-    await b.ok('browser_close_tab', { tab });
+    await b.ok('browser_tab', { action: 'close', tab });
   } finally {
     await a.close().catch(() => {});
     await b.close();

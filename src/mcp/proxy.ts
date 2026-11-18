@@ -11,6 +11,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { MCP_SERVER_NAME, type CallToolResult, type WireTool } from '../shared/protocol';
 import type { BridgeClient } from './bridgeClient';
+import { conversationIdOf, type ConversationBridges } from './conversations';
 
 /** Claude Code cuts server instructions after 4096 characters. */
 const MAX_INSTRUCTIONS = 4000;
@@ -47,6 +48,8 @@ export interface ProxyOptions {
   version: string;
   /** How long `initialize` waits for a window, so the instructions can describe it. */
   initWaitMs: number;
+  /** One session per chat conversation for calls that name one (VS Code); without it, all share `bridge`. */
+  conversations?: ConversationBridges;
 }
 
 /** Usage guidance, fixed at `initialize`: from the window when connected by then, generic otherwise. */
@@ -95,22 +98,40 @@ export function createProxyServer(bridge: BridgeClient, options: ProxyOptions): 
     return { tools: [...remote, ...LOCAL_TOOLS] as any };
   });
 
+  // A call that names its chat conversation (VS Code's own MCP client) goes through that
+  // conversation's session; every other call through the process's one session, as always.
+  const conversations = options.conversations;
   server.setRequestHandler(CallToolRequestSchema, async (request, extra): Promise<any> => {
-    const { name } = request.params;
-    const args = (request.params.arguments ?? {}) as Record<string, unknown>;
-    if (name === 'window_status') {
-      await bridge.ensure(0);
-      return text(await statusText(bridge));
+    const conversationId = conversations ? conversationIdOf(request.params._meta) : undefined;
+    if (conversations && conversationId) {
+      return conversations.use(conversationId, async conversation => {
+        conversation.client = bridge.client;
+        const result = await handleCall(conversation, request.params, extra.signal);
+        if (request.params.name === 'window_select' && !result.isError) conversations.preferredWindow = conversation.current?.instance.id;
+        return result;
+      });
     }
-    if (name === 'window_select') {
-      if (typeof args.window !== 'string' || !args.window.trim()) return text('Pass `window`: a window id from window_status.', true);
-      const result = await bridge.select(args.window);
-      return text(result.text, !result.ok);
-    }
-    return bridge.call(name, args, extra.signal);
+    const result = await handleCall(bridge, request.params, extra.signal);
+    if (conversations && request.params.name === 'window_select' && !result.isError) conversations.preferredWindow = bridge.current?.instance.id;
+    return result;
   });
 
   return server;
+}
+
+async function handleCall(bridge: BridgeClient, params: { name: string; arguments?: Record<string, unknown> }, signal: AbortSignal): Promise<CallToolResult> {
+  const { name } = params;
+  const args = (params.arguments ?? {}) as Record<string, unknown>;
+  if (name === 'window_status') {
+    await bridge.ensure(0);
+    return text(await statusText(bridge));
+  }
+  if (name === 'window_select') {
+    if (typeof args.window !== 'string' || !args.window.trim()) return text('Pass `window`: a window id from window_status.', true);
+    const result = await bridge.select(args.window);
+    return text(result.text, !result.ok);
+  }
+  return bridge.call(name, args, signal);
 }
 
 /**
@@ -122,6 +143,9 @@ async function statusText(bridge: BridgeClient): Promise<string> {
   if (!bridge.current) return status;
   const tools = await bridge.listTools();
   if (tools.length === 0 || tools.some(t => t.name.startsWith('browser_'))) return status;
+  // No browser tools can also mean the user's settings turned them all off: the window's own
+  // instructions say which it is.
+  if (!bridge.current.hello.instructions?.includes('integrated browser is not enabled')) return status;
   return `${status}\n${BROWSER_NOT_ENABLED}`;
 }
 

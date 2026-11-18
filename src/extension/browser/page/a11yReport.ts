@@ -39,7 +39,13 @@ export interface A11yInput {
   incomplete: AxeReview[];
   /** Frames that could not be checked, with why. */
   skipped: string[];
+  /** The session was given the full caveat before: use the short one. */
+  brief?: boolean;
 }
+
+export const A11Y_CAVEAT =
+  'This is not a conformance verdict: automated checks cover only part of WCAG. Keyboard operation, focus order and visibility, meaningful alt text and labels, captions, zoom and reflow need a person; check each state of the page (dialogs, menus, error messages) separately.';
+export const A11Y_CAVEAT_SHORT = 'Not a conformance verdict: keyboard use, focus, alt text, captions and zoom still need a person; audit each page state separately.';
 
 const IMPACT = ['critical', 'serious', 'moderate', 'minor'];
 
@@ -159,7 +165,7 @@ export function formatA11y(r: A11yInput): string {
   }
   for (const s of r.skipped.slice(0, 3)) lines.push(`Not checked: ${s}.`);
   if (total > 0) lines.push(`Rule details: ${RULE_DOCS(r.version)}<rule>.`);
-  lines.push('This is not a conformance verdict: automated checks cover only part of WCAG. Keyboard operation, focus order and visibility, meaningful alt text and labels, captions, zoom and reflow need a person; check each state of the page (dialogs, menus, error messages) separately.');
+  lines.push(r.brief ? A11Y_CAVEAT_SHORT : A11Y_CAVEAT);
   return lines.join('\n');
 }
 

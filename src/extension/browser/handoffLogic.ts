@@ -189,6 +189,8 @@ export function looksLikeSignIn(url: string, visiblePasswordFields: number): boo
 
 export const SIGN_IN_HINT =
   "This looks like a sign-in page. Unless you were given test credentials for it, do not sign in yourself or ask for the user's credentials in chat: hand the tab to the user with browser_request_user_input, with done_when set to what you expect after sign-in.";
+/** SIGN_IN_HINT once a session has had it in full. */
+export const SIGN_IN_HINT_SHORT = 'This looks like a sign-in page: without test credentials, hand it to the user (browser_request_user_input with done_when).';
 
 function clip(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;

@@ -262,7 +262,7 @@ Change in tab-2 after a full reload (new document), settled after 2.1 s:
 **Crash:**
 
 ```
-The page in tab-2 crashed after the change (renderer gone). New errors before the crash: …. Reload it with browser_history (action "reload") once the cause is fixed.
+The page in tab-2 crashed after the change (renderer gone). New errors before the crash: …. Reload it with browser_navigate {"action":"reload"} once the cause is fixed.
 ```
 
 **Timeout (nothing arrived):**

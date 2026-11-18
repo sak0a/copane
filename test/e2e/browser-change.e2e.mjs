@@ -14,7 +14,7 @@ const hasDebugCdp = (await a.tools()).some(t => t.name === 'debug_cdp');
 
 let previous;
 async function open(path = '/app.html') {
-  if (previous) await a.call('browser_close_tab', { tab: previous });
+  if (previous) await a.call('browser_tab', { action: 'close', tab: previous });
   const text = await a.ok('browser_open', { url: `${site.url}${path}`, background: true });
   const id = /Opened (tab-\d+)/.exec(text)?.[1];
   assert.ok(id, `no tab id in: ${text}`);
@@ -196,7 +196,7 @@ test(
     await a.ok('browser_check_change', { action: 'baseline' });
     await a.ok('debug_cdp', { commands: [{ method: 'Page.crash', noWait: true }], listenMs: 300 });
     const text = await a.ok('browser_check_change', { action: 'check', timeout: 5 });
-    assert.match(text, new RegExp(`^The page in ${tab} crashed after the change \\(renderer gone\\)\\. Reload it with browser_history`));
+    assert.match(text, new RegExp(`^The page in ${tab} crashed after the change \\(renderer gone\\)\\. Reload it with browser_navigate {"action":"reload"}`));
   },
   { skip: hasDebugCdp ? undefined : 'debug_cdp is only available in a development host' },
 );
@@ -301,7 +301,7 @@ test('an emulated device in a background tab: regions in CSS px of the device', 
   try {
     // A page loaded under the emulation can be laid out differently from one that was emulated after it
     // loaded (on the Linux CI runner the heading counted as changed), so load it under the emulation first.
-    await a.ok('browser_history', { action: 'reload' });
+    await a.ok('browser_navigate', { action: 'reload' });
     const { text } = await change('none', { reload: true });
     const regions = regionsOf(text);
     assert.equal(regions.length, 1, text);
@@ -464,7 +464,7 @@ test('a slow ticker (7 s) without an edit: a timeout, or a DOM-only result that 
 });
 
 test('cleanup: close the last tab', async () => {
-  if (previous) await a.ok('browser_close_tab', { tab: previous });
+  if (previous) await a.ok('browser_tab', { action: 'close', tab: previous });
 });
 
 try {

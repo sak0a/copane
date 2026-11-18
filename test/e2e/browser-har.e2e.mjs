@@ -68,7 +68,7 @@ let tab;
 test('default: a valid HAR 1.2 of the page and its cross-origin frame, secrets masked, no bodies', async () => {
   tab = /Opened (tab-\d+)/.exec(await a.ok('browser_open', { url: server.url('/') }))[1];
   // A reload, so the log also has the document request (the first load starts before the bridge attaches).
-  await a.ok('browser_history', { action: 'reload' });
+  await a.ok('browser_navigate', { action: 'reload' });
   assert.equal(await a.ok('browser_evaluate', { function: '() => window.done' }), 'done');
   const result = await a.ok('browser_network_requests', { har: 'har-e2e/default.har' });
   assert.match(result, /^Wrote har-e2e[\\/]default\.har \([\d.]+ kB\): \d+ requests \(\d+ from cross-origin frames\) on \d+ pages?, HAR 1\.2\./);
@@ -149,7 +149,7 @@ test('filters apply: only the matching requests are written', async () => {
 
 test('requests sent while the user had the tab stay withheld in the HAR, also with secrets', async () => {
   await a.ok('browser_navigate', { url: server.url('/handoff') });
-  const handoff = await a.ok('browser_request_user_input', { message: 'Please sign in', done_when: { text: 'Signed in' }, timeout: 30 }, { timeoutMs: 60_000 });
+  const handoff = await a.ok('browser_request_user_input', { message: 'Please sign in', done_when: { text: 'Signed in' }, timeout_seconds: 30 }, { timeoutMs: 60_000 });
   assert.match(handoff, /yours again/);
   const result = await a.ok('browser_network_requests', { har: 'har-e2e/handoff.har', harInclude: ['secrets', 'bodies'] });
   assert.match(result, /\d+ requests? (was|were) sent while the user had the tab: in the file without URL query, headers or bodies\./);
@@ -182,7 +182,7 @@ test('where it may be written: inside the workspace, .har, never over a file it 
 });
 
 test('cleanup', async () => {
-  await a.call('browser_close_tab', { tab });
+  await a.call('browser_tab', { action: 'close', tab });
   rmSync(dir, { recursive: true, force: true });
   await a.close();
 });

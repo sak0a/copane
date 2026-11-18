@@ -72,7 +72,7 @@ test('a phone preset with dark scheme, locale and time zone is what the page see
     assert.deepEqual([after.width, after.dpr, after.dark, after.reducedMotion, after.language, after.timeZone, after.userAgent], [before.width, before.dpr, before.dark, before.reducedMotion, before.language, before.timeZone, before.userAgent]);
     await until(() => toolbar() === null, 'the device toolbar to close');
     assert.ok(!titleActions().some(l => /End Agent's Device Emulation/.test(l)));
-    await a.ok('browser_close_tab', {});
+    await a.ok('browser_tab', { action: 'close' });
   } finally {
     await a.close();
   }
@@ -95,10 +95,19 @@ test('screenshots show the emulated viewport and clicks by coordinates hit, also
     await a.ok('browser_emulate', { preset: 'desktop' });
     assert.deepEqual([(await report(a)).width, (await report(a)).height], [1920, 1080]);
     assert.equal(await clickCell(a, 2, 3), 'r2c3');
+    // Default detail stays within ~0.8 MP / 1280 px; detail high gives the sharper image it points at.
+    const normal = await a.call('browser_screenshot', {});
+    const [, nw, nh] = /\((\d+)×(\d+) px; viewport/.exec(normal.text).map(Number);
+    assert.ok(Math.max(nw, nh) <= 1282 && nw * nh <= 805_000, `default ${nw}×${nh}: ${normal.text}`);
+    const high = await a.call('browser_screenshot', { detail: 'high' });
+    const [, hw] = /\((\d+)×(\d+) px; viewport/.exec(high.text).map(Number);
+    assert.ok(hw <= 1570, high.text);
+    if (/Downscaled; detail: "high"/.test(normal.text)) assert.ok(hw > nw, `detail high ${hw} px wide, default ${nw}: ${high.text}`);
+    assert.doesNotMatch(high.text, /Downscaled/);
     await a.ok('browser_emulate', { reset: true });
     assert.equal(await clickCell(a, 3, 3), 'r3c3');
     assert.equal(await clickCell(a, 1, 0), 'r1c0');
-    await a.ok('browser_close_tab', {});
+    await a.ok('browser_tab', { action: 'close' });
   } finally {
     await a.close();
   }
@@ -117,7 +126,7 @@ test('a background tab: the screenshot is the whole viewport or says what is cut
     assert.equal(await clickCell(a, 3, 0), 'r3c0');
     await a.ok('browser_emulate', { reset: true });
     assert.equal(await clickCell(a, 3, 3), 'r3c3');
-    await a.ok('browser_close_tab', {});
+    await a.ok('browser_tab', { action: 'close' });
   } finally {
     await a.close();
   }
@@ -129,11 +138,11 @@ test('emulation ends when the session releases the tab, and the agent is told', 
     await a.ok('browser_open', { url: server.url('/') });
     const width = (await settledReport(a)).width;
     await a.ok('browser_emulate', { preset: 'iphone-se', colorScheme: 'dark' });
-    await a.ok('browser_release_tab', {});
+    await a.ok('browser_tab', { action: 'release' });
     await until(async () => (await report(a)).width === width, 'the normal width again');
     assert.equal(toolbar(), null);
     assert.match(await a.ok('browser_emulate', {}), /your earlier emulation of tab-\d+ had ended: control of tab-\d+ ended.*\n.*is not emulating anything/);
-    await a.ok('browser_close_tab', {});
+    await a.ok('browser_tab', { action: 'close' });
   } finally {
     await a.close();
   }
@@ -152,7 +161,7 @@ test('the user can reset it, and another session cannot change it while the tab 
     await until(async () => (await report(a)).width !== 768, 'the normal width again');
     assert.equal((await report(a)).language === 'de-DE', false);
     assert.match(await a.ok('browser_emulate', {}), /had ended: the user reset it/);
-    await a.ok('browser_close_tab', {});
+    await a.ok('browser_tab', { action: 'close' });
   } finally {
     await a.close();
     await b.close();
@@ -175,7 +184,7 @@ test('bad input is refused with a message; touch mode refuses what a touch scree
     await a.ok('browser_emulate', { mobile: false });
     assert.equal(await clickCell(a, 2, 2), 'r2c2');
     await a.ok('browser_emulate', { reset: true });
-    await a.ok('browser_close_tab', {});
+    await a.ok('browser_tab', { action: 'close' });
   } finally {
     await a.close();
   }

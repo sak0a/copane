@@ -17,7 +17,15 @@ const maxCharsArg = z
   .min(500)
   .max(MAX_MAX_CHARS)
   .optional()
-  .describe(`Default ${DEFAULT_MAX_CHARS}.`);
+  .describe(`Default ${DEFAULT_MAX_CHARS}. Longer output keeps its start and end and names the cut lines.`);
+
+/** Per execution: what each session was already told about it while it ran (see statusOf). */
+const told = new WeakMap<Execution, Set<string>>();
+function toldOf(execution: Execution): Set<string> {
+  let set = told.get(execution);
+  if (!set) told.set(execution, (set = new Set()));
+  return set;
+}
 
 export function terminalTools(services: BridgeServices, manager: TerminalManager): ToolDefinition<any>[] {
   // ---------------------------------------------------------------- helpers
@@ -92,16 +100,65 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
     return new ToolError(
       'busy',
       `${t.id} is busy: \`${shortCommand(c.commandLine)}\` (started by ${by(session, c.agentSession)}) has been running for ${formatDuration(Date.now() - c.startedAt)}. ` +
-        `Wait for it (terminal_wait), give it input (terminal_send), stop it (terminal_interrupt), or omit \`terminal\` to run in a free terminal of your own.`,
+        `Wait for it (terminal_wait), give it input (terminal_send), stop it (terminal_send keys ["Ctrl+C"]), or omit \`terminal\` to run in a free terminal of your own.`,
     );
   }
 
   const readCall = (t: Tracked, fromLine: number) => `terminal_read {"terminal":"${t.id}","what":"command","from_line":${fromLine}}`;
 
-  function statusOf(t: Tracked): string {
+  /**
+   * What the running command is doing, in full the first time a session hears it for this execution
+   * (and each time it changes kind, e.g. to a full-screen program), else in its brief form.
+   */
+  function activityOf(t: Tracked, execution: Execution, session: AgentSession | undefined): string {
+    const activity = manager.activity(t);
+    if (!session) return activity.summary;
+    const heard = toldOf(execution);
+    const key = `${session.id}\0${activity.kind}`;
+    if (heard.has(key)) return activity.brief;
+    heard.add(key);
+    return activity.summary;
+  }
+
+  /** The running command, named in full the first time a session hears about it for this execution. */
+  function runningLine(t: Tracked, execution: Execution, session: AgentSession | undefined): string {
+    const heard = session ? toldOf(execution) : undefined;
+    const took = formatDuration(Date.now() - execution.startedAt);
+    const named = heard?.has(session!.id);
+    heard?.add(session!.id);
+    const what = named ? `${t.id} is still running the same command (for ${took}).` : `${t.id} is running \`${shortCommand(execution.commandLine)}\` (for ${took}).`;
+    return `${what} ${activityOf(t, execution, session)}`;
+  }
+
+  /**
+   * terminal_send with keys ["Ctrl+C"] alone: stop the running command, wait (bounded) for it to end
+   * and say whether it did, with the last output. Once its own tool, terminal_interrupt.
+   */
+  async function interrupt(t: Tracked, ctx: ToolContext, waitSeconds: number): Promise<string> {
+    const execution = t.current;
+    const waitMs = Math.max(300, waitSeconds * 1000);
+    t.terminal.sendText('\x03', false);
+    if (execution) await raceTimeout(execution.done, waitMs, ctx.signal);
+    else await sleep(300);
+    await t.mirror.flush();
+    let headline: string;
+    if (!execution) headline = `Pressed Ctrl+C in ${t.id}; no command was running.`;
+    else if (execution.ended) headline = `Interrupted. ${finishedLine(t, execution, ctx.session)}`;
+    else headline = `Pressed Ctrl+C, but \`${shortCommand(execution.commandLine)}\` is still running after ${+(waitMs / 1000).toFixed(1)} s. Try again, send keys ["Ctrl+\\\\"], or close the terminal (terminal_close).`;
+    return withNotes(t, [headline, ...newOutputParts(t, ctx.session, 'Output since your last look:'), statusOf(t, ctx.session)], ctx.session);
+  }
+
+  /** The suggestions after a command that is still running: in full once per session and terminal. */
+  function nextLine(t: Tracked, session: AgentSession): string {
+    if (t.hintsShown.has(session.id)) return `Next: terminal_wait, terminal_read or terminal_send (keys ["Ctrl+C"] stops it).`;
+    t.hintsShown.add(session.id);
+    return `Next: terminal_wait {"terminal":"${t.id}"} (until it ends, or for_text), terminal_read for new output, terminal_send to type, or with keys ["Ctrl+C"] to stop it.`;
+  }
+
+  function statusOf(t: Tracked, session?: AgentSession): string {
     if (t.closed) return `${t.id} has been closed.`;
     if (t.handoff) return `${t.id} is waiting for the user: "${t.handoff.message}".`;
-    if (t.current) return `${t.id} is running \`${shortCommand(t.current.commandLine)}\` (for ${formatDuration(Date.now() - t.current.startedAt)}). ${manager.activity(t).summary}`;
+    if (t.current) return runningLine(t, t.current, session);
     const last = t.last ? ` Last command \`${shortCommand(t.last.commandLine)}\`${t.last.exitCode !== undefined ? ` exited with ${t.last.exitCode}` : ' finished'}.` : '';
     return `${t.id} is idle at the prompt.${last}`;
   }
@@ -118,12 +175,26 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
     return formatClip(clipLines(lines, { maxChars }), from => readCall(t, from), { startLost });
   }
 
+  /**
+   * Output lines that are not a whole command's output (new output, output since a handoff), cut to
+   * size. When they are the end of the latest command's output, cuts name that output's line numbers,
+   * which terminal_read pages exactly; otherwise only the end is kept, pointing at the whole output.
+   */
+  function partialBlock(t: Tracked, lines: readonly string[], startLost: boolean, maxChars: number | undefined): string {
+    const execution = t.current ?? t.last;
+    const whole = execution ? manager.outputOf(t, execution).lines : [];
+    const offset = whole.length - lines.length;
+    if (execution && offset >= 0 && lines.every((line, i) => whole[offset + i] === line)) {
+      return formatClip(clipLines(lines, { maxChars }), from => readCall(t, from), { startLost, lineOffset: offset });
+    }
+    const more = execution ? readCall(t, 1) : `terminal_read {"terminal":"${t.id}","what":"screen"}`;
+    return formatClip(clipLines(lines, { maxChars, headTail: false }), () => more, { startLost });
+  }
+
   function newOutputBlock(t: Tracked, session: AgentSession, maxChars: number | undefined): string | undefined {
     const { lines, startLost } = manager.readNew(session, t);
     if (lines.length === 0) return undefined;
-    // Cut new output is still part of the command's output, which can be paged from its start.
-    const more = t.current ?? t.last ? readCall(t, 1) : `terminal_read {"terminal":"${t.id}","what":"screen"}`;
-    return formatClip(clipLines(lines, { maxChars }), () => more, { startLost });
+    return partialBlock(t, lines, startLost, maxChars);
   }
 
   /** The visible screen (bounded by rows x cols), with what it is. */
@@ -175,7 +246,7 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
       title: 'Run a command in a terminal',
       description:
         'Runs a shell command in a VS Code terminal the user can watch (default: your current one, opened when needed) and returns its output and exit code. ' +
-        'A command still running after timeout_seconds keeps running: continue with terminal_wait, terminal_read, terminal_send or terminal_interrupt.',
+        'A command still running after timeout_seconds keeps running: continue with terminal_wait, terminal_read or terminal_send (keys ["Ctrl+C"] stops it).',
       input: {
         command: z.string().min(1).describe("As typed at the prompt of the terminal's shell."),
         terminal: terminalArg,
@@ -194,14 +265,15 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
         const block = outputBlock(t, execution, args.max_chars);
         manager.markRead(ctx.session, t, execution);
         if (execution.ended) return withNotes(t, [note, finishedLine(t, execution, ctx.session), block], ctx.session);
+        toldOf(execution).add(ctx.session.id); // The command is named below; later statuses need not repeat it.
         return withNotes(t, [
           note,
           `\`${shortCommand(execution.commandLine)}\` is still running in ${t.id} after ${formatDuration(Date.now() - execution.startedAt)}; it keeps running.`,
-          manager.activity(t).summary,
+          activityOf(t, execution, ctx.session),
           'Output so far:',
           block,
           t.mirror.alternate ? screenBlock(t) : undefined,
-          `Next: terminal_wait {"terminal":"${t.id}"} (until it ends, or for_text), terminal_read for new output, terminal_send to type, terminal_interrupt to stop it.`,
+          nextLine(t, ctx.session),
         ], ctx.session);
       },
     }),
@@ -225,19 +297,19 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
         if (what === 'screen') {
           return withNotes(t, [
             screenBlock(t),
-            statusOf(t),
+            statusOf(t, ctx.session),
             manager.dimensionsAvailable ? undefined : 'Note: the real terminal size is not available (proposed API terminalDimensions not enabled), so a full-screen program may be laid out differently here.',
           ], ctx.session);
         }
         if (what === 'command') {
           const execution = t.current ?? t.last;
-          if (!execution) return withNotes(t, [`No command has run in ${t.id} since the extension started watching it.`, statusOf(t)], ctx.session);
+          if (!execution) return withNotes(t, [`No command has run in ${t.id} since the extension started watching it.`, statusOf(t, ctx.session)], ctx.session);
           const { lines, startLost } = manager.outputOf(t, execution);
           const clip = clipLines(lines, { maxChars: args.max_chars, fromLine: args.from_line });
           manager.markRead(ctx.session, t, execution);
-          return withNotes(t, [`Output of \`${shortCommand(execution.commandLine)}\` in ${t.id}:`, formatClip(clip, from => readCall(t, from), { startLost }), statusOf(t)], ctx.session);
+          return withNotes(t, [`Output of \`${shortCommand(execution.commandLine)}\` in ${t.id}:`, formatClip(clip, from => readCall(t, from), { startLost }), statusOf(t, ctx.session)], ctx.session);
         }
-        return withNotes(t, [...newOutputParts(t, ctx.session, `New output in ${t.id}:`, args.max_chars), statusOf(t)], ctx.session);
+        return withNotes(t, [...newOutputParts(t, ctx.session, `New output in ${t.id}:`, args.max_chars), statusOf(t, ctx.session)], ctx.session);
       },
     }),
 
@@ -262,7 +334,7 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
         if (!pattern && !execution) {
           const ended = unreportedEnd(t, ctx.session);
           const headline = ended ? `Nothing is running in ${t.id} any more: ${finishedLine(t, ended, ctx.session)}` : `Nothing is running in ${t.id}.`;
-          return withNotes(t, [headline, ...newOutputParts(t, ctx.session, 'New output:', args.max_chars), statusOf(t)], ctx.session);
+          return withNotes(t, [headline, ...newOutputParts(t, ctx.session, 'New output:', args.max_chars), statusOf(t, ctx.session)], ctx.session);
         }
         const mark = t.marks.get(ctx.session.id);
         let found = false;
@@ -286,7 +358,7 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
         else if (!pattern && execution?.ended) headline = finishedLine(t, execution, ctx.session);
         else if (pattern) headline = `"${args.for_text}" did not appear within ${took}.${t.current ? '' : ' (Nothing is running in the terminal.)'}`;
         else headline = `Still running after waiting ${took}.`;
-        return withNotes(t, [headline, ...newOutputParts(t, ctx.session, 'New output:', args.max_chars), statusOf(t)], ctx.session);
+        return withNotes(t, [headline, ...newOutputParts(t, ctx.session, 'New output:', args.max_chars), statusOf(t, ctx.session)], ctx.session);
       },
     }),
 
@@ -294,12 +366,13 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
       name: 'terminal_send',
       title: 'Type into a terminal',
       description:
-        'Types text and/or presses keys in a terminal, to answer a prompt or drive a menu or full-screen program, and returns the output that followed. Text is typed as is; add keys ["Enter"] to submit. Never type secrets you were not given.',
+        'Types text and/or presses keys in a terminal, to answer a prompt or drive a menu or full-screen program, and returns the output that followed. Text is typed as is; add keys ["Enter"] to submit. ' +
+        'keys ["Ctrl+C"] alone stops the running command and says whether it ended. Never type secrets you were not given.',
       input: {
         terminal: terminalArg,
         text: z.string().optional(),
-        keys: z.array(z.string()).optional().describe('Pressed after the text, e.g. ["Down", "Enter"], ["Ctrl+C"], ["Escape"].'),
-        wait_seconds: z.number().min(0).max(30).optional().describe('Longest wait for output to settle, default 2.'),
+        keys: z.array(z.string()).optional().describe('Pressed after the text, e.g. ["Down", "Enter"], ["Escape"].'),
+        wait_seconds: z.number().min(0).max(30).optional().describe('Longest wait for output to settle, default 2; with Ctrl+C alone, for the command to end, default 5.'),
       },
       handler: async (args, ctx) => {
         const t = await existing(ctx, args.terminal);
@@ -312,6 +385,7 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
           throw err;
         }
         if (!data) throw new ToolError('invalid_input', 'Nothing to send: pass `text`, `keys` or both.');
+        if (data === '\x03') return interrupt(t, ctx, args.wait_seconds ?? 5);
         if (!t.marks.has(ctx.session.id)) t.marks.set(ctx.session.id, t.mirror.mark());
         const sentAt = Date.now();
         const before = t.mirror.received;
@@ -324,27 +398,7 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
           if (gotOutput && Date.now() - t.mirror.lastWriteAt >= 500) break;
         }
         await t.mirror.flush();
-        return withNotes(t, [`Sent ${describeInput(args.text, args.keys)} to ${t.id}.`, ...newOutputParts(t, ctx.session, 'Output since your last look:'), statusOf(t)], ctx.session);
-      },
-    }),
-
-    defineTool({
-      name: 'terminal_interrupt',
-      title: 'Interrupt a terminal command',
-      description: 'Presses Ctrl+C in a terminal to stop its command, waits up to 5 s for it to end, and returns the last output.',
-      input: { terminal: terminalArg },
-      handler: async (args, ctx) => {
-        const t = await existing(ctx, args.terminal);
-        const execution = t.current;
-        t.terminal.sendText('\x03', false);
-        if (execution) await raceTimeout(execution.done, 5000, ctx.signal);
-        else await sleep(300);
-        await t.mirror.flush();
-        let headline: string;
-        if (!execution) headline = `Pressed Ctrl+C in ${t.id}; no command was running.`;
-        else if (execution.ended) headline = `Interrupted. ${finishedLine(t, execution, ctx.session)}`;
-        else headline = `Pressed Ctrl+C, but \`${shortCommand(execution.commandLine)}\` is still running after 5 s. Try again, send keys ["Ctrl+\\\\"], or close the terminal (terminal_close).`;
-        return withNotes(t, [headline, ...newOutputParts(t, ctx.session, 'Output since your last look:'), statusOf(t)], ctx.session);
+        return withNotes(t, [`Sent ${describeInput(args.text, args.keys)} to ${t.id}.`, ...newOutputParts(t, ctx.session, 'Output since your last look:'), statusOf(t, ctx.session)], ctx.session);
       },
     }),
 
@@ -382,7 +436,7 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
         await sleep(150);
         await t.mirror.flush();
         const { lines, startLost } = manager.linesSince(t, since);
-        const block = formatClip(clipLines(lines), from => readCall(t, from), { startLost });
+        const block = partialBlock(t, lines, startLost, undefined);
         manager.markRead(ctx.session, t, execution?.ended ? execution : undefined);
         return withNotes(t, [
           note,
@@ -390,7 +444,7 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
           `Output in ${t.id} since the request (only what the terminal displayed; input at hidden prompts is never visible to you):`,
           block,
           t.mirror.alternate ? screenBlock(t) : undefined,
-          statusOf(t),
+          statusOf(t, ctx.session),
         ], ctx.session);
       },
     }),
@@ -456,7 +510,7 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
           };
         });
         if (rows.length === 0) return 'No terminals are open. terminal_run opens one for you.';
-        return JSON.stringify(rows, null, 1);
+        return JSON.stringify(rows);
       },
     }),
 

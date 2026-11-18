@@ -11,6 +11,10 @@
 //   --client <name>     MCP client name to present (default "claude-code")
 //   --cwd <dir>         working directory of the MCP server (used to pick the window)
 //   --instance <id>     connect to this window id instead of discovering one
+//   --meta '<json>'     `_meta` to send with every tool call
+//   --conversation <id> send `_meta["vscode.conversationId"]` with every tool call, as VS Code's chat does
+//                       (with --client "Visual Studio Code"); in --repl, a line "@<id> <tool> <json>" sends
+//                       that call in conversation <id>
 // Images in results are written to .dev/shots/ and printed as file paths.
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -64,8 +68,14 @@ function print(result) {
   if (result.isError) console.log('[isError]');
 }
 
-async function call(tool, json) {
-  const result = await client.callTool({ name: tool, arguments: json ? JSON.parse(json) : {} }, undefined, { timeout: 600_000 });
+const baseMeta = options.meta ? JSON.parse(options.meta) : {};
+function metaFor(conversation) {
+  const meta = { ...baseMeta, ...(conversation ? { 'vscode.conversationId': conversation } : {}) };
+  return Object.keys(meta).length ? { _meta: meta } : {};
+}
+
+async function call(tool, json, conversation = options.conversation) {
+  const result = await client.callTool({ name: tool, arguments: json ? JSON.parse(json) : {}, ...metaFor(conversation) }, undefined, { timeout: 600_000 });
   print(result);
   return !result.isError;
 }
@@ -77,13 +87,19 @@ if (options.list) {
   if (tools.length === 0) console.log('(no tools: not connected to a window?)');
 } else if (options.repl) {
   for await (const line of createInterface({ input: process.stdin })) {
-    const trimmed = line.trim();
+    let trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
+    console.log(`> ${trimmed}`);
+    let conversation = options.conversation;
+    if (trimmed.startsWith('@')) {
+      const end = trimmed.indexOf(' ');
+      conversation = end < 0 ? trimmed.slice(1) : trimmed.slice(1, end);
+      trimmed = end < 0 ? '' : trimmed.slice(end + 1).trim();
+    }
     const space = trimmed.indexOf(' ');
     const tool = space < 0 ? trimmed : trimmed.slice(0, space);
-    console.log(`> ${trimmed}`);
     try {
-      ok = (await call(tool, space < 0 ? '' : trimmed.slice(space + 1))) && ok;
+      ok = (await call(tool, space < 0 ? '' : trimmed.slice(space + 1), conversation)) && ok;
     } catch (err) {
       ok = false;
       console.log(`[error] ${err.message}`);

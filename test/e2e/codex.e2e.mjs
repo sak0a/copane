@@ -42,7 +42,7 @@ test('a Codex client gets a "Codex" session label and color', async () => {
   // Codex 0.16x introduces itself as "codex-mcp-client" (title "Codex").
   const a = await agent({ client: 'codex-mcp-client' });
   try {
-    const info = JSON.parse(/^\{[\s\S]*?\n\}/.exec(await a.ok('session_info'))[0]);
+    const info = JSON.parse(await a.ok('session_info'));
     assert.match(info.you?.label ?? '', /^Codex \d+$/);
     assert.ok(info.you.color, 'has a color');
   } finally {
@@ -132,7 +132,7 @@ test('real Codex session: tools work, images and long results come through, Code
     const run = await codexExec(
       `Use only the copane MCP tools, nothing else. 1) session_info. 2) browser_open ${site.url}/long.html, then browser_screenshot. ` +
         `3) browser_snapshot with maxChars 60000 and tell me the last line of its result. 4) terminal_run: echo codex-was-here > ${marker}. ` +
-        '5) browser_release_tab. Then reply with your session label only.',
+        '5) browser_tab with action release. Then reply with your session label only.',
       ['-c', 'mcp_servers.copane.default_tools_approval_mode="approve"'],
     );
     const label = JSON.parse(run.call('session_info').result.content[0].text).you.label;

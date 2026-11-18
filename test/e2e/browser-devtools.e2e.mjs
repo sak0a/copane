@@ -30,7 +30,7 @@ const exported = new Map();
 
 let previous;
 async function open(url) {
-  if (previous) await a.call('browser_close_tab', { tab: previous });
+  if (previous) await a.call('browser_tab', { action: 'close', tab: previous });
   const text = await a.ok('browser_open', { url, background: true });
   const id = /Opened (tab-\d+)/.exec(text)?.[1];
   assert.ok(id, `no tab id in: ${text}`);
@@ -281,6 +281,9 @@ test('audit accessibility: rules with refs and fixes; part of the page; refs act
   await a.ok('browser_click', { ref });
   const part = await a.ok('browser_audit', { type: 'accessibility', selector: '#clean' });
   assert.match(part, /only region "Fine part"[^\n]*: no problems found by the automated checks\./);
+  // The caveat is given in full once per session, in short afterwards.
+  assert.match(text, /This is not a conformance verdict: automated checks cover only part of WCAG\./);
+  assert.match(part, /\nNot a conformance verdict: keyboard use, focus, alt text, captions and zoom still need a person; audit each page state separately\.$/);
   assert.ok(text.length < 3000, `result too long: ${text.length}`);
 });
 
@@ -307,10 +310,12 @@ test('audit performance: load timing, vitals, requests, long tasks, render-block
   assert.match(text, /Render-blocking: \/slow\.css\?ms=400 4\d\d ms/);
   assert.match(text, /not comparable with Lighthouse/);
   // In front, the tab is painted and its interactions are reported (in the background they may not be).
-  await a.ok('browser_show_tab');
+  await a.ok('browser_tab', { action: 'show' });
   await a.ok('browser_click', { selector: '#heavy' });
   const after = await a.ok('browser_audit', { type: 'performance' });
   assert.match(after, /Interactions: slowest click on <button#heavy>[^\n]*handlers 2\d\d ms/);
+  assert.match(text, /Measured in VS Code's embedded browser/);
+  assert.match(after, /\nMeasured in Chromium [\d.]* ?on this machine, [^\n]*: compare before and after a change; not comparable with Lighthouse or field data\. Request details: browser_network_requests with id\.$/);
 });
 
 // ---------------------------------------------------------------- run the exported tests
@@ -335,7 +340,7 @@ test('exported tests run green in Playwright (with --playwright <dir>)', async (
 });
 
 test('cleanup: close the last tab', async () => {
-  if (previous) await a.ok('browser_close_tab', { tab: previous });
+  if (previous) await a.ok('browser_tab', { action: 'close', tab: previous });
 });
 
 try {

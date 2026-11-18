@@ -5,11 +5,11 @@
 //
 // Serves the fixture pages in test/fixtures/pages/ from two local servers on free ports (127.0.0.1 and
 // localhost, i.e. two origins, for cross-origin iframes). Every case opens its own background tab.
-import { writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startFixtureServer } from '../fixtures/pages/server.mjs';
-import { agent, assert, run, sleep, test } from './harness.mjs';
+import { agent, assert, hostDir, run, sleep, test } from './harness.mjs';
 
 const site = await startFixtureServer();
 const other = await startFixtureServer({ host: 'localhost' });
@@ -99,15 +99,15 @@ test('navigate: waitUntil, slow loads and resources that never finish', async ()
 test('history: back, forward, reload, and same-document SPA routes', async () => {
   await open('/spa.html');
   await a.ok('browser_navigate', { url: url('/form.html') });
-  assert.match(await a.ok('browser_history', { action: 'back' }), /Went back in tab-\d+: .*spa\.html — "SPA fixture"/);
-  assert.match(await a.ok('browser_history', { action: 'forward' }), /form\.html — "Form fixture"/);
-  assert.match(await a.ok('browser_history', { action: 'reload' }), /Reloaded tab-\d+: .*form\.html/);
-  await a.ok('browser_history', { action: 'back' });
+  assert.match(await a.ok('browser_navigate', { action: 'back' }), /Went back in tab-\d+: .*spa\.html — "SPA fixture"/);
+  assert.match(await a.ok('browser_navigate', { action: 'forward' }), /form\.html — "Form fixture"/);
+  assert.match(await a.ok('browser_navigate', { action: 'reload' }), /Reloaded tab-\d+: .*form\.html/);
+  await a.ok('browser_navigate', { action: 'back' });
   assert.match(await a.ok('browser_click', { selector: 'a[data-route=items]' }), /URL changed to .*\/spa\/items \(same page, no reload\)/);
-  assert.match(await a.ok('browser_history', { action: 'back' }), /the URL is now .*\/spa\.html \(same page, no reload\)/);
-  await a.ok('browser_history', { action: 'forward' });
-  await a.ok('browser_history', { action: 'forward' }).catch(() => {});
-  await fails('browser_history', { action: 'forward' }, /no next page/);
+  assert.match(await a.ok('browser_navigate', { action: 'back' }), /the URL is now .*\/spa\.html \(same page, no reload\)/);
+  await a.ok('browser_navigate', { action: 'forward' });
+  await a.ok('browser_navigate', { action: 'forward' }).catch(() => {});
+  await fails('browser_navigate', { action: 'forward' }, /no next page/);
 });
 
 // ---------------------------------------------------------------- snapshot and refs
@@ -444,8 +444,69 @@ test('screenshot: viewport, element, full page, png, and the bridge UI hidden', 
   const full = await a.call('browser_screenshot', { fullPage: true });
   assert.match(full.text, /The page is \d+ px tall; only the top \d+ px were captured/);
   const [, fw, fh] = /(\d+)×(\d+) px/.exec(full.text).map(Number);
-  assert.ok(Math.max(fw, fh) <= 1568 && fw * fh <= 1_150_000 + 2000, `full page ${fw}×${fh}`);
+  assert.ok(Math.max(fw, fh) <= 1280 && fw * fh <= 800_000 + 2000, `full page ${fw}×${fh}`);
+  assert.match(full.text, /For browser_click x\/y: x = imageX \/ 0\.\d+, y = imageY \/ 0\.\d+\. Downscaled; detail: "high" gives a sharper image/);
   assert.ok(Buffer.from(full.images[0].data, 'base64').length < 1_500_000);
+  const high = await a.call('browser_screenshot', { fullPage: true, detail: 'high' });
+  const [, hw, hh] = /(\d+)×(\d+) px/.exec(high.text).map(Number);
+  assert.ok(Math.max(hw, hh) <= 1568 && hw * hh <= 1_150_000 + 2000 && hh > fh, `full page with detail high ${hw}×${hh}, default ${fw}×${fh}`);
+  assert.doesNotMatch(high.text, /Downscaled/);
+});
+
+test('screenshot: about 0.8 MP by default, 1.15 MP with detail high, and how image pixels map to clicks', async () => {
+  await open('/form.html');
+  // A page area of 1440×900 CSS px, as a normal window shows: the default budget binds, then high's.
+  await evaluate("() => { document.body.innerHTML = '<div id=area style=\"width:1440px;height:900px;background:linear-gradient(#fff,#ccc)\"><button id=b style=\"margin:300px 0 0 700px\">Hit</button></div>'; document.body.style.margin = '0'; scrollTo(0, 0); }");
+  const shot = await a.call('browser_screenshot', { selector: '#area' });
+  assert.match(shot.text, /^Screenshot of .*#area.* in tab-\d+, 1131×707 px\. For browser_click x\/y: x = imageX \/ 0\.786, y = imageY \/ 0\.786\. Downscaled; detail: "high" gives a sharper image \(~1\.4× the tokens\)\.$/);
+  const high = await a.call('browser_screenshot', { selector: '#area', detail: 'high' });
+  assert.match(high.text, /, 1356×848 px\. For browser_click x\/y: x = imageX \/ 0\.942, y = imageY \/ 0\.942\.$/);
+  assert.equal(high.images.length, 1);
+  // A viewport shot is never larger than the viewport, and says how to map its pixels.
+  const vp = await a.call('browser_screenshot');
+  assert.match(vp.text, /^Screenshot of the viewport in tab-\d+, \d+×\d+ px\. (Its pixels are CSS px|For browser_click x\/y, divide its coordinates by)/);
+});
+
+test('screenshot: path also saves the image in the workspace, by the file rules of the other tools', async () => {
+  const dir = join(hostDir, 'ws', 'shot-e2e');
+  rmSync(dir, { recursive: true, force: true });
+  try {
+    await open('/form.html');
+    const plain = await a.call('browser_screenshot');
+    assert.doesNotMatch(plain.text, /Saved to/);
+    // The format follows the extension; the file holds the bytes returned, in a folder created for it.
+    const shot = await a.call('browser_screenshot', { path: 'shot-e2e/sub/form.png' });
+    assert.ok(!shot.isError, shot.text);
+    assert.equal(shot.images[0].mimeType, 'image/png');
+    const [, w, h] = /, (\d+)×(\d+) px\./.exec(shot.text).map(Number);
+    const saved = /\nSaved to (\/.+[\\/]shot-e2e[\\/]sub[\\/]form\.png) \((\d+)×(\d+) px PNG, [\d.]+ k?B\)\.$/.exec(shot.text);
+    assert.ok(saved, shot.text);
+    assert.deepEqual([Number(saved[2]), Number(saved[3])], [w, h]);
+    const bytes = readFileSync(saved[1]);
+    assert.ok(bytes.equals(readFileSync(join(dir, 'sub', 'form.png'))), 'the reported path is the file in the workspace');
+    assert.ok(bytes.equals(Buffer.from(shot.images[0].data, 'base64')), 'the file holds the returned image');
+    assert.equal(bytes.readUInt32BE(0), 0x89504e47);
+    assert.deepEqual([bytes.readUInt32BE(16), bytes.readUInt32BE(20)], [w, h]);
+    // Its own file may be overwritten; a JPEG by extension; a contradicting format, another extension,
+    // a file it did not write and a path outside the project are refused before anything is taken.
+    assert.match(await a.ok('browser_screenshot', { path: 'shot-e2e/sub/form.png', detail: 'high' }), /Saved to .*form\.png \(\d+×\d+ px PNG/);
+    const jpg = await a.call('browser_screenshot', { path: 'shot-e2e/form.jpg' });
+    assert.equal(jpg.images[0].mimeType, 'image/jpeg');
+    assert.deepEqual([...readFileSync(join(dir, 'form.jpg')).subarray(0, 2)], [0xff, 0xd8]);
+    await fails('browser_screenshot', { path: 'shot-e2e/x.png', format: 'jpeg' }, /ends in \.png but format is jpeg; end it in \.jpg or leave format out/);
+    await fails('browser_screenshot', { path: 'shot-e2e/x.gif' }, /must end in \.png, \.jpg or \.jpeg/);
+    writeFileSync(join(dir, 'mine.png'), 'not ours');
+    await fails('browser_screenshot', { path: 'shot-e2e/mine.png' }, /exists and was not written by browser_screenshot; pick another path \(it is never overwritten\)/);
+    assert.equal(readFileSync(join(dir, 'mine.png'), 'utf8'), 'not ours');
+    const outside = join(tmpdir(), `copane-shot-outside-${process.pid}.png`);
+    await fails('browser_screenshot', { path: outside }, /outside your working directory and the workspace folders/);
+    assert.ok(!existsSync(outside));
+    // A failed screenshot writes nothing.
+    await fails('browser_screenshot', { selector: '#no-such-element', path: 'shot-e2e/missing.png' });
+    assert.ok(!existsSync(join(dir, 'missing.png')));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // ---------------------------------------------------------------- console and network
@@ -467,7 +528,7 @@ test('console: levels, filter, onlyNew, page loads, bounded output', async () =>
   assert.match(await a.ok('browser_console_messages', { filter: '/care+ful/' }), /1 console message/);
   await a.ok('browser_console_messages', { onlyNew: true });
   assert.match(await a.ok('browser_console_messages', { onlyNew: true }), /No console messages .* new since your last read/);
-  await a.ok('browser_history', { action: 'reload' });
+  await a.ok('browser_navigate', { action: 'reload' });
   await evaluate("console.info('after reload')");
   assert.match(await a.ok('browser_console_messages', { onlyNew: true }), /--- page loaded: .*spa\.html ---\n.*\[info\] after reload/);
   // A flood stays within the output budget and says what was left out.
@@ -481,7 +542,7 @@ test('console: levels, filter, onlyNew, page loads, bounded output', async () =>
 test('network: listing, filters, onlyNew and request details with headers and bodies', async () => {
   await open('/spa.html');
   // Recording starts when the bridge attaches to the tab (its first tool call), so load the page again.
-  await a.ok('browser_history', { action: 'reload' });
+  await a.ok('browser_navigate', { action: 'reload' });
   await a.ok('browser_click', { selector: '#fetch-ok' });
   await a.ok('browser_click', { selector: '#fetch-500' });
   await evaluate("fetch('/echo', { method: 'POST', headers: { 'content-type': 'application/json', 'x-agent': 'yes' }, body: JSON.stringify({ hello: 'world' }) }).then(r => r.text())");
@@ -503,6 +564,47 @@ test('network: listing, filters, onlyNew and request details with headers and bo
   await a.ok('browser_network_requests', { onlyNew: true });
   assert.match(await a.ok('browser_network_requests', { onlyNew: true }), /No matching requests/);
   await fails('browser_network_requests', { id: 'r99999' }, /No request "r99999"/);
+});
+
+test('console and network: the current page and its redirects by default, earlier pages with allPages', async () => {
+  await open('/spa.html');
+  await a.ok('browser_history', { action: 'reload' });
+  await a.ok('browser_click', { selector: '#fetch-ok' });
+  await evaluate("console.log('first page says hi')");
+  await a.ok('browser_wait_for', { loadState: 'networkidle' });
+  await a.ok('browser_console_messages', { onlyNew: true });
+  // A second page, reached through an HTTP redirect.
+  await a.ok('browser_navigate', { url: url('/redirect?to=/form.html') });
+  await evaluate("console.log('second page says hi')");
+  const left = /\(loaded \d\d:\d\d:\d\d\)[^:\n]*; \d+ requests? from earlier pages left out \(allPages: true lists them\)/;
+  const net = await a.ok('browser_network_requests');
+  assert.match(net, /^\d+ requests? in tab-\d+ on the current page /);
+  assert.match(net, left);
+  assert.match(net, /GET 302 → document {2}\/redirect\?to=\/form\.html/, 'the redirect that led to the page stays visible');
+  assert.match(net, /GET 200 document {2}\/form\.html/);
+  assert.doesNotMatch(net, /\/json|spa\.html/);
+  const allNet = await a.ok('browser_network_requests', { allPages: true });
+  assert.match(allNet, /\/json/);
+  assert.match(allNet, /spa\.html/);
+  assert.doesNotMatch(allNet, /left out/);
+  // Filters apply to the count of what was left out too.
+  assert.match(await a.ok('browser_network_requests', { filter: '/json' }), /^No matching requests in tab-\d+, on the current page \(loaded [\d:]+\); 1 request from earlier pages left out \(allPages: true lists them\)\./);
+  const con = await a.ok('browser_console_messages');
+  assert.match(con, /second page says hi/);
+  assert.doesNotMatch(con, /first page says hi/);
+  assert.match(con, /on the current page \(loaded [\d:]+\) \(0 errors, 0 warnings\); \d+ messages? from earlier pages left out \(allPages: true lists them\):/);
+  const allCon = await a.ok('browser_console_messages', { allPages: true });
+  assert.match(allCon, /first page says hi[\s\S]*--- page loaded: .*form\.html ---[\s\S]*second page says hi/);
+  // A same-document navigation (pushState) keeps the page.
+  await evaluate("history.pushState({}, '', '/form.html#step2'); console.log('after pushState')");
+  const pushed = await a.ok('browser_console_messages');
+  assert.match(pushed, /second page says hi[\s\S]*after pushState/);
+  // onlyNew is not limited to the page: what was not read yet is shown once, wherever it came from.
+  await evaluate("console.log('unread when leaving')");
+  await a.ok('browser_navigate', { url: url('/spa.html') });
+  const unread = await a.ok('browser_console_messages', { onlyNew: true });
+  assert.match(unread, /new since your last read[\s\S]*unread when leaving[\s\S]*--- page loaded: .*spa\.html ---/);
+  assert.doesNotMatch(unread, /left out/);
 });
 
 test('actions report what changed on the page, within a small budget', async () => {
@@ -559,9 +661,9 @@ test('dialogs: "leave this page?" does not block navigation', async () => {
   await open('/dialogs.html');
   await a.ok('browser_click', { selector: '#guard' });
   assert.match(await a.ok('browser_navigate', { url: url('/form.html') }), /"Form fixture"[\s\S]*confirm(ed)? leaving/);
-  await a.ok('browser_history', { action: 'back' });
+  await a.ok('browser_navigate', { action: 'back' });
   await a.ok('browser_click', { selector: '#guard' });
-  assert.match(await a.ok('browser_history', { action: 'reload' }), /Reloaded/);
+  assert.match(await a.ok('browser_navigate', { action: 'reload' }), /Reloaded/);
 });
 
 // ---------------------------------------------------------------- evaluate
@@ -645,7 +747,7 @@ test('tools are listed with descriptions and input schemas', async () => {
   const tools = await a.tools();
   const names = tools.map(t => t.name);
   for (const name of [
-    'browser_navigate', 'browser_history', 'browser_snapshot', 'browser_screenshot', 'browser_click', 'browser_type', 'browser_fill_form',
+    'browser_navigate', 'browser_tab', 'browser_snapshot', 'browser_screenshot', 'browser_click', 'browser_type', 'browser_fill_form',
     'browser_press_key', 'browser_hover', 'browser_scroll', 'browser_drag', 'browser_upload_file', 'browser_wait_for',
     'browser_console_messages', 'browser_network_requests', 'browser_handle_dialog', 'browser_evaluate',
   ]) {

@@ -2,7 +2,7 @@
 // starts the bridge server and publishes this window so agents can connect.
 import * as vscode from 'vscode';
 import { activateBrowser } from './browser';
-import { BridgeServer } from './core/bridgeServer';
+import { BridgeServer, usageNotesPolicy } from './core/bridgeServer';
 import { activateDebugTools } from './core/debugTools';
 import { describeWindow, InstanceRegistration } from './core/instance';
 import { buildInstructions } from './core/instructions';
@@ -12,11 +12,13 @@ import { VscodePrompts } from './core/prompts';
 import type { BridgeServices } from './core/services';
 import { SessionManager, type RememberedSession } from './core/sessions';
 import { ToolRegistry } from './core/tools';
+import { isToolEnabled, type ToolSelection } from './core/toolSelection';
 import { activateRegistration } from './registration';
 import { activateRemote } from './remote';
 import { activateSessionTools } from './core/sessionTools';
 import { activateTerminals } from './terminal';
 import { activateUi } from './ui';
+import { activateVscodeChat } from './vscodeChat';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const channel = vscode.window.createOutputChannel('Copane', { log: true });
@@ -77,7 +79,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   activateTerminals(services);
   activateUi(services);
   activateRegistration(services);
+  activateVscodeChat(services);
 
+  // Which tools agents get, and whether Copilot gets the usage notes in a result (contributes/core.json).
+  const toolSelection = (): ToolSelection => ({ profile: config().get<string>('tools.profile'), disabled: config().get<unknown[]>('tools.disabled') });
   const server = new BridgeServer({
     socketPath: instance.info.socketPath,
     token: instance.info.token,
@@ -86,9 +91,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     sessions,
     tools,
     log,
-    instructions: () => buildInstructions(services),
+    instructions: () => {
+      const selection = toolSelection();
+      return buildInstructions(services, name => isToolEnabled(selection, name));
+    },
+    needsUsageNotes: usageNotesPolicy(() => config().get<boolean>('usageNotesInResults', true)),
+    toolSelection,
   });
-  context.subscriptions.push(server);
+  context.subscriptions.push(
+    server,
+    // Connected agents get the new list (a list change also costs their client its prompt cache).
+    vscode.workspace.onDidChangeConfiguration(e => {
+      if (e.affectsConfiguration('copane.tools')) server.notifyToolsChanged();
+    }),
+  );
   try {
     await server.listen();
     instance.publish();

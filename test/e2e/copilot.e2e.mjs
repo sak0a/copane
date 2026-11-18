@@ -19,7 +19,7 @@ test('a copilot-cli client is a Copilot session and gets the usage notes once', 
     const you = JSON.parse(first[0]).you;
     assert.match(you.label, /^Copilot \d+$/);
     assert.ok(first[1].startsWith(NOTES), first[1].slice(0, 80));
-    assert.match(first[1], /browser_release_tab/);
+    assert.match(first[1], /browser_tab {"action":"release"}/);
     const second = await texts(a, 'session_info');
     assert.equal(second.length, 1);
     assert.ok(!second.join('\n').includes(NOTES));

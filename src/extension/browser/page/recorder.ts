@@ -38,7 +38,7 @@ export interface Recording {
 }
 
 const RECORDED = new Set([
-  'browser_navigate', 'browser_history', 'browser_click', 'browser_type', 'browser_fill_form', 'browser_press_key', 'browser_hover', 'browser_scroll',
+  'browser_navigate', 'browser_click', 'browser_type', 'browser_fill_form', 'browser_press_key', 'browser_hover', 'browser_scroll',
   'browser_drag', 'browser_upload_file', 'browser_handle_dialog', 'browser_wait_for', 'browser_evaluate', 'browser_emulate',
 ]);
 /** Tools whose resolved elements become locators. */
@@ -135,7 +135,7 @@ export class Recorder implements PageHook, Disposable {
     // The URL changed since the agent's last step without a step of its own (a redirect after a login,
     // a timer, a link the agent followed in a snapshot it took meanwhile): the agent saw it, so assert it.
     const rec = this.recordings.get(call.sessionTabKey);
-    if (rec && !isBlank(call.state.url) && call.state.url !== rec.lastUrl && p.tool !== 'browser_navigate') {
+    if (rec && !isBlank(call.state.url) && call.state.url !== rec.lastUrl && !(p.tool === 'browser_navigate' && p.args.url !== undefined)) {
       this.push(rec, { kind: 'expectUrl', url: call.state.url });
       rec.lastUrl = call.state.url;
     }
@@ -256,15 +256,16 @@ export class Recorder implements PageHook, Disposable {
     let assertUrl = true;
     switch (p.tool) {
       case 'browser_navigate': {
+        if (a.action) {
+          steps.push({ kind: 'history', action: a.action });
+          assertUrl = a.action !== 'reload';
+          break;
+        }
         const url = normalizeUrl(a.url);
         steps.push({ kind: 'goto', url });
         assertUrl = urlNow !== url && urlNow !== `${url}/`;
         break;
       }
-      case 'browser_history':
-        steps.push({ kind: 'history', action: a.action });
-        assertUrl = a.action !== 'reload';
-        break;
       case 'browser_click':
         steps.push({
           kind: 'click',
@@ -375,7 +376,7 @@ export class Recorder implements PageHook, Disposable {
         assertUrl = false;
         break;
     }
-    if (assertUrl && !isBlank(urlNow) && urlNow !== (p.tool === 'browser_navigate' ? normalizeUrl(a.url) : p.urlBefore)) steps.push({ kind: 'expectUrl', url: urlNow });
+    if (assertUrl && !isBlank(urlNow) && urlNow !== (p.tool === 'browser_navigate' && a.url !== undefined ? normalizeUrl(a.url) : p.urlBefore)) steps.push({ kind: 'expectUrl', url: urlNow });
     const opened = this.services.browser.listTabs().filter(t => p.tabsBefore && !p.tabsBefore.has(t.id) && t.openerTab === call.tab.id);
     for (const t of opened) steps.push({ kind: 'note', text: `Left out: this opened a new tab (${t.id}); in the test, wait for it with page.waitForEvent('popup') before the step above. Its own steps are in that tab's recording.` });
     this.push(rec, ...steps);

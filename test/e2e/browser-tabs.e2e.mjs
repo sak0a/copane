@@ -98,7 +98,7 @@ test('an agent tab shows the indicator and editor badge while controlled; releas
       await sleep(500);
       await until(async () => (await page2.indicator()).count === 1, 'the indicator after reload');
 
-      const released = await a.ok('browser_release_tab');
+      const released = await a.ok('browser_tab', { action: 'release' });
       assert.match(released, /Released tab-\d+/);
       await until(async () => (await page2.indicator()).count === 0, 'the indicator to go away on release');
       // The editor tab still says who used it.
@@ -141,7 +141,7 @@ test('consent: Allow lets the session use the user tab and is not asked again', 
     const url = fresh();
     const id = await userOpens(a, url);
     const before = (await prompts(a, ['Allow'])).shown.length;
-    const selected = await a.ok('browser_select_tab', { tab: id });
+    const selected = await a.ok('browser_tab', { action: 'select', tab: id });
     assert.match(selected, new RegExp(`${id} is now your current tab`));
     const after = await prompts(a, [], false);
     assert.equal(after.shown.length, before + 1);
@@ -164,7 +164,7 @@ test('consent: Deny is remembered, never asked twice, and the error says not to 
     const first = await evaluate(a, id, '1');
     assert.ok(first.isError);
     assert.match(first.text, /declined.*Do not ask again/s);
-    const second = await a.call('browser_select_tab', { tab: id });
+    const second = await a.call('browser_tab', { action: 'select', tab: id });
     assert.ok(second.isError);
     assert.match(second.text, /declined/);
     assert.equal((await prompts(a, [], false)).shown.length, before + 1, 'asked more than once');
@@ -181,17 +181,17 @@ test('consent: a dismissed prompt cools down; "Allow on site" covers other tabs 
   try {
     const first = await userOpens(a, fresh());
     await prompts(a, [null]);
-    const dismissed = await a.call('browser_select_tab', { tab: first });
+    const dismissed = await a.call('browser_tab', { action: 'select', tab: first });
     assert.ok(dismissed.isError);
     assert.match(dismissed.text, /closed the request .* without answering/);
-    const again = await a.call('browser_select_tab', { tab: first });
+    const again = await a.call('browser_tab', { action: 'select', tab: first });
     assert.match(again.text, /without answering/, 'asked again during the cool-down');
 
     const second = await userOpens(a, fresh());
     const before = (await prompts(a, [`Allow on ${server.host}`])).shown.length;
-    await a.ok('browser_select_tab', { tab: second });
+    await a.ok('browser_tab', { action: 'select', tab: second });
     const third = await userOpens(a, fresh());
-    await a.ok('browser_select_tab', { tab: third });
+    await a.ok('browser_tab', { action: 'select', tab: third });
     assert.equal((await prompts(a, [], false)).shown.length, before + 1, 'the site answer did not cover the third tab');
   } finally {
     await a.close();
@@ -204,7 +204,7 @@ test('consent: two calls waiting on the same question share one prompt', async (
     const id = await userOpens(a, fresh());
     await prompts(a, [], true);
     // No queued answer: a real question waits (in the status bar, see browser-prompts.e2e.mjs) while both calls wait on it.
-    const calls = [a.call('browser_select_tab', { tab: id }, { timeoutMs: 60_000 }), evaluate(a, id, '6')];
+    const calls = [a.call('browser_tab', { action: 'select', tab: id }, { timeoutMs: 60_000 }), evaluate(a, id, '6')];
     const waiting = async () => JSON.parse(await a.ok('debug_answer_prompts', {})).waiting.filter(w => w.message.includes('wants to use your browser tab'));
     // The question appears a moment after the calls start; a fixed wait was flaky on a busy host.
     await until(async () => (await waiting()).length > 0, 'the consent question', { timeoutMs: 10_000 });
@@ -253,13 +253,13 @@ test('two sessions: the lease makes the second one busy until release; reads sti
     assert.ok(busy.isError);
     assert.match(busy.text, new RegExp(`${id} is being controlled by ${labelA}.*You can still read it`, 's'));
     // Another live session's tab is readable without asking anyone.
-    const selected = await b.ok('browser_select_tab', { tab: id });
+    const selected = await b.ok('browser_tab', { action: 'select', tab: id });
     assert.match(selected, new RegExp(`${labelA} controls it right now`));
-    const closing = await b.call('browser_close_tab', { tab: id });
+    const closing = await b.call('browser_tab', { action: 'close', tab: id });
     assert.ok(closing.isError);
     assert.match(closing.text, /belongs to/);
 
-    await a.ok('browser_release_tab', { tab: id });
+    await a.ok('browser_tab', { action: 'release', tab: id });
     assert.equal((await evaluate(b, id, '5')).text, '5');
     const page = await openPage(hostDir, url);
     try {
@@ -310,7 +310,7 @@ test('pause from the page indicator refuses agents until the user resumes', asyn
       const refused = await evaluate(a, id, '1');
       assert.ok(refused.isError);
       assert.match(refused.text, /paused agent access.*Do not retry in a loop/s);
-      assert.ok((await a.call('browser_select_tab', { tab: id })).isError, 'reads must be refused while paused');
+      assert.ok((await a.call('browser_tab', { action: 'select', tab: id })).isError, 'reads must be refused while paused');
       // The page click did not reach the page's own button underneath.
       assert.equal(await page.evaluate("document.getElementById('clicks').textContent"), '0');
 
@@ -406,7 +406,7 @@ test('attribution: agent tabs, user tabs and popups of a controlled page', async
 
     const userUrl = fresh();
     await userOpens(a, userUrl);
-    for (const t of [link, scripted]) await a.ok('browser_close_tab', { tab: t.id });
+    for (const t of [link, scripted]) await a.ok('browser_tab', { action: 'close', tab: t.id });
   } finally {
     await a.close();
     await b.close();
@@ -422,7 +422,7 @@ test('closing a tab during use fails pending and later calls fast with a useful 
     const started = Date.now();
     const slow = evaluate(a, id, 'new Promise(resolve => setTimeout(() => resolve(1), 20000))');
     await sleep(500);
-    await a.ok('browser_show_tab', { tab: id });
+    await a.ok('browser_tab', { action: 'show', tab: id });
     await a.ok('debug_vscode_command', { command: 'workbench.action.closeActiveEditor' });
     const result = await slow;
     assert.ok(result.isError);
@@ -437,7 +437,7 @@ test('closing a tab during use fails pending and later calls fast with a useful 
   }
 });
 
-test('browser_show_tab brings a tab to the front without opening a duplicate', async () => {
+test('browser_tab show brings a tab to the front without opening a duplicate', async () => {
   const a = await agent({ session: 'bt-show' });
   try {
     const title1 = `Show one ${Date.now()}`;
@@ -446,7 +446,7 @@ test('browser_show_tab brings a tab to the front without opening a duplicate', a
     await a.ok('browser_open', { url: fresh(`/titled?t=${encodeURIComponent(title2)}`) });
     const first = (await tabs(a)).find(t => t.url.includes(encodeURIComponent(title1))).id;
     await until(() => editorTabs().find(t => t.label === title2)?.active, 'the second tab in front');
-    await a.ok('browser_show_tab', { tab: first });
+    await a.ok('browser_tab', { action: 'show', tab: first });
     await until(() => editorTabs().find(t => t.label === title1)?.active, 'the first tab in front');
     assert.equal(editorTabs().filter(t => t.label === title1).length, 1);
   } finally {
@@ -466,10 +466,50 @@ test('a session that ends frees its tabs for others', async () => {
     await a.close();
     await until(async () => (await tabs(b)).find(t => t.id === id)?.notes.includes('opened by an ended session'), 'the session to end', { timeoutMs: 15_000, intervalMs: 500 });
     assert.equal((await evaluate(b, id, '8')).text, '8');
-    assert.ok(!(await b.call('browser_close_tab', { tab: id })).isError, 'an ended session\'s tab can be closed');
+    assert.ok(!(await b.call('browser_tab', { action: 'close', tab: id })).isError, 'an ended session\'s tab can be closed');
   } finally {
     await setSettings({});
     await b.close();
+  }
+});
+
+test('browser_tab and browser_navigate refuse arguments that do not go together; old names still work', async () => {
+  const a = await agent({ session: 'bt-merged' });
+  try {
+    const first = fresh();
+    const second = fresh();
+    await a.ok('browser_open', { url: first });
+    const id = (await tabByUrl(a, first)).id;
+    const names = (await a.tools()).map(t => t.name);
+    for (const old of ['browser_select_tab', 'browser_show_tab', 'browser_release_tab', 'browser_close_tab', 'browser_history']) assert.ok(!names.includes(old), `${old} is listed`);
+    const refusals = [
+      [{ action: 'select' }, /^browser_tab \{"action":"select"\} needs `tab`/],
+      [{ action: 'close', all: true }, /^`all` goes only with \{"action":"release"\}/],
+      [{ action: 'list' }, /action/],
+    ];
+    for (const [args, message] of refusals) {
+      const r = await a.call('browser_tab', args);
+      assert.ok(r.isError, JSON.stringify(args));
+      assert.match(r.text, message);
+    }
+    assert.equal((await tabs(a)).filter(t => t.id === id).length, 1, 'nothing was closed');
+    for (const [args, message] of [
+      [{}, /^browser_navigate needs `url` \(the page to load\) or `action`/],
+      [{ url: second, action: 'back' }, /takes `url` or `action`, not both/],
+      [{ action: 'back', ignoreCache: true }, /^`ignoreCache` goes only with \{"action":"reload"\}/],
+    ]) {
+      const r = await a.call('browser_navigate', args);
+      assert.ok(r.isError, JSON.stringify(args));
+      assert.match(r.text, message);
+    }
+    await a.ok('browser_navigate', { url: second });
+    assert.match(await a.ok('browser_navigate', { action: 'back' }), new RegExp(`^Went back in ${id}: `));
+    // Old names: the same call through the new tool, with a line saying which one.
+    assert.match(await a.ok('browser_history', { action: 'forward' }), new RegExp(`^\\(browser_history is now browser_navigate \\{"action":"forward"\\}: call that from now on; the old name will be removed\\.\\)\\nWent forward in ${id}: `));
+    assert.match(await a.ok('browser_close_tab', { tab: id }), new RegExp(`^\\(browser_close_tab is now browser_tab \\{"action":"close"\\}: [^\\n]*\\nClosed ${id} `));
+    assert.ok(!(await tabs(a)).some(t => t.id === id), 'the tab was closed');
+  } finally {
+    await a.close();
   }
 });
 
@@ -485,8 +525,8 @@ test('tab ids, ownership, consent and the current tab survive a window reload', 
     id = (await tabByUrl(a, url)).id;
     userId = await userOpens(a, userUrl);
     await prompts(a, ['Allow']);
-    await a.ok('browser_select_tab', { tab: userId });
-    await a.ok('browser_select_tab', { tab: id });
+    await a.ok('browser_tab', { action: 'select', tab: userId });
+    await a.ok('browser_tab', { action: 'select', tab: id });
     await sleep(800); // state is saved shortly after changes
     await a.call('debug_vscode_command', { command: 'workbench.action.reloadWindow' }, { timeoutMs: 5000 }).catch(() => {});
   } finally {

@@ -167,7 +167,7 @@ test('"Show Agent Session" for an agent running in a terminal of the window show
     assert.equal(after.pid, ppid, 'the terminal shown is the one whose shell runs the agent');
   }
 
-  await launcher.ok('terminal_interrupt', { terminal: terminalId });
+  await launcher.ok('terminal_send', { terminal: terminalId, keys: ['Ctrl+C'] });
   await command('copane.ui.closeTab', tabs.t);
 });
 

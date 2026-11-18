@@ -79,6 +79,8 @@ export class Tracked {
   readonly consentPending = new Map<string, Promise<boolean>>();
   /** Sessions that were already told what is degraded in this terminal. */
   readonly limitationsShown = new Set<string>();
+  /** Sessions that were already shown the full "Next:" suggestions for a running command here. */
+  readonly hintsShown = new Set<string>();
   /** Per session: the last finished execution whose end it was told about. */
   readonly reportedEnd = new Map<string, Execution>();
   /** Per session: where its last read ended. */

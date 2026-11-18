@@ -1,4 +1,5 @@
-// Console and network: reading what the tab recorded since the bridge attached to it.
+// Console and network: reading what the tab recorded since the bridge attached to it. Lists show the
+// current page by default (logScope.ts); allPages shows everything, onlyNew what the session has not read.
 import { z } from 'zod';
 import { ToolError } from '../../core/errors';
 import { defineTool, type ToolDefinition } from '../../core/tools';
@@ -6,6 +7,8 @@ import { withPage, type PageCall, type PageEnv } from './call';
 import { exportHar } from './harExport';
 import { formatConsoleEntry, levelAtLeast, shortLocation, type ConsoleEntry, type ConsoleLevel } from './consoleLog';
 import { filterNetwork, formatBody, formatNetworkEntry, notableHeaders, pageOrigin, urlMatcher, type NetworkEntry } from './networkLog';
+import { currentPageScope, earlierNote, type PageScope } from './logScope';
+import type { PageState } from './pageState';
 import { clip, formatBytes, formatMs } from './ringBuffer';
 import { tabArg } from './schema';
 
@@ -35,16 +38,33 @@ function time(ms: number): string {
   return new Date(ms).toTimeString().slice(0, 8);
 }
 
+const ALL: PageScope = { startSeq: 0 };
+
+/** The current page's part of the tab's logs (logScope.ts). */
+function pageScope(state: PageState): PageScope {
+  return currentPageScope({ navigations: state.navigations.all(), loaderId: state.loaderId, requests: state.network.entries.all() });
+}
+
+/** "new since your last read", "on the current page (loaded 12:00:01)", "since 11:58:40 (when the bridge attached)". */
+function scopeText(state: PageState, onlyNew: boolean | undefined, page: PageScope): string {
+  if (onlyNew) return 'new since your last read';
+  if (page.startSeq > 0) return `on the current page (loaded ${time(page.loadedAt ?? state.recordingSince)})`;
+  return `since ${time(state.recordingSince)} (when the bridge attached)`;
+}
+
+const allPagesArg = z.boolean().optional().describe('Also list earlier pages, not only the current one.');
+
 export function logTools(env: PageEnv): ToolDefinition<any>[] {
   return [
     defineTool({
       name: 'browser_console_messages',
       title: 'Console messages',
-      description: "Lists the tab's console messages, uncaught errors and browser warnings, oldest first, with page loads marked.",
+      description: "Lists the current page's console messages, uncaught errors and browser warnings, oldest first.",
       input: {
         level: z.enum(['error', 'warning', 'info', 'debug']).optional().describe('Minimum level; default info (includes log).'),
         filter: z.string().optional().describe('Text or /regex/.'),
         onlyNew: z.boolean().optional().describe('Only what you have not read yet.'),
+        allPages: allPagesArg,
         limit: z.number().int().min(1).max(500).optional().describe('Newest N, default 100.'),
         tab: tabArg,
       },
@@ -53,7 +73,9 @@ export function logTools(env: PageEnv): ToolDefinition<any>[] {
         withPage(env, ctx, args.tab, { access: 'read', allowDialog: true, skipReady: true }, async call => {
           const { state } = call;
           const cursor = cursorFor(env, call);
-          const since = args.onlyNew ? cursor.console : 0;
+          // onlyNew is not scoped to the page: what was not read yet is shown once, whatever page it came from.
+          const page = args.onlyNew || args.allPages ? ALL : pageScope(state);
+          const since = args.onlyNew ? cursor.console : Math.max(0, page.startSeq - 1);
           let match: (s: string) => boolean;
           try {
             match = urlMatcher(args.filter);
@@ -61,7 +83,9 @@ export function logTools(env: PageEnv): ToolDefinition<any>[] {
             throw new ToolError('invalid_input', err instanceof Error ? err.message : String(err));
           }
           const min: ConsoleLevel = args.level ?? 'info';
-          const entries = state.console.entries.after(since).filter(e => levelAtLeast(e.level, min) && match(e.text));
+          const wanted = (e: ConsoleEntry) => levelAtLeast(e.level, min) && match(e.text);
+          const entries = state.console.entries.after(since).filter(wanted);
+          const earlier = page.startSeq > 0 ? earlierNote(state.console.entries.all().filter(e => e.seq < page.startSeq && wanted(e)).length, { one: 'message', many: 'messages' }) : '';
           cursor.console = state.seq;
           const limited = entries.slice(-(args.limit ?? 100));
           const navs = state.navigations.after(since).filter(n => !n.sameDocument);
@@ -73,14 +97,16 @@ export function logTools(env: PageEnv): ToolDefinition<any>[] {
           ].sort((a, b) => a.seq - b.seq);
           const { kept, dropped } = fitNewest(items.map(i => i.line), OUTPUT_BUDGET);
           const counts = { error: entries.filter(e => e.level === 'error').length, warning: entries.filter(e => e.level === 'warning').length };
-          const scope = args.onlyNew ? 'new since your last read' : `since ${time(state.recordingSince)} (when the bridge attached)`;
+          const scope = scopeText(state, args.onlyNew, page);
           if (entries.length === 0) {
-            return `No console messages${min !== 'debug' ? ` at level ${min} or above` : ''}${args.filter ? ` matching "${args.filter}"` : ''} in ${call.tab.id}, ${scope}.${state.dialog ? '\nNote: a dialog is open and blocks the page; see browser_handle_dialog.' : ''}`;
+            return `No console messages${min !== 'debug' ? ` at level ${min} or above` : ''}${args.filter ? ` matching "${args.filter}"` : ''} in ${call.tab.id}, ${scope}${earlier ? `; ${earlier}` : ''}.${state.dialog ? '\nNote: a dialog is open and blocks the page; see browser_handle_dialog.' : ''}`;
           }
-          const head = `${entries.length} console message${entries.length === 1 ? '' : 's'} in ${call.tab.id} ${scope} (${counts.error} errors, ${counts.warning} warnings):`;
+          const head = `${entries.length} console message${entries.length === 1 ? '' : 's'} in ${call.tab.id} ${scope} (${counts.error} errors, ${counts.warning} warnings)${earlier ? `; ${earlier}` : ''}:`;
+          // Discarded messages matter only when some of them may have been in the listed range.
+          const lost = state.console.entries.dropped > 0 && !args.onlyNew && (state.console.entries.all()[0]?.seq ?? 0) > page.startSeq;
           const notes = [
             entries.length > limited.length || dropped ? `(${entries.length - limited.length + dropped} older messages not shown; raise limit or use filter)` : '',
-            state.console.entries.dropped && !args.onlyNew ? `(the buffer keeps the last ${state.console.entries.capacity}; ${state.console.entries.dropped} older messages were discarded)` : '',
+            lost ? `(the buffer keeps the last ${state.console.entries.capacity}; ${state.console.entries.dropped} older messages were discarded)` : '',
           ].filter(Boolean);
           return [head, ...notes, ...kept].join('\n');
         }),
@@ -88,7 +114,7 @@ export function logTools(env: PageEnv): ToolDefinition<any>[] {
     defineTool({
       name: 'browser_network_requests',
       title: 'Network requests',
-      description: "Lists the tab's network requests, oldest first; with id, shows one request's headers and bodies.",
+      description: "Lists the current page's network requests (redirects included), oldest first; with id, shows one request's headers and bodies.",
       input: {
         id: z.string().optional().describe('e.g. "r12", from a list or an action result.'),
         filter: z.string().optional().describe('URL text, glob (*) or /regex/.'),
@@ -97,6 +123,7 @@ export function logTools(env: PageEnv): ToolDefinition<any>[] {
         types: z.array(z.string()).optional().describe('fetch, xhr, document, script, image, websocket, ...'),
         includeStatic: z.boolean().optional().describe('Also list images, fonts, styles and scripts.'),
         onlyNew: z.boolean().optional().describe('Only what you have not read yet.'),
+        allPages: allPagesArg,
         limit: z.number().int().min(1).max(500).optional().describe('Newest N, default 100.'),
         maxBodyChars: z.number().int().min(100).max(20_000).optional().describe('With id: cut bodies here, default 4000.'),
         har: z.string().optional().describe('Write the matching requests (static included) to this HAR file, e.g. "network.har"; cookies and tokens are masked.'),
@@ -109,34 +136,41 @@ export function logTools(env: PageEnv): ToolDefinition<any>[] {
           if (args.id !== undefined) return requestDetails(call, args.id, args.maxBodyChars ?? 4000);
           const { state } = call;
           const cursor = cursorFor(env, call);
-          const since = args.onlyNew ? cursor.network : 0;
           if (args.har !== undefined) {
+            // A HAR file holds everything recorded (or everything unread), not just the current page.
             let entries: NetworkEntry[];
             try {
-              entries = filterNetwork(state.network.entries.after(since), { url: args.filter, method: args.method, status: args.status, types: args.types, includeStatic: args.includeStatic ?? true }).matched;
+              entries = filterNetwork(state.network.entries.after(args.onlyNew ? cursor.network : 0), { url: args.filter, method: args.method, status: args.status, types: args.types, includeStatic: args.includeStatic ?? true }).matched;
             } catch (err) {
               throw new ToolError('invalid_input', err instanceof Error ? err.message : String(err));
             }
             return exportHar(call, entries, args.har, args.harInclude ?? []);
           }
           if (args.harInclude) throw new ToolError('invalid_input', 'harInclude applies only with har (the path of the HAR file to write).');
+          // onlyNew is not scoped to the page: what was not read yet is shown once, whatever page it came from.
+          const page = args.onlyNew || args.allPages ? ALL : pageScope(state);
+          const since = args.onlyNew ? cursor.network : Math.max(0, page.startSeq - 1);
+          const filter = { url: args.filter, method: args.method, status: args.status, types: args.types, includeStatic: args.includeStatic };
           let result: { matched: NetworkEntry[]; hiddenStatic: number };
+          let earlierCount = 0;
           try {
-            result = filterNetwork(state.network.entries.after(since), { url: args.filter, method: args.method, status: args.status, types: args.types, includeStatic: args.includeStatic });
+            result = filterNetwork(state.network.entries.after(since), filter);
+            if (page.startSeq > 0) earlierCount = filterNetwork(state.network.entries.all().filter(e => e.seq < page.startSeq), filter).matched.length;
           } catch (err) {
             throw new ToolError('invalid_input', err instanceof Error ? err.message : String(err));
           }
+          const earlier = earlierNote(earlierCount, { one: 'request', many: 'requests' });
           cursor.network = state.seq;
           const now = Date.now();
           const limited = result.matched.slice(-(args.limit ?? 100));
           const origin = pageOrigin(state.url);
           const { kept, dropped } = fitNewest(limited.map(e => formatNetworkEntry(e, now, origin)), OUTPUT_BUDGET);
           const onOrigin = origin !== undefined && limited.some(e => e.url.startsWith(`${origin}/`));
-          const scope = args.onlyNew ? 'new since your last read' : `since ${time(state.recordingSince)} (when the bridge attached)`;
+          const scope = scopeText(state, args.onlyNew, page);
           const hidden = result.hiddenStatic ? `${result.hiddenStatic} static resources (images, scripts, styles, fonts) hidden; pass includeStatic: true to see them.` : '';
-          if (result.matched.length === 0) return [`No matching requests in ${call.tab.id}, ${scope}.`, hidden].filter(Boolean).join('\n');
+          if (result.matched.length === 0) return [`No matching requests in ${call.tab.id}, ${scope}${earlier ? `; ${earlier}` : ''}.`, hidden].filter(Boolean).join('\n');
           const failed = result.matched.filter(e => e.failed || (e.status ?? 0) >= 400).length;
-          const head = `${result.matched.length} request${result.matched.length === 1 ? '' : 's'} in ${call.tab.id} ${scope}${failed ? ` (${failed} failed)` : ''}${onOrigin ? `; paths are relative to ${origin}` : ''}:`;
+          const head = `${result.matched.length} request${result.matched.length === 1 ? '' : 's'} in ${call.tab.id} ${scope}${failed ? ` (${failed} failed)` : ''}${earlier ? `; ${earlier}` : ''}${onOrigin ? `; paths are relative to ${origin}` : ''}:`;
           const older = result.matched.length - limited.length + dropped;
           return [head, ...(older ? [`(${older} older requests not shown; raise limit or filter)`] : []), ...kept, ...(hidden ? [hidden] : [])].join('\n');
         }),

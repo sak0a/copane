@@ -193,5 +193,6 @@ export async function accessibilityAudit(call: PageCall, root: ElementTarget | u
     violations,
     incomplete: [...incomplete.values()],
     skipped,
+    brief: !call.env.notices.first(call.ctx.session.id, 'a11y-caveat'),
   });
 }

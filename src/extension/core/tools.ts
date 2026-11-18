@@ -85,6 +85,10 @@ export class ToolRegistry {
     };
   }
 
+  has(name: string): boolean {
+    return this.tools.has(name);
+  }
+
   list(): WireTool[] {
     return [...this.tools.values()].map(t => t.wire);
   }
@@ -93,6 +97,8 @@ export class ToolRegistry {
   async call(name: string, rawArgs: unknown, ctx: ToolContext): Promise<CallToolResult> {
     const tool = this.tools.get(name);
     if (!tool) return errorResult(`Unknown tool "${name}".`);
+    const unknown = unknownArgumentsMessage(name, Object.keys(tool.definition.input), rawArgs);
+    if (unknown) return errorResult(unknown);
     const parsed = tool.schema.safeParse(rawArgs ?? {});
     if (!parsed.success) return errorResult(`Invalid arguments for ${name}:\n${z.prettifyError(parsed.error)}`);
     try {
@@ -104,6 +110,32 @@ export class ToolRegistry {
       return errorResult(`${name} failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
+}
+
+/**
+ * Arguments a tool does not take would otherwise be dropped without a word, and the call would do
+ * something else than the agent meant. The check is on the top-level names only (nested objects
+ * still drop unknown fields) and done here rather than with a strict zod object, so the message can
+ * list the valid names; the advertised schema stays the same. `_meta` is MCP's own field and never
+ * an argument.
+ */
+export function unknownArgumentsMessage(name: string, valid: readonly string[], rawArgs: unknown): string | undefined {
+  if (!rawArgs || typeof rawArgs !== 'object' || Array.isArray(rawArgs)) return undefined;
+  const known = new Set(valid);
+  const unknown = Object.keys(rawArgs).filter(key => key !== '_meta' && !known.has(key));
+  if (unknown.length === 0) return undefined;
+  const loose = (key: string) => key.toLowerCase().replace(/[_-]/g, '');
+  const hints = unknown.flatMap(key => {
+    const match = valid.find(v => loose(v) === loose(key));
+    return match ? [`"${key}" is "${match}"`] : [];
+  });
+  const list = (keys: readonly string[]) => keys.map(k => `"${k}"`).join(', ');
+  return (
+    `${name} has no argument${unknown.length > 1 ? 's' : ''} ${list(unknown)}; nothing was done. ` +
+    (valid.length ? `Its arguments are ${list(valid)}.` : 'It takes no arguments.') +
+    (hints.length ? ` (${hints.join(', ')}.)` : '') +
+    ' Call it again with only those.'
+  );
 }
 
 /** Keywords whose value maps names to schemas: the names are parameter names, not keywords. */

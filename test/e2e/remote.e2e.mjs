@@ -60,7 +60,7 @@ test('an agent download is copied to the remote side, where the agent reads it',
     assert.equal(readFileSync(path, 'utf8'), 'made on the user side');
     assert.deepEqual(await stagingFiles(), [], 'nothing left in the staging folder on the user side');
     rmSync(path, { force: true });
-    await a.ok('browser_release_tab');
+    await a.ok('browser_tab', { action: 'release' });
   } finally {
     await (await user()).ok('debug_answer_prompts', { answers: [], clear: true });
     await a.close();
@@ -81,7 +81,7 @@ test('a download the user refuses is deleted on the user side and never reaches 
     assert.match(line, /declined|did not allow/);
     assert.ok(!existsSync(join(agentFolder, name)));
     assert.deepEqual(await stagingFiles(), []);
-    await a.ok('browser_release_tab');
+    await a.ok('browser_tab', { action: 'release' });
   } finally {
     await (await user()).ok('debug_answer_prompts', { answers: [], clear: true });
     await a.close();

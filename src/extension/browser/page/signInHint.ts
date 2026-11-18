@@ -1,9 +1,9 @@
 // After an action that loaded a new page: if the page looks like a sign-in page (a visible password
 // field, an identity provider, a login path), the action result says to hand the tab to the user
 // (browser_request_user_input) instead of signing in. Once per page and session; one cheap evaluate,
-// only after navigations.
+// only after navigations. In full the first time in a session, short afterwards (sessionNotices.ts).
 import { ToolError } from '../../core/errors';
-import { SIGN_IN_HINT, looksLikeSignIn } from '../handoffLogic';
+import { SIGN_IN_HINT, SIGN_IN_HINT_SHORT, looksLikeSignIn } from '../handoffLogic';
 import type { PageCall, PageHook } from './call';
 import { DialogInterrupt } from './pageState';
 
@@ -34,6 +34,6 @@ export class SignInHint implements PageHook {
     if (!looksLikeSignIn(state.url, passwords)) return [];
     this.told.set(call.sessionTabKey, loaderId);
     if (this.told.size > 500) this.told.delete(this.told.keys().next().value!);
-    return [SIGN_IN_HINT];
+    return [call.env.notices.pick(call.ctx.session.id, 'sign-in', SIGN_IN_HINT, SIGN_IN_HINT_SHORT)];
   }
 }

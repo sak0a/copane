@@ -46,7 +46,7 @@ test('a click that downloads reports the saved file; the same name again gets a 
     assert.equal(savedPath(second), join(folder, 'report (1).csv'));
     assert.match(second, /renamed because report\.csv already existed/);
     assert.equal(readFileSync(path, 'utf8'), readFileSync(savedPath(second), 'utf8'), 'the first file is untouched');
-    await a.ok('browser_close_tab', {});
+    await a.ok('browser_tab', { action: 'close' });
   } finally {
     await a.close();
   }
@@ -60,7 +60,7 @@ test('a file the page generates (blob URL) is saved under the name the page gave
     const path = savedPath(result);
     assert.ok(path?.endsWith('generated.csv'), result);
     assert.equal(readFileSync(path, 'utf8'), 'made,in,page\n1,2,3\n');
-    await a.ok('browser_close_tab', {});
+    await a.ok('browser_tab', { action: 'close' });
   } finally {
     await a.close();
   }
@@ -78,7 +78,7 @@ test('a broken download fails with how much arrived; a slow one can be waited fo
     assert.equal(statSync(savedPath(waited)).size, 65536);
     const list = await a.ok('browser_downloads', {});
     assert.match(list, /^dl-\d+ slow\.bin: saved[^\n]*\ndl-\d+ broken\.bin: failed/);
-    await a.ok('browser_close_tab', {});
+    await a.ok('browser_tab', { action: 'close' });
   } finally {
     await a.close();
   }
@@ -94,7 +94,7 @@ test('a download that starts well after the click is caught by waiting for it', 
     assert.match(waited, /export\.txt: saved to /);
     assert.equal(statSync(savedPath(waited)).size, 50);
     assert.match(await a.ok('browser_downloads', { wait: true, timeoutSeconds: 2 }), /No download started in tab-\d+ within 2 s\./);
-    await a.ok('browser_close_tab', {});
+    await a.ok('browser_tab', { action: 'close' });
   } finally {
     await a.close();
   }
@@ -114,7 +114,7 @@ test('"ask": the user denies (file deleted) or allows once per session', async (
     assert.match(prompt.message, /is downloading "report\.csv" from 127\.0\.0\.1:\d+\. Save it, and further downloads of this session, to /);
     assert.deepEqual(prompt.choices, ['Allow', 'Always Allow', 'Deny']);
     assert.deepEqual(new Set(readdirSync(folder)), before, 'nothing was saved');
-    await a.ok('browser_close_tab', {});
+    await a.ok('browser_tab', { action: 'close' });
 
     await b.ok('debug_answer_prompts', { answers: ['Allow'], clear: true });
     await b.ok('browser_open', { url: server.url('/') });
@@ -122,7 +122,7 @@ test('"ask": the user denies (file deleted) or allows once per session', async (
     assert.match(await b.ok('browser_click', { selector: '#report' }), /report.*\.csv: saved to /);
     assert.match(await b.ok('browser_click', { selector: '#same' }), /same.*\.txt: saved to /);
     assert.equal((await shown(b)).length, count + 1, 'asked once for the session');
-    await b.ok('browser_close_tab', {});
+    await b.ok('browser_tab', { action: 'close' });
   } finally {
     await a.close();
     await b.close();
@@ -137,7 +137,7 @@ test('"deny": nothing is saved and the agent is told why', async () => {
     const count = (await shown(a)).length;
     assert.match(await a.ok('browser_click', { selector: '#same' }), /same\.txt: not saved, the setting copane\.browser\.agentDownloads is "deny"/);
     assert.equal((await shown(a)).length, count, 'the user was not asked');
-    await a.ok('browser_close_tab', {});
+    await a.ok('browser_tab', { action: 'close' });
   } finally {
     await a.close();
     await setSettings({ 'copane.browser.agentDownloads': 'allow' });

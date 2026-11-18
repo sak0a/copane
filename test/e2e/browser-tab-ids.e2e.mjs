@@ -86,7 +86,7 @@ test('user tabs no agent used keep their ids after a reload; tabs showing the sa
     // Closing a user tab asks for consent first, like any use of it.
     const left = (await tabs(again)).filter(t => t.url.includes(`ids=${stamp}`));
     await again.ok('debug_answer_prompts', { answers: left.map(() => 'Allow'), clear: true });
-    for (const t of left) await again.call('browser_close_tab', { tab: t.id });
+    for (const t of left) await again.call('browser_tab', { action: 'close', tab: t.id });
     await again.ok('debug_answer_prompts', { clear: true });
     await again.close();
   }

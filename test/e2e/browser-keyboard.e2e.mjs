@@ -321,7 +321,7 @@ test('focus on a far ancestor is seen; focus clipped away by an ancestor is hidd
 });
 
 test('cleanup: close the tab', async () => {
-  if (tab) await a.ok('browser_close_tab', { tab });
+  if (tab) await a.ok('browser_tab', { action: 'close', tab });
 });
 
 try {

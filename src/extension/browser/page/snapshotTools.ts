@@ -2,12 +2,16 @@
 import { z } from 'zod';
 import { ToolError } from '../../core/errors';
 import { defineTool, image, text, type ToolDefinition } from '../../core/tools';
+import type { ToolContent } from '../../../shared/protocol';
+import { agentFilePath, writeAgentFile, type AgentFile } from './agentFile';
 import { withPage, type PageCall, type PageEnv } from './call';
 import { addCrossOriginFrames } from './frameSnapshot';
+import { imageSize } from './imageSize';
 import { DialogInterrupt } from './pageState';
-import { clip } from './ringBuffer';
+import { clip, formatBytes } from './ringBuffer';
 import { elementArgs, tabArg } from './schema';
-import { fullPageHeight, screenshotScale } from './screenshotMath';
+import { isSavedShot, markShot, shotFormat, SHOT_EXTENSION_HINT, SHOT_EXTENSIONS } from './screenshotFile';
+import { coordinateNote, fullPageHeight, screenshotScale, sharperAvailable, SHARPER_NOTE } from './screenshotMath';
 import { TOGGLE_BRIDGE_UI } from './scripts';
 import { compareDelivered, describeDelta, lastDelivered, setDelivered, type Delivered } from './snapshotDelta';
 import { buildTree, findInTree, renderText, renderTree, snapshotLines, textWindow, type AXNode, type RefNode, type Tree } from './snapshot';
@@ -210,35 +214,49 @@ export function snapshotTools(env: PageEnv): ToolDefinition<any>[] {
     defineTool({
       name: 'browser_screenshot',
       title: 'Screenshot page',
-      description: 'Takes a screenshot of the viewport, the full page or one element, to check layout and visual state.',
+      description: 'Screenshot of the viewport, the full page or a single element.',
       input: {
         ...elementArgs,
         fullPage: z.boolean().optional(),
-        format: z.enum(['jpeg', 'png']).optional().describe('Default jpeg; png for exact pixels.'),
+        format: z.enum(['jpeg', 'png']).optional().describe('png: exact pixels.'),
+        detail: z.enum(['normal', 'high']).optional().describe('high: sharper, ~1.4× the tokens.'),
+        path: z.string().optional().describe('Also save here if you see no image.'),
         tab: tabArg,
       },
       annotations: { readOnlyHint: true },
-      handler: (args, ctx) =>
-        withPage(env, ctx, args.tab, { access: 'read' }, async call => {
+      handler: (args, ctx) => {
+        // With path: checked before the capture, written only once it succeeded (same bytes as returned).
+        let format = args.format ?? 'jpeg';
+        let file: AgentFile | undefined;
+        if (args.path !== undefined) {
+          const chosen = shotFormat(args.path, args.format);
+          if ('error' in chosen) throw new ToolError('invalid_input', chosen.error);
+          format = chosen.format;
+          file = agentFilePath(env, ctx, args.path, { extensions: SHOT_EXTENSIONS, extensionHint: SHOT_EXTENSION_HINT, isOurs: isSavedShot, tool: 'browser_screenshot' });
+        }
+        const done = (shot: ToolContent[]) => (file ? saveScreenshot(shot, file) : shot);
+        return withPage(env, ctx, args.tab, { access: 'read' }, async call => {
           const target = (await resolveTarget(call, args, { waitMs: 2000 })) as ElementTarget | undefined;
           if (target && args.fullPage) throw new ToolError('invalid_input', 'Pass either an element (ref/selector) or fullPage, not both.');
           if (target) await scrollIntoView(call, target);
-          const format = args.format ?? 'jpeg';
+          const detail = args.detail ?? 'normal';
           for (const hook of env.hooks ?? []) {
-            const shot = await hook.screenshot?.(call, { target, fullPage: Boolean(args.fullPage), format });
-            if (shot) return shot;
+            const shot = await hook.screenshot?.(call, { target, fullPage: Boolean(args.fullPage), format, detail });
+            if (shot) return done(shot);
           }
           const vp = await viewport(call);
           let region: { x: number; y: number; width: number; height: number };
           let what: string;
           let cut = '';
+          let origin: { x: number; y: number } | undefined;
           if (target) {
             const box = await elementBox(target.call, target.backendNodeId);
             if (!box || box.width < 1 || box.height < 1) throw new ToolError('failed', `${target.label} has no visible box to capture (it is hidden or empty).`);
             region = { x: box.x + vp.pageX, y: box.y + vp.pageY, width: box.width, height: box.height };
+            origin = { x: box.x, y: box.y };
             what = target.label;
           } else if (args.fullPage) {
-            const height = fullPageHeight(vp.contentWidth, vp.contentHeight);
+            const height = fullPageHeight(vp.contentWidth, vp.contentHeight, detail);
             region = { x: 0, y: 0, width: vp.contentWidth, height };
             what = 'the full page';
             if (height < vp.contentHeight) cut = ` The page is ${Math.round(vp.contentHeight)} px tall; only the top ${height} px were captured to keep the image readable. Scroll with browser_scroll and take viewport screenshots for the rest.`;
@@ -246,7 +264,7 @@ export function snapshotTools(env: PageEnv): ToolDefinition<any>[] {
             region = { x: vp.pageX, y: vp.pageY, width: vp.width, height: vp.height };
             what = 'the viewport';
           }
-          const scale = screenshotScale(region.width, region.height);
+          const scale = screenshotScale(region.width, region.height, detail);
           let hidden = 0;
           try {
             hidden = await call.evaluate<number>(TOGGLE_BRIDGE_UI, [true]);
@@ -267,12 +285,30 @@ export function snapshotTools(env: PageEnv): ToolDefinition<any>[] {
           }
           const w = Math.round(region.width * scale);
           const h = Math.round(region.height * scale);
-          const mapping =
-            !target && !args.fullPage
-              ? scale === 1 ? ' Its pixels are CSS px: usable as x/y for browser_click.' : ` For browser_click x/y, divide its coordinates by ${scale.toFixed(3)}.`
-              : '';
-          return [image(data, `image/${format}`), text(`Screenshot of ${what} in ${call.tab.id}, ${w}×${h} px.${mapping}${cut}`)];
-        }),
+          const mapping = coordinateNote(origin ? { kind: 'element', scale, origin } : args.fullPage ? { kind: 'page', scale, scroll: { x: vp.pageX, y: vp.pageY } } : { kind: 'viewport', scale });
+          const sharper = sharperAvailable(region.width, region.height, detail) ? ` ${SHARPER_NOTE}` : '';
+          return done([image(data, `image/${format}`), text(`Screenshot of ${what} in ${call.tab.id}, ${w}×${h} px. ${mapping}${sharper}${cut}`)]);
+        });
+      },
     }),
   ];
+}
+
+/** Writes the screenshot's image to the file, marked as the tool's (screenshotFile.ts), and returns it with a line saying where. */
+function saveScreenshot(shot: ToolContent[], file: AgentFile): ToolContent[] {
+  const item = shot.find(c => c.type === 'image');
+  const marked = item && markShot(Buffer.from(item.data, 'base64'));
+  if (!item || !marked) throw new ToolError('failed', `The screenshot is not a PNG or JPEG image, so nothing was written to ${file.file}; call browser_screenshot again without path.`);
+  try {
+    writeAgentFile(file, marked.data);
+  } catch (err) {
+    throw new ToolError('failed', `Could not write ${file.file} (${(err as Error).message}); pick another path inside the project.`);
+  }
+  const size = imageSize(marked.data);
+  const line = `Saved to ${file.file} (${size ? `${size.width}×${size.height} px ` : ''}${marked.format.toUpperCase()}, ${formatBytes(marked.data.length)}).`;
+  const out = shot.map(c => (c === item ? { ...item, data: marked.data.toString('base64') } : c));
+  const last = out.findLastIndex(c => c.type === 'text');
+  if (last < 0) return [...out, text(line)];
+  out[last] = text(`${(out[last] as { text: string }).text}\n${line}`);
+  return out;
 }

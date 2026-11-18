@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { BridgeServices } from './services';
 import { sessionDisplayName } from './sessions';
-import { defineTool, json } from './tools';
+import { defineTool, text } from './tools';
 
 /** Tools about the agent session itself. */
 export function activateSessionTools(services: BridgeServices): void {
@@ -15,9 +15,10 @@ export function activateSessionTools(services: BridgeServices): void {
           'Shows your session label and color as the user sees them, the window and workspace, and the other agent sessions in it.',
         input: {},
         annotations: { readOnlyHint: true },
+        // Compact JSON: read as data, and pretty-printing would only add characters.
         handler: (_args, ctx) =>
           [
-            json({
+            text(JSON.stringify({
               you: { id: ctx.session.id, label: ctx.session.label, color: ctx.session.color.id, title: ctx.session.title ?? null },
               window: services.window,
               browserAvailable: services.browser.available,
@@ -25,7 +26,7 @@ export function activateSessionTools(services: BridgeServices): void {
                 .list()
                 .filter(s => s.id !== ctx.session.id)
                 .map(s => ({ label: sessionDisplayName(s), connected: s.connected })),
-            }),
+            })),
           ],
       }),
       defineTool({

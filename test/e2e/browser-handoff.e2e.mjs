@@ -28,7 +28,7 @@ async function withAgent(name, url, fn) {
     const opened = await a.ok('browser_open', { url });
     const tabId = /Opened (tab-\d+)/.exec(opened)[1];
     await fn(a, tabId, opened);
-    await a.call('browser_close_tab', { tab: tabId });
+    await a.call('browser_tab', { action: 'close', tab: tabId });
   } finally {
     await a.close();
   }
@@ -56,10 +56,10 @@ const shownPrompts = async a => JSON.parse(await a.ok('debug_answer_prompts', {}
 /** Everything the agent can read about the tab's traffic and console, joined. */
 async function everythingReadable(a, tabId) {
   const texts = [];
-  const list = await a.ok('browser_network_requests', { includeStatic: true, tab: tabId });
+  const list = await a.ok('browser_network_requests', { includeStatic: true, allPages: true, tab: tabId });
   texts.push(list);
   for (const id of new Set(list.match(/\br\d+\b/g) ?? [])) texts.push(await a.ok('browser_network_requests', { id, tab: tabId }));
-  texts.push(await a.ok('browser_console_messages', { level: 'debug', tab: tabId }));
+  texts.push(await a.ok('browser_console_messages', { level: 'debug', allPages: true, tab: tabId }));
   texts.push(await a.ok('browser_snapshot', { tab: tabId }));
   return texts.join('\n');
 }
@@ -159,6 +159,20 @@ test('the agent cannot read or act in the tab meanwhile, and the views show the 
   } finally {
     await other.close();
   }
+});
+
+test('the sign-in hint is given in full once per session, then in short', async () => {
+  const s = await site();
+  await withAgent('hint', s.url('/'), async (a, tabId, opened) => {
+    assert.match(opened, /This looks like a sign-in page\. Unless you were given test credentials for it, do not sign in yourself/);
+    const again = await a.ok('browser_open', { url: s.url('/spa'), background: true });
+    const second = /Opened (tab-\d+)/.exec(again)[1];
+    assert.match(again, /This looks like a sign-in page: without test credentials, hand it to the user \(browser_request_user_input with done_when\)\./);
+    assert.doesNotMatch(again, /do not sign in yourself/);
+    await a.call('browser_close_tab', { tab: second });
+  });
+  // Another session gets it in full again.
+  await withAgent('hint2', s.url('/'), async (a, tabId, opened) => assert.match(opened, /This looks like a sign-in page\. Unless/));
 });
 
 test('done by the user on a single-page sign-in: nothing the user typed is readable afterwards', async () => {

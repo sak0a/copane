@@ -7,11 +7,13 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { BridgeServer } from '../../src/extension/core/bridgeServer';
 import { nullLogger } from '../../src/extension/core/log';
 import { SessionManager } from '../../src/extension/core/sessions';
 import { defineTool, ToolRegistry } from '../../src/extension/core/tools';
 import { BridgeClient, sessionKeyFrom } from '../../src/mcp/bridgeClient';
+import { CONVERSATION_META_KEY, ConversationBridges, conversationIdOf, conversationSessionKey, type ConversationBridgesOptions } from '../../src/mcp/conversations';
 import { buildInstructions, createProxyServer } from '../../src/mcp/proxy';
 import { PROTOCOL_VERSION, type InstanceInfo } from '../../src/shared/protocol';
 
@@ -27,11 +29,21 @@ let instances: InstanceInfo[];
 const windows: FakeWindow[] = [];
 const cleanups: Array<() => unknown> = [];
 
-async function openWindow(id: string, folders: string[], options: { startedAt?: number; extraTool?: boolean; browserTool?: boolean } = {}): Promise<FakeWindow> {
+async function openWindow(
+  id: string,
+  folders: string[],
+  options: { startedAt?: number; extraTool?: boolean; browserTool?: boolean; graceMs?: number; stateTools?: boolean; browserOff?: boolean } = {},
+): Promise<FakeWindow> {
   const socketPath = process.platform === 'win32' ? `\\\\.\\pipe\\ab-proxy-${process.pid}-${id}-${Date.now()}` : path.join(dir, `${id}.sock`);
-  const sessions = new SessionManager({ graceMs: () => 0 });
+  const sessions = new SessionManager({ graceMs: () => options.graceMs ?? 0 });
   const tools = new ToolRegistry();
   tools.register([defineTool({ name: 'whoami', description: 'x', input: {}, handler: (_a, ctx) => `${ctx.session.label} in ${id}` })]);
+  // Per-session state, like a session's current tab or terminal.
+  const notes = new Map<string, string>();
+  if (options.stateTools) tools.register([
+    defineTool({ name: 'note', description: 'x', input: { text: z.string() }, handler: (a, ctx) => (notes.set(ctx.session.id, a.text), 'noted') }),
+    defineTool({ name: 'recall', description: 'x', input: {}, handler: (_a, ctx) => notes.get(ctx.session.id) ?? '(nothing)' }),
+  ]);
   if (options.extraTool) tools.register([defineTool({ name: 'extra', description: 'x', input: {}, handler: () => 'extra' })]);
   if (options.browserTool) tools.register([defineTool({ name: 'browser_open', description: 'x', input: {}, handler: () => 'opened' })]);
   const windowInfo = { instanceId: id, workspaceName: path.basename(folders[0] ?? 'none'), workspaceFolders: folders, remoteName: null, platform: process.platform };
@@ -43,7 +55,7 @@ async function openWindow(id: string, folders: string[], options: { startedAt?: 
     sessions,
     tools,
     log: nullLogger,
-    instructions: () => `Window instructions of ${id}.`,
+    instructions: () => `Window instructions of ${id}.${options.browserOff ? ' The integrated browser is not enabled in this VS Code.' : ''}`,
   });
   await server.listen();
   const info: InstanceInfo = {
@@ -76,19 +88,39 @@ async function openWindow(id: string, folders: string[], options: { startedAt?: 
 }
 
 async function agent(
-  options: { cwd?: string; env?: NodeJS.ProcessEnv; ancestors?: number[]; initWaitMs?: number; clientName?: string; sessionKey?: string | ((clientName: string) => string) } = {},
+  options: {
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+    ancestors?: number[];
+    initWaitMs?: number;
+    clientName?: string;
+    sessionKey?: string | ((clientName: string) => string);
+    /** Serve VS Code chat conversations (`_meta["vscode.conversationId"]`), as dist/mcp-server.js does. */
+    conversations?: Omit<ConversationBridgesOptions, 'create'>;
+  } = {},
 ) {
-  const bridge = new BridgeClient({
+  const common = {
     env: options.env ?? {},
     cwd: options.cwd ?? '/work/a',
     pid: 4242,
-    sessionKey: options.sessionKey ?? 'key-1',
     readInstances: () => instances,
     ancestors: async () => options.ancestors ?? [],
-    log: m => process.env.DBG && console.error(m),
+    log: (m: string) => void (process.env.DBG && console.error(m)),
     timing: { pollMs: 20, backgroundMs: 40, graceMs: 1500, callWaitAfterLossMs: 4000, callWaitMs: 150 },
-  });
-  const server = createProxyServer(bridge, { version: '0.0.0', initWaitMs: options.initWaitMs ?? 300 });
+  };
+  const bridge = new BridgeClient({ ...common, sessionKey: options.sessionKey ?? 'key-1' });
+  const created: string[] = [];
+  const conversations = options.conversations
+    ? new ConversationBridges({
+        ...options.conversations,
+        create: (sessionKey, window) => {
+          created.push(sessionKey);
+          return new BridgeClient({ ...common, sessionKey, window });
+        },
+      })
+    : undefined;
+  if (conversations) cleanups.push(() => conversations.dispose());
+  const server = createProxyServer(bridge, { version: '0.0.0', initWaitMs: options.initWaitMs ?? 300, conversations });
   const client = new Client({ name: options.clientName ?? 'claude-code', version: '9.9.9' });
   let listChanged = 0;
   client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
@@ -98,12 +130,13 @@ async function agent(
   await server.connect(b);
   await client.connect(a);
   cleanups.push(() => client.close(), () => bridge.dispose());
-  const call = async (name: string, args: Record<string, unknown> = {}) => {
-    const result = (await client.callTool({ name, arguments: args })) as { content: Array<{ text: string }>; isError?: boolean };
+  const call = async (name: string, args: Record<string, unknown> = {}, conversation?: string) => {
+    const _meta = conversation === undefined ? undefined : { [CONVERSATION_META_KEY]: conversation, 'vscode.requestId': 'r1' };
+    const result = (await client.callTool({ name, arguments: args, ...(_meta ? { _meta } : {}) })) as { content: Array<{ text: string }>; isError?: boolean };
     return { text: result.content.map(c => c.text).join('\n'), isError: result.isError === true };
   };
   const toolNames = async () => (await client.listTools()).tools.map(t => t.name).sort();
-  return { client, bridge, call, toolNames, listChanged: () => listChanged };
+  return { client, bridge, conversations, created, call, toolNames, listChanged: () => listChanged };
 }
 
 const until = async (fn: () => boolean | Promise<boolean>, what: string, timeoutMs = 3000) => {
@@ -155,9 +188,13 @@ describe('MCP server', () => {
   });
 
   it('window_status says how to enable the browser when the window lists no browser tools', async () => {
-    await openWindow('100', ['/work/a']);
+    await openWindow('100', ['/work/a'], { browserOff: true });
     const without = await agent();
     expect((await without.call('window_status')).text).toMatch(/no browser_\* tools\. Ask the user to run the command "Copane: Enable Integrated Browser"/);
+    // No browser tools because the user's settings turned them off: not the browser's fault.
+    await openWindow('300', ['/work/c']);
+    const filtered = await agent({ cwd: '/work/c' });
+    expect((await filtered.call('window_status')).text).not.toMatch(/Enable Integrated Browser/);
     await openWindow('200', ['/work/b'], { browserTool: true });
     const withBrowser = await agent({ cwd: '/work/b' });
     const status = (await withBrowser.call('window_status')).text;
@@ -347,5 +384,138 @@ describe('session key and instructions', () => {
       connectionSummary: () => 'summary',
     } as unknown as BridgeClient;
     expect(buildInstructions(bridge).length).toBeLessThanOrEqual(4000);
+  });
+});
+
+describe('VS Code chat conversations (one MCP server process for every chat of a window)', () => {
+  const vscode = { clientName: 'Visual Studio Code', conversations: {} };
+
+  it('gives each conversation its own session, reuses it for the same id, and keeps the default for calls without one', async () => {
+    const win = await openWindow('100', ['/work/a'], { stateTools: true });
+    const { call, created } = await agent(vscode);
+    expect((await call('whoami')).text).toBe('Agent 1 in 100');
+    expect((await call('whoami', {}, 'chat-a')).text).toBe('Agent 2 in 100');
+    expect((await call('whoami', {}, 'chat-b')).text).toBe('Agent 3 in 100');
+    expect((await call('whoami', {}, 'chat-a')).text).toBe('Agent 2 in 100');
+    expect(created).toEqual([conversationSessionKey('chat-a'), conversationSessionKey('chat-b')]);
+
+    await call('note', { text: 'a' }, 'chat-a');
+    await call('note', { text: 'b' }, 'chat-b');
+    expect((await call('recall', {}, 'chat-a')).text).toBe('a');
+    expect((await call('recall', {}, 'chat-b')).text).toBe('b');
+    expect((await call('recall')).text).toBe('(nothing)');
+
+    expect((await call('window_status', {}, 'chat-b')).text).toMatch(/Connected to VS Code window 100 .* as "Agent 3"/);
+    expect((await call('window_status')).text).toMatch(/as "Agent 1"/);
+    const keys = win.sessions.list().map(s => s.id);
+    expect(keys).toEqual(['key-1', conversationSessionKey('chat-a'), conversationSessionKey('chat-b')]);
+    expect(win.sessions.list().every(s => s.client.name === 'Visual Studio Code' && s.client.kind === 'other')).toBe(true);
+  });
+
+  it('ignores the conversation id when the server is not set up for conversations', async () => {
+    await openWindow('100', ['/work/a']);
+    const { call } = await agent({ clientName: 'Visual Studio Code' });
+    expect((await call('whoami', {}, 'chat-a')).text).toBe('Agent 1 in 100');
+    expect((await call('whoami', {}, 'chat-b')).text).toBe('Agent 1 in 100');
+  });
+
+  it('reads only a usable conversation id, and namespaces its key', () => {
+    expect(conversationIdOf({ 'vscode.conversationId': 'x' })).toBe('x');
+    expect(conversationIdOf({ 'vscode.conversationId': '' })).toBeUndefined();
+    expect(conversationIdOf({ 'vscode.conversationId': 7 })).toBeUndefined();
+    expect(conversationIdOf({ progressToken: 1 })).toBeUndefined();
+    expect(conversationIdOf(undefined)).toBeUndefined();
+    expect(conversationSessionKey('x')).toMatch(/^vscode-chat:[0-9a-f]{32}$/);
+    expect(conversationSessionKey('x')).toBe(conversationSessionKey('x'));
+    expect(conversationSessionKey('x')).not.toBe(conversationSessionKey('y'));
+    expect(conversationSessionKey('x', 's1')).toBe(`s1/${conversationSessionKey('x')}`);
+    // The id itself is not in the key the window stores.
+    expect(conversationSessionKey('vscode-chat-session://local/abc')).not.toContain('abc');
+  });
+
+  it('sends one tools/list_changed for a tool list change, however many conversations are connected', async () => {
+    const win = await openWindow('100', ['/work/a']);
+    const { call, listChanged, toolNames } = await agent(vscode);
+    for (const id of ['a', 'b', 'c']) await call('whoami', {}, id);
+    const before = listChanged();
+    win.server['options'].tools.register([defineTool({ name: 'later', description: 'x', input: {}, handler: () => 'later' })]);
+    await until(() => listChanged() > before, 'tools/list_changed');
+    await new Promise(r => setTimeout(r, 300));
+    expect(listChanged() - before).toBe(1);
+    expect(await toolNames()).toContain('later');
+    expect((await call('later', {}, 'b')).text).toBe('later');
+  });
+
+  it('closes the least recently used conversation beyond the limit; it resumes its session when it comes back', async () => {
+    const win = await openWindow('100', ['/work/a'], { stateTools: true, graceMs: 5000 });
+    const { call, conversations } = await agent({ ...vscode, conversations: { max: 2 } });
+    await call('note', { text: 'kept' }, 'a');
+    await call('whoami', {}, 'b');
+    await call('whoami', {}, 'a'); // b is now the least recently used
+    expect((await call('whoami', {}, 'c')).text).toBe('Agent 4 in 100');
+    expect(conversations!.size).toBe(2);
+    expect(conversations!.peek('b')).toBeUndefined();
+    const keyB = conversationSessionKey('b');
+    await until(() => win.sessions.get(keyB)?.connected === false, 'b to be disconnected in the window');
+    expect((await call('whoami', {}, 'b')).text).toBe('Agent 3 in 100');
+    expect(win.sessions.get(keyB)?.connected).toBe(true);
+    // a was closed for b; it comes back to the same session with its state.
+    expect(conversations!.peek('a')).toBeUndefined();
+    expect((await call('recall', {}, 'a')).text).toBe('kept');
+    expect(win.sessions.list()).toHaveLength(4);
+  });
+
+  it('never closes a conversation in the middle of a call', async () => {
+    const win = await openWindow('100', ['/work/a']);
+    win.server['options'].tools.register([
+      defineTool({ name: 'slow', description: 'x', input: {}, handler: () => new Promise<string>(resolve => setTimeout(() => resolve('done'), 400)) }),
+    ]);
+    const { call, conversations } = await agent({ ...vscode, conversations: { max: 1 } });
+    const slow = call('slow', {}, 'a');
+    await new Promise(r => setTimeout(r, 100));
+    expect((await call('whoami', {}, 'b')).text).toBe('Agent 3 in 100');
+    expect((await slow).text).toBe('done');
+    expect(conversations!.size).toBe(2);
+    await call('whoami', {}, 'b');
+    expect(conversations!.size).toBe(1);
+    expect(conversations!.peek('a')).toBeUndefined();
+  });
+
+  it('closes a conversation that has been idle, and the window disconnects its session', async () => {
+    const win = await openWindow('100', ['/work/a'], { graceMs: 5000 });
+    const { call, conversations } = await agent({ ...vscode, conversations: { idleMs: 150, sweepMs: 30 } });
+    await call('whoami', {}, 'a');
+    const key = conversationSessionKey('a');
+    expect(win.sessions.get(key)?.connected).toBe(true);
+    await until(() => conversations!.size === 0, 'the idle conversation to be closed');
+    await until(() => win.sessions.get(key)?.connected === false, 'the session to be disconnected');
+    expect(win.sessions.get('key-1')?.connected).toBe(true);
+    expect((await call('whoami', {}, 'a')).text).toBe('Agent 2 in 100');
+  });
+
+  it('window_select moves only the conversation that called it; a new conversation starts in the chosen window', async () => {
+    await openWindow('100', ['/work/a']);
+    await openWindow('200', ['/work/b']);
+    const { call } = await agent(vscode);
+    expect((await call('whoami', {}, 'a')).text).toBe('Agent 2 in 100');
+    expect((await call('whoami', {}, 'b')).text).toBe('Agent 3 in 100');
+    expect((await call('window_select', { window: '200' }, 'a')).text).toMatch(/Connected to VS Code window 200/);
+    expect((await call('whoami', {}, 'a')).text).toBe('Agent 1 in 200');
+    expect((await call('whoami', {}, 'b')).text).toBe('Agent 3 in 100');
+    expect((await call('whoami')).text).toBe('Agent 1 in 100');
+    expect((await call('whoami', {}, 'c')).text).toBe('Agent 2 in 200');
+    expect((await call('window_status', {}, 'c')).text).toMatch(/chosen with window_select/);
+  });
+
+  it('a conversation follows its window through a reload', async () => {
+    const first = await openWindow('100', ['/work/a']);
+    const { call, conversations } = await agent(vscode);
+    expect((await call('whoami', {}, 'a')).text).toBe('Agent 2 in 100');
+    first.close();
+    await until(() => !conversations!.peek('a')?.current, 'the conversation to see the window go away');
+    setTimeout(() => void openWindow('200', ['/work/a']), 300);
+    const result = await call('whoami', {}, 'a');
+    expect(result.text).toMatch(/^Agent \d in 200$/);
+    expect(conversations!.peek('a')?.current?.matchedBy).toBe('reconnect');
   });
 });

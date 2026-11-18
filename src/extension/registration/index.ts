@@ -20,6 +20,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { bridgeHome, instanceFile, readLiveInstances, socketPathFor } from '../../shared/paths';
 import { Env } from '../../shared/protocol';
+import { Emitter } from '../core/events';
 import { scopedLogger, type Logger } from '../core/log';
 import type { BridgeServices } from '../core/services';
 import { applyTextEdits, argvJsonPath, argvState, enableProposedApiEdits, newArgvJson, type ArgvState } from './argv';
@@ -134,6 +135,13 @@ export function activateRegistration(services: BridgeServices): void {
   );
 
   registration.installServerSafely();
+  // How agents start the server, for modules that hand it to VS Code itself (vscodeChat/).
+  services.mcpServer = {
+    spec: () => registration.serverSpec,
+    installError: () => registration.serverInstallError,
+    onDidChange: registration.onDidChangeServer.event,
+  };
+  context.subscriptions.push({ dispose: () => registration.onDidChangeServer.dispose() });
   const detected = setup
     .detectIntegratedBrowser()
     .then(() => setup.refresh())
@@ -170,6 +178,8 @@ class Registration {
   private readonly lastCheckFile: string;
   private spec: ServerSpec;
   private installError: string | undefined;
+  /** Fires after the server was installed again and the spec or the install error changed. */
+  readonly onDidChangeServer = new Emitter<void>();
   /** The walkthrough's setup state, refreshed after every change made here. */
   setup: SetupTracker | undefined;
 
@@ -231,7 +241,16 @@ class Registration {
 
   // ------------------------------------------------------------------ server
 
+  get serverSpec(): ServerSpec {
+    return this.spec;
+  }
+
+  get serverInstallError(): string | undefined {
+    return this.installError;
+  }
+
   installServerSafely(): void {
+    const before = JSON.stringify([this.spec, this.installError]);
     try {
       const result = installServer({
         binDir: this.binDir,
@@ -248,6 +267,7 @@ class Registration {
       this.log.error(`could not install the MCP server in ${this.binDir}`, err);
     }
     this.spec = this.currentSpec();
+    if (JSON.stringify([this.spec, this.installError]) !== before) this.onDidChangeServer.fire();
   }
 
   // ------------------------------------------------------------------ agents

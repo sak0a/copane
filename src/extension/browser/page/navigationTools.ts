@@ -1,4 +1,4 @@
-// browser_navigate and browser_history: moving the tab to another page and waiting until it is usable.
+// browser_navigate: moving the tab to another page, or back, forward or reloading, and waiting until it is usable.
 import { z } from 'zod';
 import { ToolError } from '../../core/errors';
 import { defineTool, type ToolContext, type ToolDefinition } from '../../core/tools';
@@ -140,17 +140,23 @@ export function navigationTools(env: PageEnv): ToolDefinition<any>[] {
     defineTool({
       name: 'browser_navigate',
       title: 'Go to URL',
-      description: 'Loads a URL in the tab and returns once it has loaded, with its final URL, title and HTTP status. For a new tab, use browser_open.',
+      description:
+        'Loads a URL in the tab, or goes back, forward or reloads (`action` instead of `url`), and returns once the page has loaded, with its final URL, title and HTTP status. For a new tab, use browser_open.',
       input: {
-        url: z.string().min(1).describe('"localhost:3000" works without a scheme.'),
+        url: z.string().min(1).optional().describe('"localhost:3000" works without a scheme.'),
+        action: z.enum(['back', 'forward', 'reload']).optional(),
+        ignoreCache: z.boolean().optional().describe('Reload bypassing the cache.'),
         waitUntil: waitUntilArg,
         timeout: timeoutArg,
         tab: tabArg,
       },
       annotations: { openWorldHint: true },
-      handler: (args, ctx) =>
-        withPage(env, ctx, args.tab, { access: 'control', skipReady: true }, async call => {
-          const url = normalizeUrl(args.url);
+      handler: (args, ctx) => {
+        const problem = navigateProblem(args);
+        if (problem) throw new ToolError('invalid_input', problem);
+        if (args.action) return moveInHistory(env, ctx, { ...args, action: args.action });
+        return withPage(env, ctx, args.tab, { access: 'control', skipReady: true }, async call => {
+          const url = normalizeUrl(args.url!);
           const mark = markAction(call);
           const started = Date.now();
           const waitUntil = args.waitUntil ?? 'load';
@@ -195,48 +201,55 @@ export function navigationTools(env: PageEnv): ToolDefinition<any>[] {
             throw new ToolError('timeout', `${url} did not respond within ${args.timeout ?? 20} s.${notesSince(call, mark) || ' The tab may still be waiting for it; check later with browser_snapshot, or try again.'}`);
           }
           return navigationResult(call, mark, started, `Navigated ${call.tab.id} to`, waited, waitUntil);
-        }),
-    }),
-    defineTool({
-      name: 'browser_history',
-      title: 'Back, forward or reload',
-      description: "Goes back or forward in the tab's history, or reloads the page, and returns once it has loaded.",
-      input: {
-        action: z.enum(['back', 'forward', 'reload']),
-        ignoreCache: z.boolean().optional().describe('Reload bypassing the cache.'),
-        waitUntil: waitUntilArg,
-        timeout: timeoutArg,
-        tab: tabArg,
+        });
       },
-      handler: (args, ctx) =>
-        withPage(env, ctx, args.tab, { access: 'control', skipReady: true }, async call => {
-          const mark = markAction(call);
-          const started = Date.now();
-          const waitUntil = args.waitUntil ?? 'load';
-          const timeoutMs = (args.timeout ?? 20) * 1000;
-          const verb = `${args.action === 'reload' ? 'Reloaded' : args.action === 'back' ? 'Went back in' : 'Went forward in'} ${call.tab.id}:`;
-          try {
-            if (args.action === 'reload') {
-              await call.send('Page.reload', { ignoreCache: Boolean(args.ignoreCache) });
-            } else {
-              const { currentIndex, entries } = await call.send('Page.getNavigationHistory');
-              const index = currentIndex + (args.action === 'back' ? -1 : 1);
-              const entry = entries[index];
-              if (!entry) throw new ToolError('failed', `There is no ${args.action === 'back' ? 'previous' : 'next'} page in ${call.tab.id}'s history.`);
-              await call.send('Page.navigateToHistoryEntry', { entryId: entry.id });
-            }
-          } catch (err) {
-            if (!(err instanceof DialogInterrupt)) throw err;
-          }
-          const waited = await waitForNavigation(call, mark, { waitUntil, timeoutMs, sameDocumentOk: args.action !== 'reload' });
-          if (waited.timedOut && call.state.loaderId === mark.loaderId && !call.state.navigations.after(mark.seq).length && !call.state.dialog) {
-            throw new ToolError('timeout', `${verb} no page loaded within ${args.timeout ?? 20} s.`);
-          }
-          if (call.state.loaderId === mark.loaderId && call.state.navigations.after(mark.seq).length) {
-            return `${verb} the URL is now ${clip(call.state.url, 500)} (same page, no reload).`;
-          }
-          return navigationResult(call, mark, started, verb, waited, waitUntil);
-        }),
     }),
   ];
+}
+
+type HistoryAction = 'back' | 'forward' | 'reload';
+
+/**
+ * Why a browser_navigate call cannot be done as asked, or undefined: it takes exactly one of `url`
+ * and `action`, and `ignoreCache` only with a reload.
+ */
+export function navigateProblem(args: { url?: string; action?: HistoryAction; ignoreCache?: boolean }): string | undefined {
+  if (args.url !== undefined && args.action) {
+    return `browser_navigate takes \`url\` or \`action\`, not both: pass {"url":"${clip(args.url, 100)}"} to load that page, or {"action":"${args.action}"} to ${args.action === 'reload' ? 'reload the current page' : `go ${args.action}`}. Nothing was done.`;
+  }
+  if (args.url === undefined && !args.action) return 'browser_navigate needs `url` (the page to load) or `action` ("back", "forward" or "reload"). Nothing was done.';
+  if (args.ignoreCache !== undefined && args.action !== 'reload') return '`ignoreCache` goes only with {"action":"reload"}. Nothing was done.';
+  return undefined;
+}
+
+/** browser_navigate with `action`: back, forward or reload, and wait until the page is usable. */
+function moveInHistory(env: PageEnv, ctx: ToolContext, args: { action: HistoryAction; ignoreCache?: boolean; waitUntil?: WaitUntil; timeout?: number; tab?: string }): Promise<string> {
+  return withPage(env, ctx, args.tab, { access: 'control', skipReady: true }, async call => {
+    const mark = markAction(call);
+    const started = Date.now();
+    const waitUntil = args.waitUntil ?? 'load';
+    const timeoutMs = (args.timeout ?? 20) * 1000;
+    const verb = `${args.action === 'reload' ? 'Reloaded' : args.action === 'back' ? 'Went back in' : 'Went forward in'} ${call.tab.id}:`;
+    try {
+      if (args.action === 'reload') {
+        await call.send('Page.reload', { ignoreCache: Boolean(args.ignoreCache) });
+      } else {
+        const { currentIndex, entries } = await call.send('Page.getNavigationHistory');
+        const index = currentIndex + (args.action === 'back' ? -1 : 1);
+        const entry = entries[index];
+        if (!entry) throw new ToolError('failed', `There is no ${args.action === 'back' ? 'previous' : 'next'} page in ${call.tab.id}'s history.`);
+        await call.send('Page.navigateToHistoryEntry', { entryId: entry.id });
+      }
+    } catch (err) {
+      if (!(err instanceof DialogInterrupt)) throw err;
+    }
+    const waited = await waitForNavigation(call, mark, { waitUntil, timeoutMs, sameDocumentOk: args.action !== 'reload' });
+    if (waited.timedOut && call.state.loaderId === mark.loaderId && !call.state.navigations.after(mark.seq).length && !call.state.dialog) {
+      throw new ToolError('timeout', `${verb} no page loaded within ${args.timeout ?? 20} s.`);
+    }
+    if (call.state.loaderId === mark.loaderId && call.state.navigations.after(mark.seq).length) {
+      return `${verb} the URL is now ${clip(call.state.url, 500)} (same page, no reload).`;
+    }
+    return navigationResult(call, mark, started, verb, waited, waitUntil);
+  });
 }

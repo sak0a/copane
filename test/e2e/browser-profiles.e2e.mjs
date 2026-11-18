@@ -87,7 +87,7 @@ test('a profile is separate from the default store and from other profiles; tabs
 test('logins survive closing every tab of a profile', async () => {
   const p = name('closed');
   const t1 = openedId(await a.ok('browser_open', { url: server.url('/login?user=kept'), profile: p }));
-  await a.ok('browser_close_tab', { tab: t1 });
+  await a.ok('browser_tab', { action: 'close', tab: t1 });
   await sleep(1000);
   assert.match(await a.ok('browser_profiles'), new RegExp(`- ${p}: no tab open, logins kept`));
   assert.match(await a.ok('browser_open', { url: server.url('/'), profile: p }), /"Logged in as kept"/);
@@ -219,7 +219,7 @@ test('a window reload keeps profiles with open tabs (and their tab ids); a profi
   try {
     kept = openedId(await r.ok('browser_open', { url: server.url('/login?user=keeper'), profile: keep }));
     const dropped = openedId(await r.ok('browser_open', { url: server.url('/login?user=dropper'), profile: drop }));
-    await r.ok('browser_close_tab', { tab: dropped });
+    await r.ok('browser_tab', { action: 'close', tab: dropped });
     // The session still controls its tab, so its requests are being intercepted (login prompts): the
     // reload leaves such a tab unable to load anything, and Copane replaces it (service.ts, replaceStuck).
     await sleep(1000); // state is saved shortly after changes

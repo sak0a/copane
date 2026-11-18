@@ -89,14 +89,20 @@ Tools appear in Claude Code as `mcp__copane__<name>`.
 | Area | Tools |
 |---|---|
 | Session and window | `session_info`, `session_set_title`, `window_status`, `window_select` |
-| Browser tabs | `browser_list_tabs`, `browser_open`, `browser_select_tab`, `browser_show_tab`, `browser_release_tab`, `browser_close_tab`, `browser_request_user_input` (hand a tab to the user for a sign-in, captcha or decision), `browser_profiles` (separate login stores) |
-| Navigation | `browser_navigate`, `browser_history` (back, forward, reload) |
+| Browser tabs | `browser_list_tabs`, `browser_open`, `browser_tab` (select, show, release or close a tab), `browser_request_user_input` (hand a tab to the user for a sign-in, captcha or decision), `browser_profiles` (separate login stores) |
+| Navigation | `browser_navigate` (a URL, or back, forward, reload) |
 | Reading a page | `browser_snapshot` (accessibility tree with element refs; `mode: "text"` for reading, `find` to locate), `browser_screenshot`, `browser_wait_for` |
 | Acting on a page | `browser_click`, `browser_type`, `browser_fill_form` (also selects options), `browser_press_key`, `browser_hover`, `browser_scroll`, `browser_drag`, `browser_upload_file`, `browser_handle_dialog`, `browser_evaluate` |
 | Debugging a page | `browser_console_messages`, `browser_network_requests` (with `id`: one request's headers and bodies; with `har`: a HAR file), `browser_route` (mock, fail or delay requests) |
 | Devices and files | `browser_emulate` (phone and tablet sizes, dark mode, locale, time zone, slow or offline network, slow CPU), `browser_downloads` |
 | Testing and audits | `browser_audit` (accessibility with WCAG criteria, keyboard walk, performance), `browser_inspect` (the component and file:line that render an element), `browser_check_change` (what a code change did to the page), `browser_export_test` (the agent's actions as a Playwright test) |
-| Terminals | `terminal_run`, `terminal_read`, `terminal_wait`, `terminal_send`, `terminal_interrupt`, `terminal_request_user_input` (hand a login or prompt to the user), `terminal_create`, `terminal_list`, `terminal_close` |
+| Terminals | `terminal_run`, `terminal_read`, `terminal_wait`, `terminal_send` (keys `["Ctrl+C"]` stops a command), `terminal_request_user_input` (hand a login or prompt to the user), `terminal_create`, `terminal_list`, `terminal_close` |
+
+Merged after 0.3.0, to make the tool list cheaper: `browser_select_tab`, `browser_show_tab`,
+`browser_release_tab` and `browser_close_tab` are `browser_tab` with `action`, `browser_history` is
+`browser_navigate` with `action`, and `terminal_interrupt` is `terminal_send` with keys `["Ctrl+C"]`.
+The old names still work for one release (not listed; the result names the new call). Permission
+allowlists that name them need the new names.
 
 The session indicator in a page can be dragged to any corner; it stays there for that tab and new
 tabs start in the corner you last chose.
@@ -148,6 +154,10 @@ inspector plugin attributes; bundled locations go through source maps). `browser
 takes a baseline before the agent edits code and afterwards waits for the hot update or reload and
 reports only what it changed: new errors with their source lines, failed requests, a navigation or
 crash, and the changed regions of the screenshot.
+
+**Screenshots as files.** For agents whose client does not pass images to the model,
+`browser_screenshot` with `path: "shot.png"` also saves the image (PNG or JPEG by the extension),
+written like HAR files and tests: only inside the project, never over a file it did not write.
 
 **Network recording and throttling.** `browser_network_requests` with `har: "network.har"` writes
 the tab's requests, including those of iframes from other sites, as a HAR 1.2 file you can open in
@@ -286,6 +296,22 @@ Known limits: registration was checked with Copilot CLI 1.0.105 (the file format
 has not been verified with a signed-in Copilot; if it reaches the wrong one or none, the agent can
 pick it with `window_select` (`window_status` says which windows there are).
 
+**Experimental: a server for this window only.** With the setting
+`copane.vscodeChat.serverDefinition` (off by default), Copane also gives VS Code's own chat a
+`copane` server through VS Code's extension API, which starts the same launcher with
+`COPANE_INSTANCE` set to this window, so it always connects here instead of guessing from the working
+directory. In a test window VS Code's own MCP client started it and it connected to the right
+window; a real Copilot chat using it has not been tried. Limits:
+
+- VS Code may show `copane` twice or use the `mcp-config.json` entry instead. VS Code's own list
+  keeps one of two servers with the same name (`chat.mcp.collisionBehavior`); what the Copilot
+  harness does with both is unknown. If you see two, turn one off: this setting, or the
+  `mcp-config.json` entry (`copilot mcp disable copane`, which turns it off for the Copilot CLI too).
+- With the Local harness one server serves every chat of the window, so they share one Copane
+  session, labelled "Agent 1". How the Copilot harness divides chats into sessions is not known yet.
+- In a remote window the definition names the launcher on the remote side, where Copane runs; it
+  has not been tried whether the Copilot harness starts it there.
+
 ### Remote windows and WSL
 
 In a WSL, SSH or Dev Container window, Copane runs on the remote side, next to your code,
@@ -411,6 +437,9 @@ Copane's entries and nothing else, and Copane does not add them back until you r
 | `copane.browser.agentDownloads` | `ask` | Whether agents' actions may download files: `ask`, `allow`, `deny`. |
 | `copane.browser.certificateErrors` | `ask` | What to do for agents on a site with an untrusted certificate: `ask` or `block`. |
 | `copane.sessionGraceSeconds` | `20` | How long a disconnected session keeps its tabs and terminals, so it can reconnect after a reload. |
+| `copane.tools.profile` | `full` | Which tools agents get. `core` keeps the everyday ones (pages, tabs, dialogs, hand-off, terminals) and leaves out the dev and test extras (`browser_emulate`, `browser_route`, `browser_audit`, `browser_check_change`, `browser_inspect`, `browser_export_test`, `browser_profiles`) and rarely used tools (`browser_hover`, `browser_drag`, `browser_upload_file`, `browser_downloads`, `session_info`): 28 instead of 40 tools, about a third less context in every conversation. Useful for agents that load every tool up front (Copilot, Codex) and for VS Code's limit of 128 tools per request. Connected agents get the new list at once. |
+| `copane.tools.disabled` | `[]` | Tool names agents do not get, on top of the profile, e.g. `["browser_route"]`. A call to one is refused with a message saying so. `window_status` and `window_select` always stay; unknown names are ignored. |
+| `copane.usageNotesInResults` | `true` | Give Copilot sessions Copane's usage notes with their first tool result (Copilot does not pass server instructions on). Turn it off if you start Copilot with `--allow-all-mcp-server-instructions`, so the notes do not arrive twice. |
 
 ## Troubleshooting
 

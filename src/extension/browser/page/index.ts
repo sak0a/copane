@@ -22,6 +22,7 @@ import { logTools } from './logTools';
 import { describeOpened, navigationTools } from './navigationTools';
 import { PageStates } from './pageState';
 import { scrubSecretFields, withholdSince } from './privacy';
+import { SessionNotices } from './sessionNotices';
 import { SignInHint } from './signInHint';
 import { Recorder } from './recorder';
 import { RefStore } from './refs';
@@ -61,7 +62,7 @@ export function registerPageTools(services: BridgeServices, host: TabInfoHost, e
   const { browser, context } = services;
   // Frame targets are served by request interception too (rules and login prompts reach into frames).
   const attachFrame = extras.interception?.attachFrame?.bind(extras.interception);
-  const env: PageEnv = { services, states: new PageStates(services.log, attachFrame), refs: new RefStore(), cursors: new Map(), baselines: new Map() };
+  const env: PageEnv = { services, states: new PageStates(services.log, attachFrame), refs: new RefStore(), cursors: new Map(), baselines: new Map(), notices: new SessionNotices() };
   // Downloads and device emulation (downloads.ts, emulation.ts) hook into page tool calls.
   const downloads = new DownloadManager(services, host, tabId => env.states.get(tabId)?.nextSeq() ?? 0);
   const emulation = new EmulationManager(services, host, env.states);
@@ -97,6 +98,7 @@ export function registerPageTools(services: BridgeServices, host: TabInfoHost, e
     services.sessions.onDidChange(change => {
       if (change.type !== 'removed') return;
       env.refs.dropSession(change.session.id);
+      env.notices.dropSession(change.session.id);
       for (const map of [env.cursors, env.baselines]) for (const key of [...map.keys()]) if (key.startsWith(`${change.session.id}\u0000`)) map.delete(key);
     }),
     { dispose: () => env.states.dispose() },

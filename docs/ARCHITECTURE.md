@@ -17,10 +17,31 @@ session is using what, and can take over at any moment.
   (`discovery.ts`: terminal env var → extension-host ancestor → cwd inside a workspace folder → cwd in
   a git worktree whose main checkout is in a workspace folder → only window), connects to that window's socket, sends `hello`, then forwards `tools/list` and `tools/call`.
   Registered with agents under the name `copane`, so tools appear as `mcp__copane__browser_click`.
+- **VS Code chat conversations** (`src/mcp/conversations.ts`): VS Code's own MCP client runs one
+  server process per window for all its chats and names the chat in each `tools/call` as
+  `_meta["vscode.conversationId"]`. A call with it goes through a `BridgeClient` of that conversation:
+  its own connection (the protocol has one session per connection), session key
+  `vscode-chat:<sha256 of the id>` (below `COPANE_SESSION` when set), window choice and reconnects.
+  Calls without it, and `tools/list`, use the process's default client, which alone sends
+  `tools/list_changed`. `window_select` moves only the calling conversation; a conversation created
+  later starts in the window chosen last. At most 16 conversations stay connected (least recently
+  used closed first) and one idle for 30 minutes is closed, never during a call; the window then
+  treats it like an exited agent (grace period, then the session ends), and a conversation that
+  returns resumes its session by key. The default session stays connected but unused by chats.
 - **Bridge server** (`core/bridgeServer.ts`): one per window, in the extension host. Authenticates by a
   token from the instance file (`<bridge home>/instances/<pid>.json`, mode 0600). One connection = one
   agent session. A client known not to give its model the server's MCP `instructions` (Copilot CLI,
-  `dropsServerInstructions`) gets them once per session, appended to its first successful tool result.
+  `dropsServerInstructions`) gets them once per session, appended to its first successful tool result
+  (setting `copane.usageNotesInResults`, `usageNotesPolicy`).
+- **Tool selection** (`core/toolSelection.ts`, plain data): the settings `copane.tools.profile`
+  (`full` / `core`) and `copane.tools.disabled` decide which tools the bridge lists; a call to one that
+  is off gets a refusal saying which setting and what to use instead (`CORE_PROFILE_EXCLUDES`, each
+  exclusion explained there). Read at every list and call; a settings change calls
+  `BridgeServer.notifyToolsChanged`, the same `tools/changed` path as registration, so connected
+  clients refetch. The instructions leave out or adapt sentences naming a tool that is off. Tools
+  that are always there: `window_status` and `window_select` (answered by the MCP server itself, the
+  way to recover from a wrong window) and `debug_*` in a dev host. A new tool is in `core` unless it
+  is added to `CORE_PROFILE_EXCLUDES`.
 - **Wire protocol** (`src/shared/protocol.ts`): JSON-RPC, one object per line. Tool definitions live only
   in the extension, so the MCP server never needs to know them.
 - **Sessions** (`core/sessions.ts`): each connection presents a `sessionKey`; reconnecting with the same
@@ -33,7 +54,17 @@ session is using what, and can take over at any moment.
   that returns later gets its color and title back, and its number if it is still free.
 - **Tools** (`core/tools.ts`): modules define tools with `defineTool` (zod input, handler) and register
   them. Handlers get `{ session, signal, log }`, return text or content blocks, and throw `ToolError`
-  for expected failures.
+  for expected failures. A call with an argument name the tool does not take is refused, naming the
+  valid ones (top-level names only; MCP's `_meta` is ignored); the advertised schema does not say
+  `additionalProperties: false`, to keep definitions short. Related actions share one tool with an
+  `action` argument only where their annotations agree enough: a merged tool carries the most
+  cautious hints of its parts, so read-only listing (`browser_list_tabs`) stays its own tool while
+  select/show/release/close are `browser_tab` (`destructiveHint`). Per-action arguments are checked
+  in the handler, with a message saying what to pass.
+- **Tool aliases** (`core/toolAliases.ts`, plain data): old names of merged tools, one table, kept
+  for one release. The bridge server maps a call to one (when no tool of that name is registered) to
+  the new call, applies `copane.tools.*` to the new name and the old one, and starts the result with
+  a line naming the new call. Never listed.
 - **Services** (`core/services.ts`): `BrowserService` and `TerminalService` are the only way modules
   see each other. The UI module renders from these plus `SessionManager`.
 
@@ -199,6 +230,7 @@ argv.json editor. Not verified for real: Windows paths (`/c:/Users/...`), WSL it
     src/extension/remote/  RemoteService: the user's machine as seen from a remote window
     src/extension/ui/      Sessions view, Agent Tabs panel view, status bar, user commands, browser-API setup
     src/extension/registration/  registering the MCP server with Claude Code, Codex and GitHub Copilot
+    src/extension/vscodeChat/    opt-in MCP server definition for VS Code's own chat (this window only)
     contributes/*.json     per-module manifest fragments, merged into package.json by the build
     scripts/               dev host and MCP test client
     poc/                   the original feasibility probe (reference only)
@@ -221,6 +253,29 @@ the agents (detection, settings `copane.registration.<agent>`, the dev-host guar
 from plain data what the startup check and Check and Repair do. In a remote window all of this
 happens on the remote side, where the agents run.
 
+## VS Code chat
+
+`vscodeChat/` offers the server to VS Code's own MCP client through
+`vscode.lm.registerMcpServerDefinitionProvider` (provider `copane.window`), opt-in with
+`copane.vscodeChat.serverDefinition`. The definition (`definition.ts`, pure) is the launcher spec the
+registration module publishes as `services.mcpServer`, plus `COPANE_INSTANCE` = this window; label
+`copane`, no `cwd`, no `COPANE_SESSION`. The provider fires its change event on the setting and on
+`mcpServer.onDidChange`; the instance id is the extension host's pid and never changes meanwhile.
+Without the API (forks, old builds) it logs once and does nothing. From VS Code's source (main,
+2026-11): under the Local harness the window's extension host spawns the server (so discovery matches
+by `ancestor`); the Copilot harness gets extension definitions forwarded as `{type: local, command,
+args, env}` under their label (`agentHostMcpServerSupport.ts`, `agentHostLocalCustomizations.ts`; a
+`cwd` would be reported as not portable), and its Agent Host, shared by windows, spawns it, so
+`COPANE_INSTANCE` routes it. VS Code's registry disables the lower-priority one of two servers with the
+same label (`chat.mcp.collisionBehavior` "disable", default): an extension's (order 300) wins over
+Copilot CLI discovery (400). VS Code's client calls itself `Visual Studio Code` (product name), which
+`agentKind` maps to `other` ("Agent N", no usage notes: VS Code passes server instructions on). One
+server process per window serves every chat there, so they share one session; VS Code sends
+`_meta["vscode.conversationId"]` on `tools/call`, which could split them later. Verified in a dev host
+(`test/e2e/vscode-chat.e2e.mjs`): VS Code asks the provider, and "MCP: Start Server" starts the
+definition, which connects to this window. Not verified: a signed-in Copilot using it, the Copilot
+harness, remote windows.
+
 ## Tool definitions cost context
 
 Every tool definition (name, title, description, input schema, annotations) is sent to the model in
@@ -231,6 +286,8 @@ first: the first sentence says what the tool is for; a parameter is described on
 type do not say it; guidance shared by many tools goes once into `core/instructions.ts` (Claude Code
 cuts the server's instructions at 4096 characters). A new module that registers tools must be added to
 that test. `scripts/measure-tokens.mjs` measures the same list, and result sizes, on a dev host.
+The same test measures the `core` profile (`copane.tools.profile`); a tool used only for specialised
+work belongs in `CORE_PROFILE_EXCLUDES` (`core/toolSelection.ts`).
 
 ## Getting started
 
