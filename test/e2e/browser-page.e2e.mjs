@@ -729,6 +729,56 @@ test('cancellation: a cancelled wait ends and the tab stays usable', async () =>
   assert.ok(Date.now() - started < 3000);
 });
 
+test('a page that navigates while a call waits on it: a clear error, and the connection stays', async () => {
+  await open('/spa.html');
+  // The evaluation never settles; the navigation takes its document away.
+  const r = await a.call('browser_evaluate', { function: `() => new Promise(() => setTimeout(() => { location.href = ${JSON.stringify(url('/form.html'))}; }, 200))` });
+  assert.ok(r.isError, r.text);
+  assert.doesNotMatch(r.text, /Lost the connection/, r.text);
+  assert.match(r.text, /navigated/, r.text);
+  await a.ok('browser_wait_for', { url: '*/form.html', loadState: 'load' });
+  assert.equal(await evaluate('() => location.pathname'), '/form.html');
+});
+
+test('the user takes the tab over while browser_wait_for waits: it stops instead of reading on', async () => {
+  const tab = await open('/spa.html');
+  const waiting = a.call('browser_wait_for', { text: 'never appears', timeout: 20 });
+  await sleep(1000);
+  const user = await agent({ session: `browser-page-user-${Date.now()}` });
+  try {
+    await user.ok('debug_vscode_command', { command: 'copane.browser.pauseTab', args: [tab] });
+    const started = Date.now();
+    const result = await waiting;
+    assert.ok(result.isError, result.text);
+    assert.match(result.text, new RegExp(`The user has paused agent access to ${tab}`));
+    assert.doesNotMatch(result.text, /The page \(/, 'no page text after the takeover');
+    assert.ok(Date.now() - started < 5000, 'stops soon after the takeover');
+  } finally {
+    await user.call('debug_vscode_command', { command: 'copane.browser.resumeTab', args: [tab] });
+    await user.close();
+  }
+});
+
+test('the page indicator is shown again after a screenshot is cancelled', async () => {
+  await open('/long.html');
+  const indicator = () => evaluate("() => [...document.querySelectorAll('[data-copane-ui]')].map(e => e.style.getPropertyValue('visibility') || 'shown').join(',')");
+  if (!(await indicator())) return console.log('      (no page indicator on this tab; nothing to check)');
+  for (const delay of [20, 80, 200, 500]) {
+    const controller = new AbortController();
+    const pending = a.mcp.callTool({ name: 'browser_screenshot', arguments: { fullPage: true } }, undefined, { signal: controller.signal }).catch(() => undefined);
+    await sleep(delay);
+    controller.abort();
+    await pending;
+    const deadline = Date.now() + 5000;
+    let now = await indicator();
+    while (now.includes('hidden') && Date.now() < deadline) {
+      await sleep(150);
+      now = await indicator();
+    }
+    assert.ok(!now.includes('hidden'), `the indicator is still hidden after a screenshot cancelled at ${delay} ms: ${now}`);
+  }
+});
+
 test('tab closed in the middle of a call fails clearly instead of hanging', async () => {
   const text = await a.ok('browser_open', { url: url('/spa.html') });
   const tab = /Opened (tab-\d+)/.exec(text)[1];

@@ -2,6 +2,7 @@
 // every CDP command so that it ends when the agent cancels, when the tab closes, or when a JavaScript
 // dialog opens (which would otherwise block the command until someone answers the dialog).
 import { ToolError } from '../../core/errors';
+import { deniedMessage } from '../access';
 import type { BridgeServices, BrowserTabInfo, CdpPage, TabAccess } from '../../core/services';
 import type { ToolContext } from '../../core/tools';
 import type { ToolContent } from '../../../shared/protocol';
@@ -288,6 +289,15 @@ export interface WithPageOptions {
   allowDialog?: boolean;
   /** Do not wait for the document to be usable first. */
   skipReady?: boolean;
+}
+
+/**
+ * Refuses to go on once the user has taken the tab over (paused it, or an agent handed it to them).
+ * `withPage` checks this when a call starts; a call that waits and then reads the page checks again
+ * with this before each read, so nothing the user does meanwhile is returned.
+ */
+export function assertNotPaused(call: PageCall): void {
+  if (call.env.services.browser.getTab(call.tab.id)?.paused) throw new ToolError('access_denied', deniedMessage({ kind: 'paused' }, call.tab.id));
 }
 
 /** Acquires the tab and runs `fn` with a PageCall. All page tools go through here. */

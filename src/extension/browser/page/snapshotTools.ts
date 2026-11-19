@@ -6,6 +6,7 @@ import type { ToolContent } from '../../../shared/protocol';
 import { agentFilePath, writeAgentFile, type AgentFile } from './agentFile';
 import { withPage, type PageCall, type PageEnv } from './call';
 import { addCrossOriginFrames } from './frameSnapshot';
+import { showBridgeUi } from './bridgeUi';
 import { imageSize } from './imageSize';
 import { DialogInterrupt } from './pageState';
 import { clip, formatBytes } from './ringBuffer';
@@ -265,14 +266,13 @@ export function snapshotTools(env: PageEnv): ToolDefinition<any>[] {
             what = 'the viewport';
           }
           const scale = screenshotScale(region.width, region.height, detail);
-          let hidden = 0;
-          try {
-            hidden = await call.evaluate<number>(TOGGLE_BRIDGE_UI, [true]);
-          } catch (err) {
-            if (err instanceof DialogInterrupt || (err instanceof ToolError && err.code === 'cancelled')) throw err;
-          }
           let data: string;
           try {
+            try {
+              await call.evaluate<number>(TOGGLE_BRIDGE_UI, [true]);
+            } catch (err) {
+              if (err instanceof DialogInterrupt || (err instanceof ToolError && err.code === 'cancelled')) throw err;
+            }
             ({ data } = await call.send('Page.captureScreenshot', {
               format,
               ...(format === 'jpeg' ? { quality: 80 } : {}),
@@ -281,7 +281,8 @@ export function snapshotTools(env: PageEnv): ToolDefinition<any>[] {
               fromSurface: true,
             }));
           } finally {
-            if (hidden > 0 && !call.state.dialog) await call.evaluate(TOGGLE_BRIDGE_UI, [false]).catch(() => undefined);
+            // Not through the call: a cancelled call sends nothing, and the indicator must come back.
+            showBridgeUi(call);
           }
           const w = Math.round(region.width * scale);
           const h = Math.round(region.height * scale);

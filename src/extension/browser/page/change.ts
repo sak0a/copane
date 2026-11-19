@@ -13,8 +13,8 @@
 import type { ToolContent } from '../../../shared/protocol';
 import { ToolError } from '../../core/errors';
 import { image, text } from '../../core/tools';
-import { deniedMessage } from '../access';
-import { dialogMessage, type PageCall } from './call';
+import { showBridgeUi } from './bridgeUi';
+import { assertNotPaused, dialogMessage, type PageCall } from './call';
 import {
   cleanLocation,
   dedupeErrors,
@@ -325,11 +325,6 @@ function rethrowFatal(err: unknown): void {
   if (err instanceof DialogInterrupt || (err instanceof ToolError && err.code === 'cancelled')) throw err;
 }
 
-/** Refuses to go on once the user has taken the tab over (paused it, or an agent handed it to them). */
-function assertNotPaused(call: PageCall): void {
-  if (call.env.services.browser.getTab(call.tab.id)?.paused) throw new ToolError('access_denied', deniedMessage({ kind: 'paused' }, call.tab.id));
-}
-
 /** Reads a page-side value; undefined when the page does not answer (and `answered` is not called). */
 async function readPage<T>(call: PageCall, fn: string, args: unknown[], budget: Budget, answered?: () => void): Promise<T | undefined> {
   if (call.state.crashed) return undefined;
@@ -378,38 +373,6 @@ async function readViewport(call: PageCall, timeoutMs: number): Promise<{ width:
   const css = m.cssVisualViewport ?? m.cssLayoutViewport;
   const dev = m.visualViewport ?? m.layoutViewport;
   return { width: css.clientWidth, height: css.clientHeight, pageX: css.pageX ?? 0, pageY: css.pageY ?? 0, dpr: dev && css.clientWidth ? dev.clientWidth / css.clientWidth : 1 };
-}
-
-/**
- * Shows the bridge's page UI again. Sent straight to the tab, not through the call: a cancelled call
- * refuses every command, and the indicator (Take over, Resume, Done) must never stay hidden. While a
- * dialog blocks the page, it is shown again once the dialog is gone.
- */
-function showBridgeUi(call: PageCall): void {
-  const { state } = call;
-  const send = async () => {
-    try {
-      const contextId = await state.isolatedWorld();
-      await state.page.send('Runtime.callFunctionOn', { functionDeclaration: TOGGLE_BRIDGE_UI, executionContextId: contextId, arguments: [{ value: false }], returnByValue: true }, { timeoutMs: 5000 });
-    } catch (err) {
-      call.ctx.log.warn(`could not show the page indicator of ${call.tab.id} again`, err);
-    }
-  };
-  if (state.page.closed) return;
-  if (!state.dialog) {
-    void send();
-    return;
-  }
-  const sub = state.onDidChange(() => {
-    if (state.dialog) return;
-    sub.dispose();
-    clearTimeout(timer);
-    void send();
-  });
-  const timer = setTimeout(() => {
-    sub.dispose();
-    call.ctx.log.warn(`the page indicator of ${call.tab.id} stays hidden: a dialog was still open after 2 minutes`);
-  }, 120_000);
 }
 
 /** Runs `fn` with the bridge's own page UI hidden (it never shows in screenshots), and shows it again on every way out. */
@@ -572,7 +535,7 @@ export async function takeBaseline(call: PageCall, store: ChangeBaselines): Prom
   const seq = state.seq;
   const docSeq = documentStartSeq(state);
   const failures = state.network.entries.after(docSeq).filter(e => e.seq <= seq && isFailure(e));
-  const consoleErrors = state.console.entries.after(docSeq).filter(e => e.seq <= seq && e.level === 'error');
+  const consoleErrors = state.console.since(docSeq).filter(e => e.seq <= seq && e.level === 'error');
   // Requests that failed before the bridge recorded the tab are known only from the browser's console line.
   const failedUrls = new Set(failures.map(f => requestKey(f.url)));
   const unrecorded = [...new Set(consoleErrors.filter(e => isFailedResourceLine(e) && !failedUrls.has(requestKey(failedResourceUrl(e)))).map(failedResourceUrl))];
@@ -632,9 +595,9 @@ export async function checkChange(call: PageCall, base: Baseline, options: Check
     if (!(err instanceof ToolError && err.code === 'timeout')) throw err;
     // The tab stopped answering: say so, with what the logs already show.
     const failures = state.network.entries.after(sinceSeq).filter(isFailure);
-    const errors = errorsWithoutFailedRequests(state.console.entries.after(sinceSeq), failures);
+    const errors = errorsWithoutFailedRequests(state.console.since(sinceSeq), failures);
     const now = Date.now();
-    const consoleTexts = state.console.entries.after(sinceSeq).map(e => e.text);
+    const consoleTexts = state.console.since(sinceSeq).map(e => e.text);
     const requestUrls = state.network.entries.after(sinceSeq).filter(e => isHmrRequest(e, state.url)).map(e => e.url);
     const update = describeUpdate({ documentChanged: state.loaderId !== base.lastDoc, urlChanged: state.url !== base.url, consoleTexts, requestUrls, overlay: false, newErrors: 0, domChanged: false, frames: [] });
     return formatStuck({ tabId: call.tab.id, step, waitedMs: now - started, update: update === 'a change' ? undefined : update, errors: errors.slice(0, MAX_LISTED).map(e => clip(e.text.split('\n')[0]!, 300)), failures: failures.slice(0, MAX_LISTED).map(f => formatNetworkEntry(f, now)) });
@@ -674,7 +637,7 @@ export async function checkChange(call: PageCall, base: Baseline, options: Check
       state.crashed ||
       state.navigations.after(sinceSeq).length > 0 ||
       state.frames.navigations.after(sinceSeq).some(n => !n.detached) ||
-      state.console.entries.after(sinceSeq).some(e => isHmrConsole(e.text) || (e.level === 'error' && !recurringErrorKeys.has(errorKey(e.text)) && !(isFailedResourceLine(e) && recurringUrls.has(requestKey(failedResourceUrl(e)))))) ||
+      state.console.since(sinceSeq).some(e => isHmrConsole(e.text) || (e.level === 'error' && !recurringErrorKeys.has(errorKey(e.text)) && !(isFailedResourceLine(e) && recurringUrls.has(requestKey(failedResourceUrl(e)))))) ||
       state.network.entries.after(sinceSeq).some(e => isHmrRequest(e, state.url) || newFailure(e)) ||
       base.pending.some(newFailure);
     let domChanged = false;
@@ -771,7 +734,7 @@ export async function checkChange(call: PageCall, base: Baseline, options: Check
     // A new document since the last report (or the baseline): the update was a reload.
     const documentChanged = state.loaderId !== lastDoc;
     const docSeq = documentChanged ? documentStartSeq(state) : Infinity;
-    const consoleNew = state.console.entries.after(sinceSeq).filter(e => e.seq <= endSeq);
+    const consoleNew = state.console.since(sinceSeq).filter(e => e.seq <= endSeq);
     const errors = errorsWithoutFailedRequests(consoleNew, failures);
     const errorSplit = dedupeErrors(errors.filter(e => e.seq > docSeq), base.docErrors, documentChanged);
     const freshErrors = [...errors.filter(e => e.seq <= docSeq), ...errorSplit.fresh];
@@ -884,8 +847,8 @@ export async function checkChange(call: PageCall, base: Baseline, options: Check
 }
 
 function consoleLines(state: PageState, sinceSeq: number, endSeq = Infinity): Array<{ text: string; time: number }> {
-  return state.console.entries
-    .after(sinceSeq)
+  return state.console
+    .since(sinceSeq)
     .filter(e => e.seq <= endSeq)
     .map(e => ({ text: e.text, time: e.time }));
 }
@@ -907,6 +870,6 @@ async function formatError(call: PageCall, e: ConsoleEntry, locate: Locate | und
 }
 
 function devServerLost(state: PageState, sinceSeq: number): string | undefined {
-  const entry = state.console.entries.after(sinceSeq).find(e => DEV_SERVER_LOST.test(e.text));
+  const entry = state.console.since(sinceSeq).find(e => DEV_SERVER_LOST.test(e.text));
   return entry ? entry.text.split('\n')[0] : undefined;
 }

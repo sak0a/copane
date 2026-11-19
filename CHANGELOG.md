@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- A page that navigates while a tool is still waiting on it no longer drops the tab's connection:
+  the tool says the page navigated, and the next call works without reconnecting.
+- The page indicator (Take over, Resume, Done) could stay hidden when a screenshot was cancelled
+  while it was being taken.
+- `browser_wait_for` stops as soon as you take the tab over, instead of reading the page once more.
+- A console message that repeats is seen as new again: by `browser_check_change` (a hot update that
+  prints the same line as the last one), in the console list with `onlyNew`, and in what an action
+  reports.
+- `browser_screenshot` of a tab that was never shown and emulates a device larger than 1024×768 gave
+  the wrong factor for click coordinates; it now says the image is the top-left of the viewport.
+
 ## 0.4.0
 
 GitHub Copilot joins Claude Code and Codex, the tool list is smaller and configurable, and agents can
