@@ -84,7 +84,7 @@ export function logTools(env: PageEnv): ToolDefinition<any>[] {
           }
           const min: ConsoleLevel = args.level ?? 'info';
           const wanted = (e: ConsoleEntry) => levelAtLeast(e.level, min) && match(e.text);
-          const entries = state.console.entries.after(since).filter(wanted);
+          const entries = state.console.since(since).filter(wanted);
           const earlier = page.startSeq > 0 ? earlierNote(state.console.entries.all().filter(e => e.seq < page.startSeq && wanted(e)).length, { one: 'message', many: 'messages' }) : '';
           cursor.console = state.seq;
           const limited = entries.slice(-(args.limit ?? 100));

@@ -14,6 +14,8 @@ export interface ConsoleEntry {
   location: string | undefined;
   /** How many times this exact message repeated in a row. */
   count: number;
+  /** Position (as `seq`) of its latest repeat, when it repeated: the entry itself keeps its first `seq`. */
+  lastSeq?: number;
 }
 
 const MAX_TEXT = 2000;
@@ -156,12 +158,26 @@ export class ConsoleLog {
     return this.add(level, 'browser', e.text, location(e.url, e.lineNumber, undefined));
   }
 
+  /**
+   * Entries logged after `seq`, like `entries.after`, plus the entry before them when the same message
+   * was logged again after `seq` (repeats are folded into one entry, which keeps its first `seq`). That
+   * one comes as a copy placed at its latest repeat.
+   */
+  since(seq: number): ConsoleEntry[] {
+    const all = this.entries.all();
+    const first = all.findIndex(e => e.seq > seq);
+    const later = first < 0 ? [] : all.slice(first);
+    const before = all[(first < 0 ? all.length : first) - 1];
+    return before?.lastSeq !== undefined && before.lastSeq > seq ? [{ ...before, seq: before.lastSeq }, ...later] : later;
+  }
+
   private add(level: ConsoleLevel, source: ConsoleEntry['source'], text: string, loc: string | undefined): ConsoleEntry {
     const clipped = clip(text, MAX_TEXT);
     const last = this.entries.last();
     if (last && last.text === clipped && last.level === level && last.source === source && last.location === loc) {
       last.count++;
       last.time = Date.now();
+      last.lastSeq = this.nextSeq();
       return last;
     }
     const entry: ConsoleEntry = { seq: this.nextSeq(), time: Date.now(), level, source, text: clipped, location: loc, count: 1 };

@@ -6,7 +6,7 @@
 //
 // Closing a tab does not close its CDP session (the session's own onDidClose does not fire), so the
 // service closes the connection from the tab-close event, and a send that the browser answers with
-// "session/target not found" closes it too: every later send then fails at once with a message for
+// "session/target not found" closes it too ("navigated or closed" only when the page no longer answers): every later send then fails at once with a message for
 // the agent, and the next `acquire` attaches a fresh connection if the tab still exists.
 //
 // Child sessions: the page session can auto-attach to its out-of-process iframes (`Target.setAutoAttach`
@@ -28,7 +28,14 @@ interface PendingCommand {
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 /** CDP error texts that mean the page session is gone for good. */
-const GONE = /session (with given id )?not found|no target with given id|target closed|not attached to an active page|inspected target navigated or closed/i;
+const GONE = /session (with given id )?not found|no target with given id|target closed|not attached to an active page/i;
+/**
+ * What Chromium answers a command that was still running when its document went away. The page session
+ * survives a navigation, so this alone does not mean the connection is lost: `send` asks the page.
+ */
+const NAVIGATED_OR_CLOSED = /inspected target navigated or closed/i;
+/** Also what a page answers for a moment while it is between two documents. */
+const BETWEEN_DOCUMENTS = /not attached to an active page/i;
 
 export type CloseReason = 'closed' | 'tab-closed' | 'lost';
 
@@ -109,12 +116,38 @@ export class CdpConnection implements CdpPage {
     try {
       return await this.raw(method, params, this.pageSessionId, options.timeoutMs);
     } catch (err) {
-      if (!(err instanceof ToolError) && err instanceof Error && GONE.test(err.message)) {
-        this.close('lost');
-        throw this.goneError();
+      if (!(err instanceof ToolError) && err instanceof Error) {
+        if (GONE.test(err.message)) {
+          this.close('lost');
+          throw this.goneError();
+        }
+        if (NAVIGATED_OR_CLOSED.test(err.message)) {
+          if (await this.pageAnswers()) throw new ToolError('failed', `The page in ${this.tabId} navigated while the browser was working on this (${method}), so there is no result. Call the tool again.`);
+          this.close('lost');
+          throw this.goneError();
+        }
       }
       throw err;
     }
+  }
+
+  /**
+   * Whether the page session still answers, after an ambiguous failure. Asked a few times: right after
+   * a navigation started, the browser refuses even commands that need no document ("Not attached to an
+   * active page") for a moment.
+   */
+  private async pageAnswers(): Promise<boolean> {
+    for (let attempt = 0; attempt < 8 && !this.isClosed; attempt++) {
+      try {
+        await this.raw('Page.getNavigationHistory', {}, this.pageSessionId, 3000);
+        return true;
+      } catch (err) {
+        if (err instanceof ToolError) return false; // closed meanwhile, or no answer at all
+        if (err instanceof Error && GONE.test(err.message) && !BETWEEN_DOCUMENTS.test(err.message)) return false;
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
+    }
+    return false;
   }
 
   on(event: string, listener: (params: any) => void): vscode.Disposable {

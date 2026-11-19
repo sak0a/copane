@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import { ToolError } from '../../core/errors';
 import { defineTool, type ToolDefinition } from '../../core/tools';
-import { dialogMessage, withPage, type PageEnv } from './call';
+import { assertNotPaused, dialogMessage, withPage, type PageEnv } from './call';
 import { checkAcrossFrames } from './frameQuery';
 import { urlMatcher } from './networkLog';
 import { DialogInterrupt } from './pageState';
@@ -77,6 +77,8 @@ export function waitTools(env: PageEnv): ToolDefinition<any>[] {
             return life.has('load') && state.networkIdleFor() >= 500;
           };
           for (;;) {
+            // The user may take the tab over while this waits: nothing is read from then on.
+            assertNotPaused(call);
             if (state.dialog) throw new ToolError('failed', `Stopped waiting: ${dialogMessage(call.tab.id, state.dialog)}`);
             if (needsDom && state.lifecycleOf().has('DOMContentLoaded')) {
               try {

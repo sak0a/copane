@@ -20,6 +20,7 @@ import { image, text } from '../../core/tools';
 import { viewIdOf } from '../decorations';
 import type { PageCall, PageHook, ScreenshotRequest } from './call';
 import { describeEmulation, emulationSteps, isEmulating, isThrottling, mergeEmulation, shortEmulationLabel, type EmulateArgs, type EmulationSettings } from './emulationLogic';
+import { showBridgeUi } from './bridgeUi';
 import { imageSize } from './imageSize';
 import { DialogInterrupt, type PageStates } from './pageState';
 import { ThrottleTargets } from './throttle';
@@ -302,17 +303,16 @@ export class EmulationManager implements PageHook, vscode.Disposable {
     const vp = await viewport(call);
     const detail = request.detail ?? 'normal';
     const scale = screenshotScale(vp.width, vp.height, detail);
-    let hidden = 0;
-    try {
-      hidden = await call.evaluate<number>(TOGGLE_BRIDGE_UI, [true]);
-    } catch (err) {
-      if (err instanceof DialogInterrupt || (err instanceof ToolError && err.code === 'cancelled')) throw err;
-    }
     let data: string;
     let factor: number;
     let fitsBudget = true;
     const notes: string[] = [];
     try {
+      try {
+        await call.evaluate<number>(TOGGLE_BRIDGE_UI, [true]);
+      } catch (err) {
+        if (err instanceof DialogInterrupt || (err instanceof ToolError && err.code === 'cancelled')) throw err;
+      }
       const frame = await screencastFrame(call, request.format, Math.round(vp.width * scale), Math.round(vp.height * scale));
       if (!frame) {
         data = (await call.send('Page.captureScreenshot', { format: request.format, ...(request.format === 'jpeg' ? { quality: 80 } : {}), fromSurface: true })).data;
@@ -325,7 +325,13 @@ export class EmulationManager implements PageHook, vscode.Disposable {
         // VS Code draws a device larger than the editor scaled down to fit: the frame is then smaller
         // than asked for, and a higher detail would not make it sharper.
         fitsBudget = factor >= scale * 0.98;
-        if (size && dw && dh && Math.abs(size.width / size.height - vp.width / vp.height) > 0.02 * (vp.width / vp.height)) {
+        // `deviceWidth`/`deviceHeight` are the area VS Code draws the tab in, whatever is emulated. A frame
+        // of another shape than the device shows that area. So does a frame of the device's shape in a
+        // tab that was never shown: it is drawn in VS Code's 1024×768 placeholder area, unfitted (a tab
+        // that was shown before keeps its fitted picture in the background). Verified with marker boxes.
+        const otherShape = !!size && Math.abs(size.width / size.height - vp.width / vp.height) > 0.02 * (vp.width / vp.height);
+        const unfitted = !call.tab.active && Math.round(dw ?? 0) === PLACEHOLDER.width && Math.round(dh ?? 0) === PLACEHOLDER.height && (vp.width > PLACEHOLDER.width || vp.height > PLACEHOLDER.height);
+        if (size && dw && dh && (otherShape || unfitted)) {
           // A tab in the background is drawn at a fixed size without fitting the device to it: the frame
           // shows that whole area, with the emulated viewport at its top-left at 1:1.
           const viewScale = screenshotScale(dw, dh, detail);
@@ -342,7 +348,8 @@ export class EmulationManager implements PageHook, vscode.Disposable {
         }
       }
     } finally {
-      if (hidden > 0 && !call.state.dialog) await call.evaluate(TOGGLE_BRIDGE_UI, [false]).catch(() => undefined);
+      // Not through the call: a cancelled call sends nothing, and the indicator must come back.
+      showBridgeUi(call);
     }
     const size = imageSize(Buffer.from(data, 'base64'));
     const w = size?.width ?? Math.round(vp.width * factor);
@@ -411,6 +418,9 @@ interface ScreencastFrame {
   /** deviceWidth/deviceHeight: the size of the area VS Code draws the page in, in DIP. */
   metadata?: { deviceWidth?: number; deviceHeight?: number };
 }
+
+/** The area VS Code draws a browser tab in before it has ever been shown. */
+const PLACEHOLDER = { width: 1024, height: 768 };
 
 /** One screencast frame scaled to fit maxWidth × maxHeight, or undefined when none arrives in time. */
 async function screencastFrame(call: PageCall, format: 'jpeg' | 'png', maxWidth: number, maxHeight: number): Promise<ScreencastFrame | undefined> {

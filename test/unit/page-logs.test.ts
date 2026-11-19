@@ -42,6 +42,26 @@ describe('console', () => {
     expect(formatRemoteObject({ type: 'number', unserializableValue: 'NaN' })).toBe('NaN');
   });
 
+  it('a message repeated after a point counts as logged after it', () => {
+    const log = new ConsoleLog(10, seq());
+    const say = (text: string) => log.onConsoleApi({ type: 'log', args: [{ type: 'string', value: text }] })!;
+    say('first');
+    const update = say('[vite] hot updated: /src/app.js');
+    const mark = update.seq;
+    expect(log.since(mark)).toEqual([]);
+    say('[vite] hot updated: /src/app.js');
+    // One folded entry, which keeps its first position: `entries.after` does not see the repeat.
+    expect(log.entries.after(mark)).toEqual([]);
+    const again = log.since(mark);
+    expect(again.map(e => [e.text, e.count])).toEqual([['[vite] hot updated: /src/app.js', 2]]);
+    expect(again[0]!.seq).toBeGreaterThan(mark);
+    expect(log.entries.all()[1]!.seq).toBe(mark);
+    // Once something else was logged, the repeat is still found, before the later entries.
+    say('later');
+    expect(log.since(mark).map(e => e.text)).toEqual(['[vite] hot updated: /src/app.js', 'later']);
+    expect(log.since(again[0]!.seq).map(e => e.text)).toEqual(['later']);
+  });
+
   it('records levels, collapses repeats, and formats exceptions', () => {
     const log = new ConsoleLog(10, seq());
     log.onConsoleApi({ type: 'log', args: [{ type: 'string', value: 'hi' }] });

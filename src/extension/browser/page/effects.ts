@@ -93,7 +93,7 @@ export async function describeEffects(call: PageCall, mark: ActionMark): Promise
   // After a navigation, only what the new document logged and requested counts: messages and failed
   // requests of the page being left (aborted fetches, unload errors) say nothing about the new one.
   const committed = [...navs].reverse().find(n => !n.sameDocument && n.loaderId === state.loaderId);
-  const consoleEntries = state.console.entries.after(committed ? committed.seq : mark.seq);
+  const consoleEntries = state.console.since(committed ? committed.seq : mark.seq);
   // "Failed to load resource" duplicates the failed request reported below.
   const errors = consoleEntries.filter(e => e.level === 'error' && !(e.source === 'browser' && e.text.startsWith('Failed to load resource')));
   const warnings = consoleEntries.filter(e => e.level === 'warning');
