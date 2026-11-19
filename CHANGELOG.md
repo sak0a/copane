@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
+
+GitHub Copilot joins Claude Code and Codex, the tool list is smaller and configurable, and agents can
+walk a page by keyboard, find the source of an element and check what a code change did to a page.
+**Breaking:** several tool names changed (see "Fewer tools"); update permission allowlists.
 
 - **Site icons.** The Sessions view and the Agent Tabs panel show each tab's site icon (the one
   VS Code's browser already shows; size-limited, unsafe SVGs refused, nothing extra loaded).
