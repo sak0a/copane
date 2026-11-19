@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.4.1
+
+Fixes in the browser tools.
 
 - A page that navigates while a tool is still waiting on it no longer drops the tab's connection:
   the tool says the page navigated, and the next call works without reconnecting.
