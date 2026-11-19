@@ -53,6 +53,8 @@ const TOUCH_CACHE_MS = 1500;
 
 export class EmulationManager implements PageHook, vscode.Disposable {
   private readonly tabs = new Map<string, TabEmulation>();
+  /** Tabs seen as the active one since this window's extension started: VS Code has drawn them at their real size. */
+  private readonly shown = new Set<string>();
   /** Why a session's emulation of a tab ended without it asking, told on its next browser_emulate. */
   private readonly ended = new Map<string, string>();
   private readonly touchCache = new Map<string, { value: boolean; at: number; loaderId: string | undefined }>();
@@ -329,8 +331,10 @@ export class EmulationManager implements PageHook, vscode.Disposable {
         // of another shape than the device shows that area. So does a frame of the device's shape in a
         // tab that was never shown: it is drawn in VS Code's 1024×768 placeholder area, unfitted (a tab
         // that was shown before keeps its fitted picture in the background). Verified with marker boxes.
+        // "Never shown" is: not seen active since the extension started, and still at the placeholder size.
         const otherShape = !!size && Math.abs(size.width / size.height - vp.width / vp.height) > 0.02 * (vp.width / vp.height);
-        const unfitted = !call.tab.active && Math.round(dw ?? 0) === PLACEHOLDER.width && Math.round(dh ?? 0) === PLACEHOLDER.height && (vp.width > PLACEHOLDER.width || vp.height > PLACEHOLDER.height);
+        if (call.tab.active) this.shown.add(call.tab.id);
+        const unfitted = !call.tab.active && !this.shown.has(call.tab.id) && Math.round(dw ?? 0) === PLACEHOLDER.width && Math.round(dh ?? 0) === PLACEHOLDER.height && (vp.width > PLACEHOLDER.width || vp.height > PLACEHOLDER.height);
         if (size && dw && dh && (otherShape || unfitted)) {
           // A tab in the background is drawn at a fixed size without fitting the device to it: the frame
           // shows that whole area, with the emulated viewport at its top-left at 1:1.
@@ -383,6 +387,7 @@ export class EmulationManager implements PageHook, vscode.Disposable {
 
   private updateContextKey(): void {
     const active = this.host.activeTabId();
+    if (active) this.shown.add(active);
     const value = !!active && this.tabs.has(active);
     if (value === this.contextValue) return;
     this.contextValue = value;
