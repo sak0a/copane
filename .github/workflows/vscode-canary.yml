@@ -20,7 +20,8 @@ concurrency:
 
 jobs:
   insiders-e2e:
-    runs-on: ubuntu-24.04
+    # Runner pool routing: CI_* repository variables pick the runner; the literal is the default.
+    runs-on: ${{ fromJSON(format(vars.CI_LINUX || '["ubuntu-24.04"]', github.run_id, github.run_attempt)) }}
     timeout-minutes: 45
     continue-on-error: true
     env:
@@ -45,7 +46,7 @@ jobs:
           retention-days: 14
 
   proposed-api:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(format(vars.CI_LINUX || '["ubuntu-latest"]', github.run_id, github.run_attempt)) }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
@@ -63,7 +64,7 @@ jobs:
   report:
     needs: [insiders-e2e, proposed-api]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(format(vars.CI_LINUX || '["ubuntu-latest"]', github.run_id, github.run_attempt)) }}
     timeout-minutes: 5
     permissions:
       contents: read
