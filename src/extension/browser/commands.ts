@@ -73,7 +73,7 @@ export function registerBrowserCommands(services: BridgeServices, browser: Brows
           return;
         }
         const picked = await vscode.window.showQuickPick(
-          live.map(s => ({ label: sessionDisplayName(s), description: s.connected ? undefined : 'disconnected', id: s.id })),
+          live.map(s => ({ label: sessionDisplayName(s), description: s.connected ? undefined : s.away ? 'away' : 'disconnected', id: s.id })),
           { placeHolder: `Which session may use ${browser.getTab(id)?.title || id}?` },
         );
         sessionId = picked?.id;

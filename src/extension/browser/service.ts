@@ -673,6 +673,9 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
     if (record.id) {
       this.services.tabLeases.release(record.id);
       this.consent.forgetTab(record.id);
+      // A live session hears that its current tab was closed when it next uses it; an ended one
+      // (kept in `onSessionRemoved`) has nothing to come back to.
+      for (const [sessionId, tabId] of this.currentTab) if (tabId === record.id && !this.services.sessions.get(sessionId)) this.currentTab.delete(sessionId);
       for (const [key, pending] of this.pendingConsent) {
         if (pending.tabId === record.id) {
           pending.controller.abort();
@@ -687,7 +690,11 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
   }
 
   private onSessionRemoved(session: AgentSession): void {
-    this.currentTab.delete(session.id);
+    // Its current tab is kept while that tab is its own and still open: a session that ended and
+    // comes back later (its conversation is continued) goes on where it was. Forgotten when the
+    // tab closes (`untrack`).
+    const current = this.currentTab.get(session.id);
+    if (current && this.find(current)?.openedBy !== session.id) this.currentTab.delete(session.id);
     this.consent.forgetSession(session.id);
     for (const [key, pending] of this.pendingConsent) {
       if (pending.sessionId === session.id) {

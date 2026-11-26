@@ -32,9 +32,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const config = () => vscode.workspace.getConfiguration('copane');
   // Sessions are remembered in the window's workspace state, so after a reload each one gets its label
-  // and color back (its terminals survive the reload and are named after it).
+  // and color back (its terminals survive the reload and are named after it). One whose agent has not
+  // reconnected stays, as an away session, while it still owns a tab or a terminal (`holds`).
+  let owned: ((sessionId: string) => boolean) | undefined;
   const sessions = new SessionManager({
     graceMs: () => Math.max(0, config().get<number>('sessionGraceSeconds', 20)) * 1000,
+    holds: id => owned?.(id) ?? false,
     memory: {
       load: () => context.workspaceState.get<RememberedSession[]>('copane.sessions.v1', []),
       save: list => void context.workspaceState.update('copane.sessions.v1', list),
@@ -80,6 +83,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   activateUi(services);
   activateRegistration(services);
   activateVscodeChat(services);
+
+  // What a session owns: the tabs it opened and its own terminals. When they change, away sessions
+  // that own nothing any more end (the user closed what they had).
+  owned = id => services.browser.listTabs().some(t => t.origin === 'agent' && t.openedBy === id) || services.terminals.list().some(t => t.origin === 'agent' && t.ownedBy === id && t.state !== 'closed');
+  let reviewTimer: NodeJS.Timeout | undefined;
+  const reviewAway = () => {
+    reviewTimer ??= setTimeout(() => {
+      reviewTimer = undefined;
+      sessions.reviewAway();
+    }, 250);
+  };
+  context.subscriptions.push(services.browser.onDidChange(reviewAway), services.terminals.onDidChange(reviewAway), { dispose: () => clearTimeout(reviewTimer) });
 
   // Which tools agents get, and whether Copilot gets the usage notes in a result (contributes/core.json).
   const toolSelection = (): ToolSelection => ({ profile: config().get<string>('tools.profile'), disabled: config().get<unknown[]>('tools.disabled') });

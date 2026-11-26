@@ -84,6 +84,31 @@ describe('empty and setup states', () => {
   });
 });
 
+describe('away sessions (kept from before a reload or restart)', () => {
+  it('keeps their tabs and terminals under them and says what away means', () => {
+    const away = session(2, { connected: false, away: true, title: 'dev server' });
+    const model = buildViewModel(input({ sessions: [session(1), away], tabs: [tab('tab-1', { openedBy: 's2' })], terminals: [terminal('term-1', { ownedBy: 's2' })] }));
+    const node = row(model, 'session:s2');
+    expect(node.description).toBe('dev server · away');
+    expect(node.children.map(c => c.kind)).toEqual(['tab', 'terminal']);
+    expect(node.tooltip).toContain('Away: its agent has not reconnected');
+    expect(node.tooltip).not.toContain('within 20 s');
+    expect(node.contextValue.split(' ')).toEqual(expect.arrayContaining(['session', 'disconnected', 'away']));
+    expect(node.accessibilityLabel).toContain('away, its agent has not reconnected');
+    expect(model.viewDescription).toBe('1 connected, 1 away');
+  });
+
+  it('does not list or count one that owns nothing (it is about to end)', () => {
+    const model = buildViewModel(input({ sessions: [session(1), session(2, { connected: false, away: true })] }));
+    expect(treeAsText(model)).not.toContain('Claude 2');
+    expect(model.viewDescription).toBe('1 connected');
+    expect(model.status.tooltip).not.toContain('Claude 2');
+    const none = buildViewModel(input({ sessions: [session(2, { connected: false, away: true })] }));
+    expect(none.roots).toEqual([]);
+    expect(none.status.visible).toBe(false);
+  });
+});
+
 describe('session rows', () => {
   it('shows label, title, color and connection state', () => {
     const model = buildViewModel(input({ sessions: [session(1, { title: 'fixing login' }), session(2, { connected: false })] }));
@@ -248,6 +273,14 @@ describe('attention, badge and status bar', () => {
     expect(model.status.accessibilityLabel).toBe('Copane: 2 agent sessions connected');
     expect(model.attention).toEqual([]);
     expect(model.badge).toBeUndefined();
+  });
+
+  it('counts away sessions on their own, not as reconnecting', () => {
+    const model = buildViewModel(input({ sessions: [s1, session(2, { connected: false, away: true })], terminals: [terminal('term-1', { ownedBy: 's2' })] }));
+    expect(model.status.text).toBe('$(robot) 1');
+    expect(model.status.tooltip).toContain('1 session connected, 1 away');
+    expect(model.status.tooltip).toContain('**Claude 2** · away · 1 terminal');
+    expect(model.status.accessibilityLabel).toContain('1 away');
   });
 
   it('counts disconnected sessions separately', () => {

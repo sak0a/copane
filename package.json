@@ -319,7 +319,7 @@
           "type": "number",
           "default": 20,
           "minimum": 0,
-          "description": "How long a disconnected agent session keeps its tabs and terminals before they are released. Lets an agent reconnect after a window reload."
+          "description": "How long a disconnected agent session keeps its tabs and terminals before they are released. Lets an agent reconnect after a window reload. A session from before a reload or a restart of VS Code that still owns tabs or terminals is kept after that, shown as away, until its agent reconnects, you end it or you close what it owns. 0 ends sessions at once and keeps none."
         },
         "copane.tools.profile": {
           "type": "string",

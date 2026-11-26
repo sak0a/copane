@@ -6,6 +6,7 @@
 // Plays the user through `debug_vscode_command` (opening a terminal, typing with
 // workbench.action.terminal.sendSequence) and `debug_answer_prompts` (answering the extension's
 // notifications). Assumes a POSIX shell with shell integration as the default profile (bash/zsh).
+import http from 'node:http';
 import { join } from 'node:path';
 import { agent, assert, root, run, sleep, test as testCase, until } from './harness.mjs';
 
@@ -616,6 +617,86 @@ test('terminals stay with their session across a window reload, under the same l
     await b.close();
     await c2.close();
     await newcomer.close();
+  }
+});
+
+test('after a reload, a session whose agent does not come back stays, away, with its tabs and terminals', async () => {
+  const server = http.createServer((_request, response) => {
+    response.setHeader('content-type', 'text/html');
+    response.end('<title>Away</title><h1>the away page</h1>');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const a = await agent({ session: 'term-away-a' });
+  const b = await agent({ session: 'term-away-b' });
+  const hasBrowser = (await a.tools()).some(t => t.name === 'browser_open');
+  const idA = termId(await a.ok('terminal_run', { command: 'echo mine' }));
+  const idB = termId(await b.ok('terminal_run', { command: 'echo theirs' }));
+  if (hasBrowser) await a.ok('browser_open', { url: `http://127.0.0.1:${server.address().port}/` });
+  const [youA, youB] = [await labelOf(a), await labelOf(b)];
+  await sleep(6000); // as above: VS Code saves its terminal layout lazily
+  await a.call('debug_vscode_command', { command: 'workbench.action.reloadWindow' }).catch(() => {});
+  await a.close().catch(() => {});
+  await b.close().catch(() => {});
+  userAgent = undefined;
+  await sleep(4000);
+  const watcher = await until(async () => {
+    try {
+      const candidate = await agent({ session: 'term-away-watcher', client: 'other' });
+      const listed = await candidate.call('terminal_list');
+      if (!listed.isError && listed.text.includes(idA) && listed.text.includes(idB)) return candidate;
+      await candidate.close();
+    } catch {
+      // The window is still reloading.
+    }
+    return undefined;
+  }, 'window back after reload', { timeoutMs: 60_000, intervalMs: 1000 });
+  const ui = async () => JSON.parse(await watcher.ok('debug_ui_state'));
+  const row = label => new RegExp(`^${label} — (.*)$`, 'm');
+  let a2;
+  try {
+    // Neither agent reconnects. Past the grace period of restored sessions (30 s) both are away
+    // instead of ended, and their terminals and tabs are still theirs.
+    await until(async () => /away/.test(row(youA.label).exec((await ui()).tree)?.[1] ?? ''), `${youA.label} to be away`, { timeoutMs: 60_000, intervalMs: 1000 });
+    const state = await ui();
+    assert.match(row(youB.label).exec(state.tree)?.[1] ?? '', /^away/);
+    assert.match(state.status.tooltip, /2 away/);
+    assert.doesNotMatch(state.status.tooltip, /reconnecting/);
+    const seen = await list(watcher);
+    assert.equal(seen.find(t => t.id === idA)?.owner, youA.label);
+    assert.equal(seen.find(t => t.id === idB)?.owner, youB.label);
+    if (hasBrowser) {
+      assert.match(await watcher.ok('browser_list_tabs'), new RegExp(`opened by ${youA.label}`));
+      assert.match(state.panel.text, new RegExp(`${youA.label} · away`));
+    }
+
+    // The first agent comes back (its conversation is continued): same session, connected, and it
+    // goes on in its terminal and its tab.
+    a2 = await agent({ session: 'term-away-a' });
+    assert.deepEqual(await labelOf(a2), youA);
+    assert.equal((await list(a2)).find(t => t.id === idA)?.owner, 'you');
+    assert.match(await a2.ok('terminal_run', { command: 'echo back' }), new RegExp(`in ${idA}\\.`));
+    if (hasBrowser) assert.match(await a2.ok('browser_snapshot', { mode: 'text' }), /the away page/);
+    const lineOfA = (await ui()).tree.split('\n').find(line => line.startsWith(youA.label));
+    assert.ok(lineOfA, `${youA.label} is listed`);
+    assert.doesNotMatch(lineOfA, /away|disconnected/);
+
+    // The user closes what the other one had: once the window has settled (a minute after it
+    // started), that session ends.
+    await watcher.ok('debug_extension_eval', { code: `const t = vscode.window.terminals.find(t => t.name === ${JSON.stringify(youB.label)}); if (t) t.dispose(); return !!t;` });
+    // Gone from the view at once (an away session that owns nothing is not listed), ended for real
+    // once the window has settled.
+    await until(async () => !row(youB.label).test((await ui()).tree), `${youB.label} to leave the view`);
+    const others = async () => JSON.parse(await a2.ok('session_info')).otherSessions.map(s => s.label);
+    await until(async () => !(await others()).some(label => label.startsWith(youB.label)), `${youB.label} to end`, { timeoutMs: 90_000, intervalMs: 2000 });
+    assert.ok((await ui()).tree.split('\n').some(line => line.startsWith(youA.label)), `${youA.label} is still listed`);
+  } finally {
+    if (a2) {
+      if (hasBrowser) await a2.call('browser_tab', { action: 'close' });
+      await closeAll(a2);
+      await a2.close();
+    }
+    await watcher.close();
+    server.close();
   }
 });
 
