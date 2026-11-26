@@ -312,9 +312,12 @@ Copilot CLI and by Copilot harness sessions in VS Code). Copilot's file is edite
 in one atomic read-modify-replace: `copilot mcp add` drops comments, and the CLI's own writer lock
 (`.mcp-writer.lock`, an OS-level lock on an empty file) cannot be taken from Node; Copilot writes the
 file only from its `mcp` commands, and the next check repairs a lost race. Copilot gives local servers
-little more than `PATH`, so the entry passes `COPANE_INSTANCE` and `COPANE_SESSION` as
-`${NAME:-}` references. Its comparison ignores what the user may customise (`tools`, `timeout`,
-`cwd`, the default part of those references) and an update keeps those keys. `index.ts` enumerates
+little more than `PATH`, so the entry passes `COPANE_INSTANCE`, `COPANE_SESSION` and
+`COPILOT_SESSION_CWD` as `${NAME:-}` references, and it sets `timeout` (600 s, like Codex's
+`tool_timeout_sec`; Copilot's default is 30 s by its documentation). Its comparison ignores what the
+user may customise (`tools`, the value of `timeout`, `cwd`, the default part of those references)
+and an update keeps those keys; an entry without a timeout or without one of the references is out
+of date. `index.ts` enumerates
 the agents (detection, settings `copane.registration.<agent>`, the dev-host guard that requires
 `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `COPILOT_HOME` inside the dev host's folder); `plan.ts` decides
 from plain data what the startup check and Check and Repair do. In a remote window all of this
@@ -337,11 +340,34 @@ args, env}` under their label (`agentHostMcpServerSupport.ts`, `agentHostLocalCu
 same label (`chat.mcp.collisionBehavior` "disable", default): an extension's (order 300) wins over
 Copilot CLI discovery (400). VS Code's client calls itself `Visual Studio Code` (product name), which
 `agentKind` maps to `other` ("Agent N", no usage notes: VS Code passes server instructions on). One
-server process per window serves every chat there, so they share one session; VS Code sends
-`_meta["vscode.conversationId"]` on `tools/call`, which could split them later. Verified in a dev host
+server process per window serves every chat there; VS Code sends `_meta["vscode.conversationId"]`
+on `tools/call`, and each conversation gets a session of its own (`src/mcp/conversations.ts`, see
+"Pieces"). The process's default session, made at `initialize`, stays connected and unused by chats,
+so the chats are "Agent 2", "Agent 3" and so on. Verified in a dev host
 (`test/e2e/vscode-chat.e2e.mjs`): VS Code asks the provider, and "MCP: Start Server" starts the
 definition, which connects to this window. Not verified: a signed-in Copilot using it, the Copilot
 harness, remote windows.
+
+## What GitHub Copilot needs
+
+Taken from Copilot's documentation and changelog and from VS Code 1.147; not tried with a signed-in
+Copilot. One source of truth each:
+
+- **Result size** (`core/resultSize.ts`): Copilot hands its model a file instead of a tool result
+  over 20 KiB (`largeOutput.maxSizeBytes` in VS Code's agent host; the CLI has the same mechanism).
+  The limit counts bytes and Copane's limits count characters, so for a Copilot session
+  (`blockByteLimit`) the sized part of a result is rendered again with a lower character limit until
+  it fits 17,000 bytes (`fitBytes`): `browser_snapshot` (snapshot, text, find), the console and
+  request lists, and terminal output. Only defaults: a size the agent passes is its own choice. The
+  renderers keep cutting at their own boundaries and saying how to read on. The usage notes wait for
+  a later result when the first one would pass the limit with them (`bridgeServer.ts`).
+- **Time limit** (`registration/copilot.ts`, `mcp/proxy.ts`): the entry's `timeout`, and
+  `notifications/progress` every 10 s while a call runs, for any client that sent a
+  `progressToken`. Copilot counts its limit from the last progress report and stops a call at ten
+  times the limit regardless.
+- **Window** (`mcp/discovery.ts` `sessionCwd`, `bridgeClient.ts` `sessionCwdFrom`): Copilot's
+  `COPILOT_SESSION_CWD` is tried before the process's working directory in the folder rules, for a
+  Copilot client only (an agent started inside a Copilot session inherits the variable).
 
 ## Tool definitions cost context
 

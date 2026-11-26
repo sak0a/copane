@@ -303,8 +303,10 @@ Code's documentation, by **Copilot chat in VS Code** when its sessions run on th
 one atomic step: comments, other servers and keys it does not know stay as they are (`copilot mcp
 add` itself would drop the comments). Copilot starts local MCP servers with little more than `PATH`
 from the environment, so the entry passes the variables Copane needs as references,
-`"COPANE_INSTANCE": "${COPANE_INSTANCE:-}"` and the same for `COPANE_SESSION`, which Copilot fills
-from its own environment (empty when unset).
+`"COPANE_INSTANCE": "${COPANE_INSTANCE:-}"` and the same for `COPANE_SESSION` and
+`COPILOT_SESSION_CWD`, which Copilot fills from its own environment (empty when unset). The last one
+(Copilot CLI 1.0.107 and later) is the folder the Copilot session works in: Copane uses it to find
+the window of that folder when Copilot starts the server from somewhere else.
 
 - **Tool names.** The model sees Copane's tools as `copane-<tool>`, e.g. `copane-browser_click`.
 - **Check it.** `copilot mcp list` or `copilot mcp get copane` shows the entry; `/mcp` in a
@@ -315,16 +317,31 @@ from its own environment (empty when unset).
   tab access and hand-off work).
 - **Fewer tools.** Change the entry's `"tools"` to a list of tool names (without the `copane-`
   prefix) to give Copilot only those, for example when VS Code's limit of 128 tools per request is
-  reached. Copane keeps your list, and a `"timeout"` you add, when it updates the entry.
+  reached. Copane keeps your list when it updates the entry.
+- **Long calls.** The entry sets `"timeout": 600000` (10 minutes). Without one, Copilot stops a
+  tool call after its default time limit (30 seconds by its documentation), which is shorter than
+  a test run, a page wait or a hand-off to you. A timeout you set yourself is kept. While a call
+  runs, Copane also reports progress to an agent that asks for it, which Copilot counts its limit
+  from.
+- **Large results.** Copilot does not give its model a tool result over 20 KiB: it saves the
+  result to a file and hands over the path. For Copilot sessions Copane therefore sizes page
+  snapshots, console and request lists and command output in bytes, below that limit, and says how
+  to read on. A size the agent asks for itself (`maxChars`, `max_chars`) is honored as given.
+- **Tool search.** On models that support it, Copilot keeps the tools of MCP servers out of the
+  conversation until the model searches for them. `"deferTools": "never"` in the entry keeps
+  Copane's tools visible all the time, at the cost of their definitions in every conversation.
+  Copane leaves the key as you set it.
 - **How it differs from Copilot's own browser tools.** Copane works in *your* VS Code window: the
   integrated browser tabs you also use (tabs you opened only with your consent), terminals you can
   see and type into, and a hand-off to you when a page or command needs a login, a password or a
   decision. Each Copilot session gets its own label and color on the tabs and terminals it uses.
 
 Known limits: registration was checked with Copilot CLI 1.0.105 (the file format, `COPILOT_HOME`,
-`copilot mcp list` reading Copane's entry). How Copilot chat inside VS Code finds the right window
-has not been verified with a signed-in Copilot; if it reaches the wrong one or none, the agent can
-pick it with `window_select` (`window_status` says which windows there are).
+`copilot mcp list` reading Copane's entry with its timeout). The time limit, the 20 KiB limit and
+`COPILOT_SESSION_CWD` are taken from Copilot's documentation, its changelog and VS Code 1.147; none
+of it, nor how Copilot chat inside VS Code finds the right window, has been tried with a signed-in
+Copilot. If a session reaches the wrong window or none, the agent can pick it with `window_select`
+(`window_status` says which windows there are).
 
 **Experimental: a server for this window only.** With the setting
 `copane.vscodeChat.serverDefinition` (off by default), Copane also gives VS Code's own chat a
@@ -337,8 +354,9 @@ window; a real Copilot chat using it has not been tried. Limits:
   keeps one of two servers with the same name (`chat.mcp.collisionBehavior`); what the Copilot
   harness does with both is unknown. If you see two, turn one off: this setting, or the
   `mcp-config.json` entry (`copilot mcp disable copane`, which turns it off for the Copilot CLI too).
-- With the Local harness one server serves every chat of the window, so they share one Copane
-  session, labelled "Agent 1". How the Copilot harness divides chats into sessions is not known yet.
+- With the Local harness one server process serves every chat of the window; each chat is its own
+  Copane session ("Agent 2", "Agent 3", ...; "Agent 1" is the server's own, unused one). How the
+  Copilot harness divides chats into sessions is not known yet.
 - In a remote window the definition names the launcher on the remote side, where Copane runs; it
   has not been tried whether the Copilot harness starts it there.
 
