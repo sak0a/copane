@@ -41,6 +41,16 @@ describe('selectInstance', () => {
     expect(r).toMatchObject({ instance: a, matchedBy: 'ancestor' });
   });
 
+  it('uses the folder the agent session works in before the working directory of the server process', () => {
+    // Copilot may start the server somewhere else (a host shared by all windows) and says where its session works.
+    expect(selectInstance({ instances: [a, b], env: {}, cwd: '/somewhere/else', sessionCwd: '/work/b/src', ancestors: [] })).toMatchObject({ instance: b, matchedBy: 'cwd' });
+    expect(selectInstance({ instances: [a, b], env: {}, cwd: '/work/a', sessionCwd: '/work/b', ancestors: [] })).toMatchObject({ instance: b, matchedBy: 'cwd' });
+    // A session folder no window has open: the process's own directory still counts.
+    expect(selectInstance({ instances: [a, b], env: {}, cwd: '/work/a', sessionCwd: '/not/open', ancestors: [] })).toMatchObject({ instance: a, matchedBy: 'cwd' });
+    // The terminal variable and the extension-host ancestor still come first.
+    expect(selectInstance({ instances: [a, b], env: { COPANE_INSTANCE: '100' }, cwd: '/x', sessionCwd: '/work/b', ancestors: [] })).toMatchObject({ instance: a, matchedBy: 'env' });
+  });
+
   it('an explicit choice wins while that window is open', () => {
     expect(selectInstance({ instances: [a, b], env: {}, cwd: '/work/a', ancestors: [100], explicit: '200' })).toMatchObject({ instance: b, matchedBy: 'explicit' });
     expect(selectInstance({ instances: [a, b], env: {}, cwd: '/work/a', ancestors: [], explicit: '999' })).toMatchObject({ instance: a, matchedBy: 'cwd' });

@@ -23,7 +23,7 @@ import type { ServerSpec } from '../../src/extension/registration/launcher';
 
 const spec: ServerSpec = { command: '/home/u/.copane/bin/mcp-server', args: [], env: {} };
 const devSpec: ServerSpec = { command: '/tmp/copane-dev/r/home/bin/mcp-server', args: [], env: { COPANE_HOME: '/tmp/copane-dev/r/home' } };
-const PASS = { COPANE_INSTANCE: '${COPANE_INSTANCE:-}', COPANE_SESSION: '${COPANE_SESSION:-}' };
+const PASS = { COPANE_INSTANCE: '${COPANE_INSTANCE:-}', COPANE_SESSION: '${COPANE_SESSION:-}', COPILOT_SESSION_CWD: '${COPILOT_SESSION_CWD:-}' };
 
 const USER_CONFIG = `// my Copilot servers
 {
@@ -50,18 +50,29 @@ describe('copilot config location', () => {
 
 describe('the entry and its comparison', () => {
   it('is what `copilot mcp add` writes, plus the pass-through references', () => {
-    expect(copilotEntryFor(devSpec)).toEqual({ type: 'local', command: devSpec.command, args: [], env: { ...devSpec.env, ...PASS }, tools: ['*'] });
+    expect(copilotEntryFor(devSpec)).toEqual({ type: 'local', command: devSpec.command, args: [], env: { ...devSpec.env, ...PASS }, tools: ['*'], timeout: 600_000 });
   });
 
   it('accepts what the user may change: tools, timeout, type stdio, the default of a reference', () => {
-    const entry = { ...copilotEntryFor(spec), type: 'stdio', tools: ['browser_click'], timeout: 900_000, cwd: '/w', env: { COPANE_INSTANCE: '${COPANE_INSTANCE}', COPANE_SESSION: '${COPANE_SESSION:-x}' } };
+    const entry = { ...copilotEntryFor(spec), type: 'stdio', tools: ['browser_click'], timeout: 900_000, cwd: '/w', env: { COPANE_INSTANCE: '${COPANE_INSTANCE}', COPANE_SESSION: '${COPANE_SESSION:-x}', COPILOT_SESSION_CWD: '${COPILOT_SESSION_CWD}' } };
     expect(compareCopilotEntry(entry, spec)).toEqual({ current: true });
+  });
+
+  it('is out of date without a timeout (Copilot would stop a call after its default), whatever value the user chose is fine', () => {
+    const { timeout: _timeout, ...without } = copilotEntryFor(spec);
+    expect(compareCopilotEntry(without, spec)).toEqual({ current: false, reason: expect.stringContaining('sets no timeout') });
+    expect(compareCopilotEntry({ ...without, timeout: 45_000 }, spec)).toEqual({ current: true });
+    // An entry as earlier versions wrote it gets the timeout and the session folder added.
+    const before = { type: 'local', command: spec.command, args: [], env: { COPANE_INSTANCE: '${COPANE_INSTANCE:-}', COPANE_SESSION: '${COPANE_SESSION:-}' }, tools: ['*'] };
+    expect(compareCopilotEntry(before, spec)).toEqual({ current: false, reason: 'it does not pass COPILOT_SESSION_CWD through to the server' });
+    const updated = parse(upsertCopilotEntry(JSON.stringify({ mcpServers: { copane: before } }), spec), [], { allowTrailingComma: true });
+    expect(updated.mcpServers.copane).toEqual(copilotEntryFor(spec));
   });
 
   it('is out of date when it does not pass the variables through, or starts something else', () => {
     expect(compareCopilotEntry({ ...copilotEntryFor(spec), env: { COPANE_SESSION: '${COPANE_SESSION:-}' } }, spec)).toEqual({
       current: false,
-      reason: 'it does not pass COPANE_INSTANCE through to the server',
+      reason: 'it does not pass COPANE_INSTANCE and COPILOT_SESSION_CWD through to the server',
     });
     expect(compareCopilotEntry({ ...copilotEntryFor(spec), env: { ...PASS, COPANE_INSTANCE: '42' } }, spec)).toMatchObject({ current: false });
     expect(compareCopilotEntry({ ...copilotEntryFor(spec), command: '/old/.copane/bin/mcp-server' }, spec)).toMatchObject({ current: false, reason: expect.stringContaining('/old/') });
@@ -113,7 +124,7 @@ describe('editing the text', () => {
       type: 'stdio',
       command: devSpec.command,
       args: [],
-      env: { COPANE_HOME: devSpec.env.COPANE_HOME, COPANE_INSTANCE: '${COPANE_INSTANCE}', COPANE_SESSION: '${COPANE_SESSION:-}' },
+      env: { COPANE_HOME: devSpec.env.COPANE_HOME, COPANE_INSTANCE: '${COPANE_INSTANCE}', COPANE_SESSION: '${COPANE_SESSION:-}', COPILOT_SESSION_CWD: '${COPILOT_SESSION_CWD:-}' },
       timeout: 900000,
       cwd: '/w',
     });

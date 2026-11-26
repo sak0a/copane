@@ -7,6 +7,11 @@ export interface DiscoveryInput {
   instances: InstanceInfo[];
   env: NodeJS.ProcessEnv;
   cwd: string;
+  /**
+   * The folder the agent's session works in, when the agent says so and it may differ from `cwd`
+   * (Copilot: `COPILOT_SESSION_CWD`). Tried before `cwd` in rules 5 and 6.
+   */
+  sessionCwd?: string;
   /** Pids of this process's ancestors, nearest first. */
   ancestors: number[];
   /** A window id the agent chose with `window_select`. Wins while that window is open. */
@@ -88,12 +93,16 @@ export function selectInstance(input: DiscoveryInput): DiscoveryResult | undefin
     if (same[0]) return { instance: same[0], matchedBy: 'reconnect' };
   }
 
-  const byCwd = deepestContaining(instances, cwd, real);
-  if (byCwd) return { ...byCwd, matchedBy: 'cwd' };
+  const dirs = input.sessionCwd && input.sessionCwd !== cwd ? [input.sessionCwd, cwd] : [cwd];
+  for (const dir of dirs) {
+    const byCwd = deepestContaining(instances, dir, real);
+    if (byCwd) return { ...byCwd, matchedBy: 'cwd' };
+  }
 
-  const worktree = input.readFile ? worktreeOf(cwd, input.readFile) : undefined;
-  if (worktree) {
-    const mapped = path.join(worktree.mainCheckout, path.relative(worktree.root, cwd));
+  for (const dir of dirs) {
+    const worktree = input.readFile ? worktreeOf(dir, input.readFile) : undefined;
+    if (!worktree) continue;
+    const mapped = path.join(worktree.mainCheckout, path.relative(worktree.root, dir));
     const byMain = deepestContaining(instances, mapped, real);
     if (byMain) {
       const about = `The worktree's main checkout is ${worktree.mainCheckout}.`;

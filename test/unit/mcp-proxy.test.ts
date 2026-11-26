@@ -12,7 +12,7 @@ import { BridgeServer } from '../../src/extension/core/bridgeServer';
 import { nullLogger } from '../../src/extension/core/log';
 import { SessionManager } from '../../src/extension/core/sessions';
 import { defineTool, ToolRegistry } from '../../src/extension/core/tools';
-import { BridgeClient, sessionKeyFrom, startedFromVsCode } from '../../src/mcp/bridgeClient';
+import { BridgeClient, sessionCwdFrom, sessionKeyFrom, startedFromVsCode } from '../../src/mcp/bridgeClient';
 import { CONVERSATION_META_KEY, ConversationBridges, conversationIdOf, conversationSessionKey, type ConversationBridgesOptions } from '../../src/mcp/conversations';
 import { buildInstructions, createProxyServer } from '../../src/mcp/proxy';
 import { PROTOCOL_VERSION, type InstanceInfo } from '../../src/shared/protocol';
@@ -379,6 +379,20 @@ describe('MCP server', () => {
 });
 
 describe('session key and instructions', () => {
+
+  it('finds the window of the folder a Copilot session works in, whatever folder the server was started from', async () => {
+    await openWindow('100', ['/work/a']);
+    await openWindow('200', ['/work/b']);
+    const copilot = await agent({ clientName: 'copilot-cli', cwd: '/', env: { COPILOT_SESSION_CWD: '/work/b' } });
+    expect((await copilot.call('whoami')).text).toMatch(/^Copilot 1 in 200/);
+    // Another agent that only inherited the variable (started inside a Copilot session) goes by its own directory.
+    const claude = await agent({ cwd: '/work/a', env: { COPILOT_SESSION_CWD: '/work/b' } });
+    expect((await claude.call('whoami')).text).toBe('Claude 1 in 100');
+    expect(sessionCwdFrom({ COPILOT_SESSION_CWD: '/work/b' }, 'copilot-cli')).toBe('/work/b');
+    expect(sessionCwdFrom({ COPILOT_SESSION_CWD: '' }, 'copilot-cli')).toBeUndefined();
+    expect(sessionCwdFrom({ COPILOT_SESSION_CWD: 'relative/dir' }, 'copilot-cli')).toBeUndefined();
+    expect(sessionCwdFrom({ COPILOT_SESSION_CWD: '/work/b' }, 'claude-code')).toBeUndefined();
+  });
 
   it('tells an agent started from VS Code (a window may still be starting) from one started elsewhere', () => {
     expect(startedFromVsCode({ TERM_PROGRAM: 'vscode' })).toBe(true);
