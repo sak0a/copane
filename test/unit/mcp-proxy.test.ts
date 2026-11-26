@@ -93,6 +93,7 @@ async function agent(
     env?: NodeJS.ProcessEnv;
     ancestors?: number[];
     initWaitMs?: number;
+    progressMs?: number;
     clientName?: string;
     sessionKey?: string | ((clientName: string) => string);
     /** Serve VS Code chat conversations (`_meta["vscode.conversationId"]`), as dist/mcp-server.js does. */
@@ -120,7 +121,7 @@ async function agent(
       })
     : undefined;
   if (conversations) cleanups.push(() => conversations.dispose());
-  const server = createProxyServer(bridge, { version: '0.0.0', initWaitMs: options.initWaitMs ?? 300, conversations });
+  const server = createProxyServer(bridge, { version: '0.0.0', initWaitMs: options.initWaitMs ?? 300, conversations, ...(options.progressMs ? { progressMs: options.progressMs } : {}) });
   const client = new Client({ name: options.clientName ?? 'claude-code', version: '9.9.9' });
   let listChanged = 0;
   client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
@@ -249,6 +250,26 @@ describe('MCP server', () => {
     expect(result.text).toBe('Claude 1 in 200');
     expect(bridge.current?.matchedBy).toBe('reconnect');
     expect(listChanged()).toBe(before);
+  });
+
+  it('reports progress while a call runs, to a client that asked for it, so its time limit does not cut the call', async () => {
+    const win = await openWindow('100', ['/work/a']);
+    win.server['options'].tools.register([
+      defineTool({ name: 'slow', description: 'x', input: {}, handler: () => new Promise<string>(resolve => setTimeout(() => resolve('done'), 260)) }),
+    ]);
+    const { client } = await agent({ progressMs: 50 });
+    const seen: Array<{ progress: number; message?: string }> = [];
+    // The SDK sends `_meta.progressToken` when a call wants progress, as agents do.
+    const result = (await client.callTool({ name: 'slow', arguments: {} }, undefined, { onprogress: p => seen.push(p) })) as { content: Array<{ text: string }> };
+    expect(result.content[0]!.text).toBe('done');
+    expect(seen.length).toBeGreaterThanOrEqual(3);
+    expect(seen[0]!.message).toMatch(/^slow is still running \(\d+ s\)$/);
+    expect(seen.map(p => p.progress)).toEqual(seen.map((_p, i) => i + 1));
+    // Nothing after the call has ended, and nothing for a call that did not ask.
+    const count = seen.length;
+    await client.callTool({ name: 'slow', arguments: {} });
+    await new Promise(r => setTimeout(r, 120));
+    expect(seen.length).toBe(count);
   });
 
   it('a call in flight when the window goes away fails with an explanation', async () => {
