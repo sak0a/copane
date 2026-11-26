@@ -12,7 +12,7 @@ import { BridgeServer } from '../../src/extension/core/bridgeServer';
 import { nullLogger } from '../../src/extension/core/log';
 import { SessionManager } from '../../src/extension/core/sessions';
 import { defineTool, ToolRegistry } from '../../src/extension/core/tools';
-import { BridgeClient, sessionKeyFrom } from '../../src/mcp/bridgeClient';
+import { BridgeClient, sessionKeyFrom, startedFromVsCode } from '../../src/mcp/bridgeClient';
 import { CONVERSATION_META_KEY, ConversationBridges, conversationIdOf, conversationSessionKey, type ConversationBridgesOptions } from '../../src/mcp/conversations';
 import { buildInstructions, createProxyServer } from '../../src/mcp/proxy';
 import { PROTOCOL_VERSION, type InstanceInfo } from '../../src/shared/protocol';
@@ -202,10 +202,36 @@ describe('MCP server', () => {
     expect(status).not.toMatch(/Enable Integrated Browser/);
   });
 
-  it('waits for a window that is still starting at initialize', async () => {
+  it('waits for a window that is still starting at initialize, when the agent was started from VS Code', async () => {
     setTimeout(() => void openWindow('100', ['/work/a']), 100);
-    const { client } = await agent({ initWaitMs: 2000 });
+    const { client } = await agent({ initWaitMs: 2000, env: { TERM_PROGRAM: 'vscode' } });
     expect(client.getInstructions()).toContain('Window instructions of 100.');
+  });
+
+  it('does not wait for a window when the agent was started outside VS Code and none matches', async () => {
+    // Registered for every session of the agent: one started in a plain terminal must not pay
+    // the wait at its start and at every call.
+    let started = Date.now();
+    const { client, call, toolNames, listChanged } = await agent({ initWaitMs: 2000 });
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(client.getInstructions()).toMatch(/Not connected to a VS Code window/);
+    started = Date.now();
+    expect((await call('whoami')).text).toMatch(/Not connected/);
+    expect(Date.now() - started).toBeLessThan(100);
+
+    // Windows of other projects are open: still nothing to wait for.
+    await openWindow('200', ['/work/b']);
+    await openWindow('300', ['/work/c']);
+    const other = await agent({ initWaitMs: 2000, cwd: '/elsewhere' });
+    started = Date.now();
+    expect((await other.call('whoami')).text).toMatch(/Not connected/);
+    expect(Date.now() - started).toBeLessThan(100);
+
+    // Its own window opens later: picked up in the background, as before.
+    await openWindow('100', ['/work/a']);
+    await until(() => listChanged() > 0, 'tools/list_changed');
+    expect(await toolNames()).toEqual(['whoami', 'window_select', 'window_status']);
+    expect((await call('whoami')).text).toMatch(/in 100/);
   });
 
   it('survives a window reload: calls wait for the new window, the tool list does not flap', async () => {
@@ -332,6 +358,15 @@ describe('MCP server', () => {
 });
 
 describe('session key and instructions', () => {
+
+  it('tells an agent started from VS Code (a window may still be starting) from one started elsewhere', () => {
+    expect(startedFromVsCode({ TERM_PROGRAM: 'vscode' })).toBe(true);
+    expect(startedFromVsCode({ COPANE_INSTANCE: '123' })).toBe(true);
+    expect(startedFromVsCode({ VSCODE_IPC_HOOK: '/tmp/x.sock' })).toBe(true);
+    // Copilot passes `${COPANE_INSTANCE:-}`: empty when its own environment has none.
+    expect(startedFromVsCode({ COPANE_INSTANCE: '', PATH: '/usr/bin', TERM_PROGRAM: 'Apple_Terminal' })).toBe(false);
+    expect(startedFromVsCode({})).toBe(false);
+  });
   it('uses the explicit key, then the Claude Code session id, then a random one', () => {
     expect(sessionKeyFrom({ COPANE_SESSION: 'a', CLAUDE_CODE_SESSION_ID: 'b' })).toBe('a');
     expect(sessionKeyFrom({ CLAUDE_CODE_SESSION_ID: 'b' })).toBe('b');
