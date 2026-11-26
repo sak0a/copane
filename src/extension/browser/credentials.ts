@@ -1,7 +1,11 @@
 // Login prompts for sites and proxies that ask for credentials (HTTP 401 with WWW-Authenticate, or 407
-// from a proxy: Basic, Digest, NTLM, Negotiate) in tabs an agent session is driving. VS Code's browser
-// cancels every such challenge itself, so the page just fails; here the bridge answers instead: the user
-// is asked in VS Code, types the login into a masked input, and the request continues.
+// from a proxy: Basic, Digest, NTLM, Negotiate) in tabs an agent session is driving. Until 1.147 VS
+// Code's browser cancelled every such challenge itself, so the page just failed; since 1.148 it shows
+// a sign-in dialog of its own over the page, which holds the navigation (and the agent's call) until
+// the user answers. Here the bridge answers first instead: the user is asked in VS Code, types the
+// login into a masked input, the request continues, and the agent is told what happened. A challenge
+// that reaches VS Code after all (login prompts turned off, a tab that started loading before the
+// bridge attached) is VS Code's to ask about: see `onAttached` and `vscodeAsks`.
 //
 // Rules: only tabs a session controls (like certificate errors), never silently for a space the user
 // has not answered, asked once per site or proxy and realm, remembered for the window and optionally
@@ -13,7 +17,7 @@ import type { Disposable } from '../core/events';
 import type { BridgeServices, CdpPage } from '../core/services';
 import { sessionDisplayName } from '../core/sessions';
 import type { AuthDecision, AuthRequest, FetchClient, FetchInterception, FetchPattern } from './interception';
-import { describeChallenge, displayHost, LoginBook, loginKey, sentInClear, type Login } from './logins';
+import { describeChallenge, displayHost, LoginBook, loginKey, sentInClear, vscodeAsksForLogins, type Login } from './logins';
 
 const ASK_TIMEOUT_MS = 120_000;
 const REFUSE_MS = 60_000;
@@ -100,6 +104,8 @@ export class CredentialPrompts implements FetchClient, vscode.Disposable {
   private readonly asking = new Map<string, PendingAsk>();
   /** Login challenges being decided per tab: interception stays on for them even if the tab's lease ends. */
   private readonly busy = new Map<string, number>();
+  /** Tabs opened blank (`defersFirstLoad`): the URL each loads once the bridge is attached. */
+  private readonly firstLoads = new Map<string, string>();
   private readonly subscriptions: Disposable[] = [];
 
   constructor(
@@ -136,11 +142,48 @@ export class CredentialPrompts implements FetchClient, vscode.Disposable {
   }
 
   /**
+   * Whether a login challenge in this tab would be asked about by VS Code itself, with its sign-in
+   * dialog over the page (1.148 and later), because the bridge does not answer challenges there.
+   */
+  vscodeAsks(tabId: string): boolean {
+    return vscodeAsksForLogins(vscode.version) && !this.handlesAuth(tabId);
+  }
+
+  /**
+   * Whether a tab a session opens on `url` should start blank and load the URL only once the bridge
+   * is attached (`loadWhenAttached`). Where VS Code asks for logins itself, a tab opened straight
+   * onto a page that asks for one sits behind VS Code's sign-in dialog with a navigation that never
+   * commits, and its CDP session answers nothing until the user has dealt with the dialog: the
+   * bridge could neither ask in its own way nor tell the agent anything. Opened blank, the tab's
+   * first request is already seen here.
+   */
+  defersFirstLoad(url: string): boolean {
+    return this.enabled && vscodeAsksForLogins(vscode.version) && /^https?:/i.test(url);
+  }
+
+  /** The URL to load in a tab opened blank (`defersFirstLoad`), once interception is in effect there. */
+  loadWhenAttached(tabId: string, url: string): void {
+    // A tab that closed before the bridge attached to it never asked for its URL.
+    for (const id of this.firstLoads.keys()) if (!this.services.browser.getTab(id)) this.firstLoads.delete(id);
+    this.firstLoads.set(tabId, url);
+  }
+
+  /**
    * A tab opened with a URL starts loading before the bridge attaches to it, so a site that answers
-   * fast has already sent its 401 (cancelled by VS Code) when interception starts. If the page an
-   * agent opened is such an answer, load it again once: this time the challenge comes here.
+   * fast has already sent its 401 (cancelled by VS Code, until 1.147) when interception starts. If the
+   * page an agent opened is such an answer, load it again once: this time the challenge comes here.
+   * (Since 1.148 an agent's tab is opened blank instead, see `defersFirstLoad`.)
    */
   onAttached(page: CdpPage): void {
+    const first = this.firstLoads.get(page.tabId);
+    if (first !== undefined) {
+      this.firstLoads.delete(page.tabId);
+      // Not awaited: a login prompt the user has not answered holds Page.navigate too.
+      void page.send('Page.navigate', { url: first, transitionType: 'typed' }, { timeoutMs: ASK_TIMEOUT_MS + 30_000 }).then(undefined, err => {
+        if (!page.closed) this.services.log.debug(`${page.tabId}: loading ${first} after opening the tab: ${err instanceof Error ? err.message : String(err)}`);
+      });
+      return;
+    }
     // Only tabs an agent opened (browser_open, or a popup of its page): those were loaded with a GET.
     // A user's tab may show the answer to a form it posted, which must not be sent again.
     if (!this.inScope(page.tabId) || this.services.browser.getTab(page.tabId)?.origin !== 'agent') return;

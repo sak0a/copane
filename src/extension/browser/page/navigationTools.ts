@@ -109,6 +109,10 @@ export async function describeOpened(env: PageEnv, ctx: ToolContext, tabId: stri
     const life = state.lifecycleOf();
     const timedOut = result.ok === false;
     const progress = !timedOut ? `loaded in ${formatMs(Date.now() - started)}` : isBlank(state.url) ? `nothing loaded yet after ${formatMs(timeoutMs)}` : life.has('DOMContentLoaded') ? 'the document is ready but still loading resources; it is usable' : `still loading after ${formatMs(timeoutMs)}`;
+    // Nothing at all, where VS Code asks for logins itself: its sign-in dialog holds the page.
+    if (timedOut && isBlank(state.url) && /^https?:/i.test(url) && env.services.browser.loginAskedByVsCode?.(call.tab.id)) {
+      return `Opened ${call.tab.id}: ${clip(url, 500)} (${progress}). If the site (or a proxy) asks for a login, VS Code is showing its sign-in dialog in the tab and the page loads once the user has signed in there: tell the user, then wait for the page (browser_wait_for); never ask for the password.`;
+    }
     const title = isBlank(state.url) ? undefined : await pageTitle(call);
     // The document request often starts before the bridge records the tab: ask the page then.
     const doc = state.loaderId ? state.network.byRequestId(state.loaderId) : undefined;
@@ -167,6 +171,14 @@ export function navigationTools(env: PageEnv): ToolDefinition<any>[] {
             // A paused request (a login prompt the user has not answered) holds Page.navigate too.
             const notes = err instanceof ToolError && err.code === 'timeout' ? notesSince(call, mark) : '';
             if (notes) throw new ToolError('timeout', `${url} has not loaded yet.${notes}`);
+            // No answer at all, where VS Code asks for logins itself: its sign-in dialog holds the page.
+            if (err instanceof ToolError && err.code === 'timeout' && /^https?:/i.test(url) && env.services.browser.loginAskedByVsCode?.(call.tab.id)) {
+              throw new ToolError(
+                'timeout',
+                `${url} has not answered within ${args.timeout ?? 20} s. If the site (or a proxy) asks for a login, VS Code is showing its sign-in dialog in the tab and the page loads once the user has signed in there: ` +
+                  'tell the user, then wait for the page (browser_wait_for); do not navigate again, and never ask for the password.',
+              );
+            }
             if (!(err instanceof DialogInterrupt)) throw err;
             // A beforeunload dialog holds Page.navigate until it is answered.
             const waited = await waitForNavigation(call, mark, { waitUntil, timeoutMs: (args.timeout ?? 20) * 1000 });
