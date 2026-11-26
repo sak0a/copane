@@ -660,7 +660,11 @@ test('dialogs: reported by the action, other tools fail fast, then answered', as
 test('dialogs: "leave this page?" does not block navigation', async () => {
   await open('/dialogs.html');
   await a.ok('browser_click', { selector: '#guard' });
-  assert.match(await a.ok('browser_navigate', { url: url('/form.html') }), /"Form fixture"[\s\S]*confirm(ed)? leaving/);
+  // Until VS Code 1.147 the browser asks "leave this page?" and the bridge confirms; since 1.148 it
+  // leaves without asking. Either way the navigation happens, and a question is never refused.
+  const left = await a.ok('browser_navigate', { url: url('/form.html') });
+  assert.match(left, /"Form fixture"/);
+  if (/leav/.test(left)) assert.match(left, /confirm(ed)? leaving/);
   await a.ok('browser_navigate', { action: 'back' });
   await a.ok('browser_click', { selector: '#guard' });
   assert.match(await a.ok('browser_navigate', { action: 'reload' }), /Reloaded/);
