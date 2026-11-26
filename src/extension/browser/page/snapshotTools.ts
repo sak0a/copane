@@ -1,6 +1,7 @@
 // browser_snapshot and browser_screenshot: reading what is on the page.
 import { z } from 'zod';
 import { ToolError } from '../../core/errors';
+import { blockByteLimit, fitBytes } from '../../core/resultSize';
 import { defineTool, image, text, type ToolDefinition } from '../../core/tools';
 import type { ToolContent } from '../../../shared/protocol';
 import { agentFilePath, writeAgentFile, type AgentFile } from './agentFile';
@@ -140,6 +141,11 @@ interface ReadArgs {
   urls?: boolean;
   offset?: number;
   maxChars?: number;
+  /**
+   * What the snapshot, text or matches may weigh in bytes for the client that reads them
+   * (core/resultSize.ts); applied by lowering the character limit. Not with an explicit `maxChars`.
+   */
+  maxBytes?: number;
 }
 
 /** browser_snapshot's result for a capture. */
@@ -153,9 +159,10 @@ export function readResult(call: PageCall, capture: PageCapture, root: ElementTa
   const maxChars = args.maxChars ?? (args.find !== undefined ? DEFAULT_FIND_CHARS : DEFAULT_SNAPSHOT_CHARS);
   const refFor = (node: RefNode) => call.refs.assign(capture.refNode(node), capture.loaderId);
   const options = { refFor, maxChars, urls: args.urls, pageUrl: url, offset: args.offset };
+  const maxBytes = args.maxChars === undefined ? args.maxBytes : undefined;
 
   if (args.find !== undefined) {
-    const found = findInTree(tree, args.find, options);
+    const found = fitBytes(max => findInTree(tree, args.find!, { ...options, maxChars: max }), f => f.text, maxChars, maxBytes);
     if (found.matches === 0) return `${head}${scope}Nothing in ${call.tab.id} matches "${clip(args.find, 100)}" (names, values and text${args.urls ? ' and link targets' : ''} of ${root ? 'that part' : 'the whole page'} were searched, case-insensitive).`;
     const more = found.matches > found.shown ? `\n[${found.matches - found.shown} more matches not shown: make find more specific, or raise maxChars.]` : '';
     return `${head}${scope}- ${found.matches} match${found.matches === 1 ? '' : 'es'} for "${clip(args.find, 100)}" in ${call.tab.id}:\n\`\`\`yaml\n${found.text}\n\`\`\`${more}`;
@@ -165,13 +172,13 @@ export function readResult(call: PageCall, capture: PageCapture, root: ElementTa
     const rendered = renderText(tree);
     const what = root ? 'that part' : rendered.scope;
     if (!rendered.text) return `${head}${scope}${what === 'the whole page' ? 'The page shows no text.' : `There is no text in ${what}.`} Use browser_snapshot without mode to see its elements.`;
-    const win = textWindow(rendered.text, args.offset ?? 0, maxChars);
+    const win = fitBytes(max => textWindow(rendered.text, args.offset ?? 0, max), w => w.text, maxChars, maxBytes);
     const left = root || rendered.scope === 'the whole page' ? 'controls left out' : 'menus, sidebars and controls left out';
     const cut = win.end < win.total ? `\n[Cut at character ${win.end} of ${win.total}: call again with offset ${win.end} to read on.]` : '';
     return `${head}${scope}- Text of ${what} in ${call.tab.id} (${left}; browser_snapshot without mode gives refs to act on):\n${win.text}${cut}`;
   }
 
-  const output = renderTree(tree, options);
+  const output = fitBytes(max => renderTree(tree, { ...options, maxChars: max }), o => o.text, maxChars, maxBytes);
   // A whole-page snapshot from the top: remembered as what this session was shown, and when the
   // agent did not ask for it in full (offset 0), answered with what changed since it was last shown.
   if (!root && output.shown && (args.offset ?? 0) === 0) {
@@ -209,7 +216,7 @@ export function snapshotTools(env: PageEnv): ToolDefinition<any>[] {
           const root = (await resolveTarget(call, args, { waitMs: 0 })) as ElementTarget | undefined;
           const capture = await capturePage(call, root);
           if (!root) rememberPage(call, capture);
-          return readResult(call, capture, root, args);
+          return readResult(call, capture, root, { ...args, maxBytes: blockByteLimit(ctx.session.client) });
         }),
     }),
     defineTool({

@@ -7,7 +7,8 @@ import type { AgentSession } from '../core/sessions';
 import { defineTool, type ToolContext, type ToolDefinition } from '../core/tools';
 import { describeInput, encodeKeys, KeyError } from './keys';
 import { raceTimeout, sleep, type Execution, type HandoffOutcome, type TerminalManager, type Tracked } from './manager';
-import { clipLines, DEFAULT_MAX_CHARS, formatClip, formatDuration, MAX_MAX_CHARS, shortCommand } from './render';
+import { blockByteLimit, fitBytes } from '../core/resultSize';
+import { clipLines, DEFAULT_MAX_CHARS, formatClip, formatDuration, MAX_MAX_CHARS, shortCommand, type Clip } from './render';
 
 /** Without it, tools act on the session's current terminal (said once, in instructions.ts). */
 const terminalArg = z.string().optional();
@@ -203,9 +204,18 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
     return [...parts, ...notes.map(n => `Note: ${n}`)].filter(p => p !== undefined && p !== '').join('\n');
   }
 
-  function outputBlock(t: Tracked, execution: Execution, maxChars: number | undefined): string {
+  /**
+   * `clipLines` for a session: when the agent set no `max_chars`, also within the byte limit its
+   * client puts on a result (core/resultSize.ts), by lowering the character limit.
+   */
+  function clipFor(session: AgentSession | undefined, lines: readonly string[], options: { maxChars?: number; fromLine?: number; headTail?: boolean }): Clip {
+    const maxBytes = options.maxChars === undefined && session ? blockByteLimit(session.client) : undefined;
+    return fitBytes(max => clipLines(lines, { ...options, maxChars: max }), clip => clip.text, options.maxChars ?? DEFAULT_MAX_CHARS, maxBytes, 500);
+  }
+
+  function outputBlock(t: Tracked, execution: Execution, maxChars: number | undefined, session?: AgentSession): string {
     const { lines, startLost } = manager.outputOf(t, execution);
-    return formatClip(clipLines(lines, { maxChars }), from => readCall(t, from), { startLost });
+    return formatClip(clipFor(session, lines, { maxChars }), from => readCall(t, from), { startLost });
   }
 
   /**
@@ -213,21 +223,21 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
    * size. When they are the end of the latest command's output, cuts name that output's line numbers,
    * which terminal_read pages exactly; otherwise only the end is kept, pointing at the whole output.
    */
-  function partialBlock(t: Tracked, lines: readonly string[], startLost: boolean, maxChars: number | undefined): string {
+  function partialBlock(t: Tracked, lines: readonly string[], startLost: boolean, maxChars: number | undefined, session?: AgentSession): string {
     const execution = t.current ?? t.last;
     const whole = execution ? manager.outputOf(t, execution).lines : [];
     const offset = whole.length - lines.length;
     if (execution && offset >= 0 && lines.every((line, i) => whole[offset + i] === line)) {
-      return formatClip(clipLines(lines, { maxChars }), from => readCall(t, from), { startLost, lineOffset: offset });
+      return formatClip(clipFor(session, lines, { maxChars }), from => readCall(t, from), { startLost, lineOffset: offset });
     }
     const more = execution ? readCall(t, 1) : `terminal_read {"terminal":"${t.id}","what":"screen"}`;
-    return formatClip(clipLines(lines, { maxChars, headTail: false }), () => more, { startLost });
+    return formatClip(clipFor(session, lines, { maxChars, headTail: false }), () => more, { startLost });
   }
 
   function newOutputBlock(t: Tracked, session: AgentSession, maxChars: number | undefined): string | undefined {
     const { lines, startLost } = manager.readNew(session, t);
     if (lines.length === 0) return undefined;
-    return partialBlock(t, lines, startLost, maxChars);
+    return partialBlock(t, lines, startLost, maxChars, session);
   }
 
   /** The visible screen (bounded by rows x cols), with what it is. */
@@ -296,7 +306,7 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
         const waited = await waitForEnd(t, execution, (args.timeout_seconds ?? 60) * 1000, ctx);
         if (waited === 'aborted') throw new ToolError('cancelled', `Cancelled. The command keeps running in ${t.id}.`);
         await t.mirror.flush();
-        const block = outputBlock(t, execution, args.max_chars);
+        const block = outputBlock(t, execution, args.max_chars, ctx.session);
         manager.markRead(ctx.session, t, execution);
         if (execution.ended) return withNotes(t, [note, finishedLine(t, execution, ctx.session), block], ctx.session);
         toldOf(execution).add(ctx.session.id); // The command is named below; later statuses need not repeat it.
@@ -339,7 +349,7 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
           const execution = t.current ?? t.last;
           if (!execution) return withNotes(t, [`No command has run in ${t.id} since the extension started watching it.`, statusOf(t, ctx.session)], ctx.session);
           const { lines, startLost } = manager.outputOf(t, execution);
-          const clip = clipLines(lines, { maxChars: args.max_chars, fromLine: args.from_line });
+          const clip = clipFor(ctx.session, lines, { maxChars: args.max_chars, fromLine: args.from_line });
           manager.markRead(ctx.session, t, execution);
           return withNotes(t, [`Output of \`${shortCommand(execution.commandLine)}\` in ${t.id}:`, formatClip(clip, from => readCall(t, from), { startLost }), statusOf(t, ctx.session)], ctx.session);
         }
@@ -482,7 +492,7 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
         await sleep(150);
         await t.mirror.flush();
         const { lines, startLost } = manager.linesSince(t, since);
-        const block = partialBlock(t, lines, startLost, undefined);
+        const block = partialBlock(t, lines, startLost, undefined, ctx.session);
         manager.markRead(ctx.session, t, execution?.ended ? execution : undefined);
         return withNotes(t, [
           note,

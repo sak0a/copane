@@ -18,6 +18,7 @@ import {
 } from '../../shared/protocol';
 import type { Disposable } from './events';
 import { scopedLogger, type Logger } from './log';
+import { blockByteLimit, COPILOT_FILE_THRESHOLD_BYTES, utf8Bytes } from './resultSize';
 import { describeSession, type AgentSession, type SessionClient, type SessionManager } from './sessions';
 import { resolveToolAlias, withAliasNote } from './toolAliases';
 import { disabledToolMessage, isToolEnabled, type ToolSelection } from './toolSelection';
@@ -61,6 +62,17 @@ export function dropsServerInstructions(client: SessionClient): boolean {
  */
 export function usageNotesPolicy(enabled: () => boolean, needs: (client: SessionClient) => boolean = dropsServerInstructions): (client: SessionClient) => boolean {
   return client => enabled() && needs(client);
+}
+
+/**
+ * A result with the usage notes stays below this, so that Copilot still gives it to its model
+ * instead of a file (core/resultSize.ts): a first call that returns a full page keeps the notes
+ * for the call after it.
+ */
+export const USAGE_NOTES_RESULT_BYTES = COPILOT_FILE_THRESHOLD_BYTES - 1000;
+
+function textBytes(result: CallToolResult): number {
+  return result.content.reduce((n, part) => n + (part.type === 'text' ? utf8Bytes(part.text) : 0), 0);
 }
 
 export const USAGE_NOTES_HEADING = "Copane's usage notes (shown once, with your first Copane tool result):";
@@ -191,10 +203,14 @@ export class BridgeServer implements Disposable {
       });
       const result = alias ? withAliasNote(called, alias.note) : called;
       options.log.debug(`${current.label} ${params.name}${alias ? ` (as ${name})` : ''} ${result.isError ? 'failed' : 'ok'} in ${Date.now() - started} ms`);
-      // Once per session (the session object outlives reconnects with the same key), on success only.
+      // Once per session (the session object outlives reconnects with the same key), on success only,
+      // and not with a result the notes would make too large for the client: they wait for the next.
       if (!result.isError && !this.notesGiven.has(current) && (options.needsUsageNotes ?? dropsServerInstructions)(current.client)) {
-        this.notesGiven.add(current);
-        return withUsageNotes(result, options.instructions());
+        const noted = withUsageNotes(result, options.instructions());
+        if (blockByteLimit(current.client) === undefined || textBytes(noted) <= USAGE_NOTES_RESULT_BYTES) {
+          this.notesGiven.add(current);
+          return noted;
+        }
       }
       return result;
     });

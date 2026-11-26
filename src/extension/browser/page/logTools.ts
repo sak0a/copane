@@ -2,6 +2,7 @@
 // current page by default (logScope.ts); allPages shows everything, onlyNew what the session has not read.
 import { z } from 'zod';
 import { ToolError } from '../../core/errors';
+import { blockByteLimit, utf8Bytes } from '../../core/resultSize';
 import { defineTool, type ToolDefinition } from '../../core/tools';
 import { withPage, type PageCall, type PageEnv } from './call';
 import { exportHar } from './harExport';
@@ -21,15 +22,21 @@ function cursorFor(env: PageEnv, call: PageCall) {
   return c;
 }
 
-/** Keeps the newest lines that fit the budget; returns them oldest first and how many were dropped. */
-function fitNewest(lines: string[], budget: number): { kept: string[]; dropped: number } {
+/**
+ * Keeps the newest lines that fit `budget` characters and, for a client with a byte limit on
+ * results (core/resultSize.ts), `maxBytes` too; returns them oldest first and how many were dropped.
+ */
+function fitNewest(lines: string[], budget: number, maxBytes?: number): { kept: string[]; dropped: number } {
   const kept: string[] = [];
   let used = 0;
+  let bytes = 0;
   for (let i = lines.length - 1; i >= 0; i--) {
     const len = lines[i]!.length + 1;
-    if (used + len > budget) return { kept: kept.reverse(), dropped: i + 1 };
+    const size = maxBytes === undefined ? 0 : utf8Bytes(lines[i]!) + 1;
+    if (used + len > budget || (maxBytes !== undefined && bytes + size > maxBytes)) return { kept: kept.reverse(), dropped: i + 1 };
     kept.push(lines[i]!);
     used += len;
+    bytes += size;
   }
   return { kept: kept.reverse(), dropped: 0 };
 }
@@ -95,7 +102,7 @@ export function logTools(env: PageEnv): ToolDefinition<any>[] {
             // Page loads between the first shown message (or the start of the range) and now.
             ...navs.filter(n => limited.length === entries.length || n.seq > limited[0]!.seq).map(n => ({ seq: n.seq, line: `${time(n.time)} --- page loaded: ${clip(n.url, 200)} ---` })),
           ].sort((a, b) => a.seq - b.seq);
-          const { kept, dropped } = fitNewest(items.map(i => i.line), OUTPUT_BUDGET);
+          const { kept, dropped } = fitNewest(items.map(i => i.line), OUTPUT_BUDGET, blockByteLimit(ctx.session.client));
           const counts = { error: entries.filter(e => e.level === 'error').length, warning: entries.filter(e => e.level === 'warning').length };
           const scope = scopeText(state, args.onlyNew, page);
           if (entries.length === 0) {
@@ -164,7 +171,7 @@ export function logTools(env: PageEnv): ToolDefinition<any>[] {
           const now = Date.now();
           const limited = result.matched.slice(-(args.limit ?? 100));
           const origin = pageOrigin(state.url);
-          const { kept, dropped } = fitNewest(limited.map(e => formatNetworkEntry(e, now, origin)), OUTPUT_BUDGET);
+          const { kept, dropped } = fitNewest(limited.map(e => formatNetworkEntry(e, now, origin)), OUTPUT_BUDGET, blockByteLimit(ctx.session.client));
           const onOrigin = origin !== undefined && limited.some(e => e.url.startsWith(`${origin}/`));
           const scope = scopeText(state, args.onlyNew, page);
           const hidden = result.hiddenStatic ? `${result.hiddenStatic} static resources (images, scripts, styles, fonts) hidden; pass includeStatic: true to see them.` : '';
