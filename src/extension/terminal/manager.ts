@@ -170,6 +170,8 @@ export class Tracked {
 }
 
 const STATE_KEY = 'copane.terminals.v1';
+/** How long a terminal found shortly after activation may take to get the name it had before a restart. */
+const REVIVED_NAME_WAIT_MS = 3000;
 const SHELL_INTEGRATION_WAIT_MS = 12_000;
 const FIRST_PROMPT_WAIT_MS = 2_000;
 /** How long a region of output may come before its execution and still be paired with it by order. */
@@ -776,8 +778,22 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
   private async identify(t: Tracked): Promise<void> {
     const pid = await Promise.race([Promise.resolve(t.terminal.processId).catch(() => undefined), sleep(3000).then(() => undefined)]);
     t.pid = pid;
-    const claimed = new Set(this.all().map(x => x.id));
-    const record = matchPersisted(this.persisted, claimed, pid, t.terminal.name);
+    const unclaimed = () => {
+      const claimed = new Set(this.all().map(x => x.id));
+      return this.persisted.filter(r => !claimed.has(r.id));
+    };
+    const match = () => matchPersisted(this.persisted, new Set(this.all().map(x => x.id)), pid, t.terminal.name);
+    let record = match();
+    // After a restart of VS Code a revived terminal has a new process, so only its name says which
+    // one it was, and VS Code gives a revived terminal its name back a moment after it opens: while
+    // remembered terminals are still unaccounted for, shortly after activation, wait for the name.
+    const nameAtFirst = t.terminal.name;
+    const deadline = Date.now() + REVIVED_NAME_WAIT_MS;
+    while (!record && !t.closed && Date.now() < deadline && Date.now() - this.activatedAt < 60_000 && unclaimed().length > 0) {
+      await sleep(100);
+      record = match();
+    }
+    if (record && t.terminal.name !== nameAtFirst) this.services.log.info(`recognised ${record.id} once VS Code had named it "${t.terminal.name}" (it opened as "${nameAtFirst}")`);
     if (record) {
       t.id = record.id;
       t.origin = 'agent';
