@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- **Away sessions.** After a window reload or a restart of VS Code, a session whose agent has not
+  reconnected is no longer ended after 30 seconds, which left its tabs and terminals belonging to
+  nobody (an agent chat reconnects only when you continue it). It is shown as *away* and keeps its
+  tabs, terminals, label and color until its agent comes back, you end it, or you close what it
+  owns. This also holds after VS Code was closed for longer than ten minutes.
+- A terminal revived by a restart of VS Code was sometimes taken for one of your own instead of its
+  agent's (VS Code names a revived terminal a moment after it opens).
+- A session that ended and comes back later keeps its current tab, as it keeps its terminal.
+- Text that is not plain ASCII (umlauts, CJK, emoji, box drawing) no longer comes back with `�` in
+  results longer than about 8 kB: page snapshots, `browser_evaluate` results, terminal output.
+- A command that stops at a question (`[y/n]`, a password or login prompt, "Press Enter", a pager or
+  another full-screen program) returns from `terminal_run` and `terminal_wait` after a second or
+  three, saying what it waits for, instead of after the whole timeout (60 s by default). A session
+  that has been told and waits anyway waits its full time.
+- An agent started outside VS Code, with no window of its project open, no longer waits 3 s when
+  its session starts and 4 s at every call before Copane says it is not connected. Agents started
+  from VS Code still wait for a window that is starting.
+
 ## 0.4.1
 
 Fixes in the browser tools.
