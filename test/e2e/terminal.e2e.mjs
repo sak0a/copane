@@ -255,6 +255,49 @@ test('an interactive multi-step prompt is detected and answered', async () => {
   }
 });
 
+test('a command that stops at a question returns at once, not at its timeout', async () => {
+  const a = await agent({ session: 'term-prompt-early' });
+  try {
+    // A yes/no question says it wants an answer: the default timeout (60 s) is not waited out.
+    let started = Date.now();
+    const asked = await a.ok('terminal_run', { command: `printf 'Overwrite? (y/N) '; read a; echo working; sleep 3; printf 'Project name: '; read b; echo "done $a $b"` });
+    assert.ok(Date.now() - started < 10_000, `returned after ${Date.now() - started} ms`);
+    assert.match(asked, /still running/);
+    assert.match(asked, /Probably waiting for input.*Overwrite\? \(y\/N\)/);
+
+    // Told of this stop, a wait is not cut short for it again (the user may be about to answer).
+    started = Date.now();
+    const waited = await a.ok('terminal_wait', { timeout_seconds: 3 });
+    assert.match(waited, /Still running after waiting 3/);
+    assert.ok(Date.now() - started >= 2900, `waited only ${Date.now() - started} ms`);
+
+    // Answered: the command works on in silence with the answered question above it, which is
+    // not a stop; the next question (a line that only reads like one) ends the wait.
+    await a.ok('terminal_send', { text: 'y', keys: ['Enter'], wait_seconds: 0 });
+    started = Date.now();
+    const next = await a.ok('terminal_wait', { timeout_seconds: 60 });
+    const took = Date.now() - started;
+    assert.match(next, /Stopped waiting after .*: the command needs an answer first\./);
+    assert.match(next, /working/);
+    assert.match(next, /Probably waiting for input.*Project name:/);
+    assert.ok(took >= 2500 && took < 20_000, `the wait took ${took} ms`);
+
+    await a.ok('terminal_send', { text: 'demo', keys: ['Enter'] });
+    const done = await a.ok('terminal_wait', { timeout_seconds: 10 });
+    assert.match(done, /done y demo|Nothing is running/);
+
+    // A command that is only slow, or silent, is waited for as before.
+    started = Date.now();
+    const slow = await a.ok('terminal_run', { command: 'echo start; sleep 4; echo end', timeout_seconds: 20 });
+    assert.match(slow, /exited with code 0/);
+    assert.match(slow, /end/);
+    assert.ok(Date.now() - started >= 3900);
+  } finally {
+    await closeAll(a);
+    await a.close();
+  }
+});
+
 test('a full-screen program shows its screen and takes keys', async () => {
   const a = await agent({ session: 'term-fullscreen' });
   try {

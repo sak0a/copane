@@ -10,7 +10,7 @@ import { Emitter } from '../core/events';
 import type { BridgeServices, TerminalInfo, TerminalService, TerminalState } from '../core/services';
 import type { AgentSession } from '../core/sessions';
 import { decideAccess, labelPrefix, matchPersisted, renamedFor, type AccessDecision, parsePolicy, parseSessionEndPolicy, type PersistedTerminal } from './access';
-import { assessActivity, looksLikeShellPrompt, type Activity } from './activity';
+import { assessActivity, looksLikeShellPrompt, QUIET_MS, stoppedForInput, type Activity } from './activity';
 import { sameCommand, TerminalMirror, type LinesResult, type Mark, type MirrorFeed, type Region } from './mirror';
 import { shortCommand } from './render';
 import { TerminalTail } from './tail';
@@ -554,6 +554,31 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
       tail: t.mirror.tail(5),
       alternate: t.mirror.alternate,
       outputSinceStart: !t.current || t.mirror.lastWriteAt > t.current.startedAt + 100,
+    });
+  }
+
+  /**
+   * Whether `execution`, the terminal's running command, has stopped to be answered (a prompt, a
+   * menu, a still full-screen program), so that waiting longer for its end is pointless. Judged
+   * from the command's own output; flushes the mirror once the output has gone quiet.
+   */
+  async stoppedForInput(t: Tracked, execution: Execution): Promise<boolean> {
+    if (execution.ended || t.current !== execution || t.handoff || t.closed) return false;
+    const quiet = () => Date.now() - Math.max(t.mirror.lastWriteAt, execution.startedAt);
+    if (quiet() < QUIET_MS) return false;
+    await t.mirror.flush();
+    if (execution.ended || t.current !== execution) return false;
+    const { beforeCursor, afterCursor } = t.mirror.cursorLine();
+    const own = this.outputOf(t, execution).lines.filter(line => line.trim() !== '');
+    return stoppedForInput({
+      running: true,
+      quietMs: quiet(),
+      beforeCursor,
+      afterCursor,
+      tail: own.slice(-4),
+      alternate: t.mirror.alternate,
+      // By its output, not by the clock: `sudo` or `read` print their prompt the moment they start.
+      outputSinceStart: own.length > 0,
     });
   }
 

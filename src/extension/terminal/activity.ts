@@ -87,6 +87,43 @@ export function assessActivity(input: ActivityInput): Activity {
   };
 }
 
+/** In a full-screen program (a pager, an editor), a wait ends once the screen has been still this long. */
+export const FULL_SCREEN_STILL_MS = 2500;
+/** At a line that only looks like a question, a wait ends once output has been quiet this long. */
+export const QUESTION_STILL_MS = 3000;
+
+/** Says in so many words that a key or an answer is expected. */
+const ASKS_FOR_KEY_RE = /\((y\/n|yes\/no|y\/N|Y\/n)\)|\[(y\/n|Y\/n|y\/N|yes\/no)\]|use arrow keys|press (enter|return|any key)|\(enter to (submit|confirm)\)/i;
+/** Stays above the choices for as long as a menu is open (the libraries that draw one erase it on an answer). */
+const OPEN_MENU_RE = /use arrow keys|\(enter to (submit|confirm)\)/i;
+/** A request for a key that ends the output so far, the cursor waiting on the line below. */
+const KEY_REQUEST_LAST_RE = /press (enter|return|any key)[^\n]{0,40}$/i;
+/** A question or a label, with an optional hint after it: "Name:", "Proceed? (y)", "... (yes/no/[fingerprint])?". */
+const QUESTION_LINE_RE = /[?:]\s*(\([^()]{1,30}\)|\[[^[\]]{1,30}\])?\s*:?\s*$/;
+
+/**
+ * Whether a wait for the running command should end now, because the command will not go on until
+ * someone answers: it asks for a key, a choice, a login or a secret (after `QUIET_MS` of silence),
+ * its last line reads like a question (after `QUESTION_STILL_MS`: a build can pause at such a line),
+ * or a full-screen program holds a still screen. Stricter than `assessActivity`, which only words
+ * a guess: ending a wait early for a command that was merely slow costs the agent another call.
+ * `tail` must be the command's own output, so an earlier command's "press Enter" does not count.
+ */
+export function stoppedForInput(input: ActivityInput): boolean {
+  if (!input.running) return false;
+  if (input.alternate) return input.quietMs >= FULL_SCREEN_STILL_MS;
+  // Nothing printed yet: what is on the cursor line is not this command's.
+  if (input.outputSinceStart === false || input.quietMs < QUIET_MS) return false;
+  const line = input.beforeCursor.trimEnd();
+  const atLine = line.trim() !== '' && input.afterCursor === '';
+  if (atLine && (ASKS_FOR_KEY_RE.test(line) || (QUESTION_RE.test(line) && (CHOICE_RE.test(line) || SECRET_RE.test(line) || LOGIN_RE.test(line))))) return true;
+  // Above the cursor only what cannot be a question already answered: "Overwrite? (y/N) y" stays
+  // on screen while the command works on.
+  const tail = input.tail.slice(-4);
+  if (OPEN_MENU_RE.test(tail.join('\n')) || KEY_REQUEST_LAST_RE.test(tail[tail.length - 1]?.trimEnd() ?? '')) return true;
+  return atLine && QUESTION_LINE_RE.test(line) && input.quietMs >= QUESTION_STILL_MS;
+}
+
 const SHELL_PROMPT_RE = /(^PS [^>]*>|[$#%>❯»➜λ])\s?$/;
 
 /** Without shell integration: does the cursor line look like a shell prompt waiting for a command? */
