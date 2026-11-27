@@ -3,7 +3,7 @@
   "displayName": "Copane",
   "description": "Shares your VS Code window with Claude Code, Codex, GitHub Copilot and other MCP agents: its integrated browser tabs and terminals, per window and per agent session, with you able to step in.",
   "publisher": "saka",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "license": "PolyForm-Shield-1.0.0",
   "engines": {
     "vscode": "^1.140.0"
