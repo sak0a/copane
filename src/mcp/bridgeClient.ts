@@ -97,6 +97,17 @@ export function sessionKeyFrom(env: NodeJS.ProcessEnv, clientName?: string): str
   return env.CLAUDE_CODE_SESSION_ID || env.COPILOT_AGENT_SESSION_ID || randomUUID();
 }
 
+/**
+ * Whether the agent was started from VS Code: in an integrated terminal (`TERM_PROGRAM`, and
+ * `COPANE_INSTANCE` once the window's extension runs), by an extension (the extension host's
+ * `VSCODE_*` variables), or by a server definition that names its window. Its window may then still
+ * be starting, so it is worth waiting for. An agent started anywhere else has no window on the way.
+ */
+export function startedFromVsCode(env: NodeJS.ProcessEnv): boolean {
+  if (env[Env.instance] || env.TERM_PROGRAM === 'vscode') return true;
+  return Object.keys(env).some(name => name.startsWith('VSCODE_') && !!env[name]);
+}
+
 export function agentKind(clientName: string): AgentKind {
   const name = clientName.toLowerCase();
   if (name.includes('claude')) return 'claude-code';
@@ -129,6 +140,8 @@ export class BridgeClient {
   /** The bridge closed our connection while its window stayed open (the user ended the session). */
   private endedByWindow = false;
   private switching = false;
+  /** The last attempt found this session's window, but could not connect to it (yet). */
+  private matchedUnanswered = false;
   private background: NodeJS.Timeout | undefined;
   private graceTimer: NodeJS.Timeout | undefined;
   private lastVisible = '[]';
@@ -159,14 +172,29 @@ export class BridgeClient {
     this.scheduleBackground();
   }
 
-  /** Connects if needed, waiting up to `waitMs` for a window to appear. */
+  /**
+   * Connects if needed, waiting up to `waitMs` for a window to appear, but only while one can be
+   * expected (`expectsWindow`): an agent started outside VS Code, with no window to find, gets its
+   * answer at once instead of after the wait, at every start and every call.
+   */
   async ensure(waitMs = 0): Promise<Connection | undefined> {
     const deadline = Date.now() + waitMs;
     for (;;) {
       const current = this.current ?? (await this.attempt());
-      if (current || this.disposed || Date.now() >= deadline) return current;
+      if (current || this.disposed || Date.now() >= deadline || !this.expectsWindow()) return current;
       await sleep(Math.min(this.timing.pollMs, Math.max(0, deadline - Date.now())));
     }
+  }
+
+  /**
+   * Whether waiting for a window can help: this session had one (it is reloading or restarting),
+   * the agent chose one, a matching window is there but did not answer yet, or the agent was
+   * started from VS Code, whose window may still be starting. Otherwise no window is on its way;
+   * one that opens later is still picked up in the background, and the agent is told
+   * (`tools/list_changed`).
+   */
+  private expectsWindow(): boolean {
+    return !!this.previous || !!this.explicit || this.matchedUnanswered || startedFromVsCode(this.options.env);
   }
 
   /** The tools the agent should see right now. */
@@ -306,10 +334,13 @@ export class BridgeClient {
       readFile: p => fs.readFileSync(p, 'utf8'),
     });
     if (!found) {
+      this.matchedUnanswered = false;
       this.lastProblem = explainNoMatch({ instances, cwd: this.options.cwd, env: this.options.env });
       return undefined;
     }
-    return this.open(found);
+    const connection = await this.open(found);
+    this.matchedUnanswered = !connection;
+    return connection;
   }
 
   private async open({ instance, matchedBy, note }: DiscoveryResult): Promise<Connection | undefined> {

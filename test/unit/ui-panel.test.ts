@@ -140,6 +140,12 @@ describe('rows', () => {
     expect(row(model, 'tab-2').icon).toEqual({ id: 'debug-pause', color: s1.color.themeColor });
   });
 
+  it('marks tabs of a session that is away', () => {
+    const model = buildPanelModel(input({ sessions: [session(1, { connected: false, away: true })], tabs: [tab('tab-1', { openedBy: 's1' })] }));
+    expect(row(model, 'tab-1').description).toBe('Claude 1 · away · idle · localhost:3000');
+    expect(row(model, 'tab-1').tooltip).toContain('(away)');
+  });
+
   it('marks tabs of a session that is reconnecting', () => {
     const model = buildPanelModel(input({ sessions: [session(1, { connected: false })], tabs: [tab('tab-1', { openedBy: 's1' })] }));
     expect(row(model, 'tab-1').description).toBe('Claude 1 · reconnecting · idle · localhost:3000');

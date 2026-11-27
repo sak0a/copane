@@ -45,8 +45,15 @@ export interface AgentSession {
   readonly cwd: string | undefined;
   readonly createdAt: number;
   lastActivityAt: number;
-  /** False while the MCP server is disconnected and the grace period is running. */
+  /** False while the MCP server is disconnected and the grace period is running, and while away. */
   connected: boolean;
+  /**
+   * A session of an earlier run of this window (before a reload or a restart of VS Code) whose agent
+   * has not come back yet. It has no time limit: it stays while it still owns a tab or a terminal,
+   * so those keep their session until the agent reconnects (its conversation is continued) or the
+   * user ends it. See `SessionManagerOptions.holds`.
+   */
+  away?: boolean;
   /** How the MCP server found this window on its latest connection (for diagnostics). */
   matchedBy?: InstanceMatch;
 }
@@ -82,6 +89,15 @@ export interface SessionManagerOptions {
    * and colors on its terminals (which survive the reload) stay true.
    */
   memory?: SessionMemory;
+  /**
+   * Whether a session still owns something in the window (a tab it opened, a terminal of its own).
+   * With it, a session restored from before a reload or restart is not ended when its agent has not
+   * reconnected after the grace period: it stays as an `away` session for as long as this is true.
+   * An agent chat reconnects only when the user continues it, long after any grace period, and its
+   * tabs and terminals would meanwhile belong to nobody. Call `reviewAway` when the answer may have
+   * changed. Without it, restored sessions end after their grace period.
+   */
+  holds?: (sessionId: string) => boolean;
 }
 
 /** What is remembered of a session, so it can be given the same identity when it comes back. */
@@ -96,8 +112,10 @@ export interface RememberedSession {
   createdAt: number;
   /** When the window last knew it (refreshed while the session exists). */
   seenAt: number;
-  /** Still a session of the window when saved (connected or within its grace period), not ended. */
+  /** Still a session of the window when saved (connected, within its grace period or away), not ended. */
   live: boolean;
+  /** It was away when saved: it comes back away, not as one that is about to reconnect. */
+  away?: boolean;
 }
 
 export interface SessionMemory {
@@ -109,6 +127,12 @@ export interface SessionMemory {
 export const RESTORE_WINDOW_MS = 10 * 60_000;
 /** Restored sessions wait at least this long for their agent to reconnect: a reload takes seconds. */
 export const RESTORE_GRACE_MS = 30_000;
+/**
+ * What a restored session owned shows up a little after the window starts (terminals are revived
+ * and recognised one by one, tabs are matched to their ids): until the window has been up this long,
+ * an away session is not ended for owning nothing.
+ */
+export const AWAY_SETTLE_MS = 60_000;
 /** Ended sessions are remembered this long, so one that comes back late can get its number back if it is free. */
 const ENDED_MEMORY_MS = 24 * 60 * 60_000;
 const ENDED_MEMORY_MAX = 30;
@@ -122,6 +146,11 @@ export class SessionManager {
   private readonly graceMs: () => number;
   private readonly now: () => number;
   private readonly memory: SessionMemory | undefined;
+  private readonly holds: ((sessionId: string) => boolean) | undefined;
+  private readonly startedAt: number;
+  /** Restored sessions whose agent has not connected in this run: these may become away. */
+  private readonly restored = new Set<string>();
+  private settleTimer: NodeJS.Timeout | undefined;
   /** Identities of ended sessions (by key), for one that comes back later. */
   private readonly ended = new Map<string, RememberedSession>();
   private heartbeat: NodeJS.Timeout | undefined;
@@ -133,7 +162,13 @@ export class SessionManager {
     this.graceMs = options.graceMs ?? (() => 20_000);
     this.now = options.now ?? Date.now;
     this.memory = options.memory;
+    this.holds = options.holds;
+    this.startedAt = this.now();
     if (this.memory) this.restore(this.memory.load());
+    if (this.restored.size > 0 && this.holds) {
+      this.settleTimer = setTimeout(() => this.reviewAway(), AWAY_SETTLE_MS + 50);
+      this.settleTimer.unref?.();
+    }
   }
 
   /** Registers a connection. Returns the existing session when the key is known (a reconnect). */
@@ -144,9 +179,11 @@ export class SessionManager {
       clearTimeout(timer);
       this.graceTimers.delete(info.sessionKey);
     }
+    this.restored.delete(info.sessionKey);
     const existing = this.sessions.get(info.sessionKey);
     if (existing) {
       existing.connected = true;
+      delete existing.away;
       existing.lastActivityAt = this.now();
       if (info.matchedBy) existing.matchedBy = info.matchedBy;
       this.changeEmitter.fire({ type: 'updated', session: existing });
@@ -196,9 +233,41 @@ export class SessionManager {
   }
 
   private startGrace(id: string, ms: number): void {
-    const timer = setTimeout(() => this.remove(id), ms);
+    const timer = setTimeout(() => this.graceOver(id), ms);
     timer.unref?.();
     this.graceTimers.set(id, timer);
+  }
+
+  /**
+   * The agent did not reconnect in time. A session of this run ends. One restored from before a
+   * reload or restart becomes away instead while it owns something (or may yet turn out to).
+   */
+  private graceOver(id: string): void {
+    this.graceTimers.delete(id);
+    const session = this.sessions.get(id);
+    if (!session) return;
+    if (!this.restored.has(id) || !this.holds || (this.settled() && !this.holds(id))) {
+      this.remove(id);
+      return;
+    }
+    session.away = true;
+    this.changeEmitter.fire({ type: 'updated', session });
+    this.save();
+  }
+
+  private settled(): boolean {
+    return this.now() - this.startedAt >= AWAY_SETTLE_MS;
+  }
+
+  /**
+   * Ends the away sessions that own nothing any more (the user closed their tabs and terminals).
+   * Call when tabs or terminals changed. Does nothing while the window is still starting.
+   */
+  reviewAway(): void {
+    if (!this.holds || !this.settled()) return;
+    for (const session of [...this.sessions.values()]) {
+      if (session.away && !this.holds(session.id)) this.remove(session.id);
+    }
   }
 
   /** Ends a session immediately (user action). */
@@ -210,7 +279,9 @@ export class SessionManager {
     this.graceTimers.delete(id);
     this.connections.delete(id);
     this.sessions.delete(id);
+    this.restored.delete(id);
     session.connected = false;
+    delete session.away;
     if (this.memory) {
       this.ended.set(id, { ...this.remember(session), live: false });
       this.pruneEnded();
@@ -246,6 +317,8 @@ export class SessionManager {
   dispose(): void {
     for (const timer of this.graceTimers.values()) clearTimeout(timer);
     this.graceTimers.clear();
+    if (this.settleTimer) clearTimeout(this.settleTimer);
+    this.settleTimer = undefined;
     if (this.heartbeat) clearInterval(this.heartbeat);
     this.heartbeat = undefined;
     this.changeEmitter.dispose();
@@ -254,10 +327,13 @@ export class SessionManager {
   // ------------------------------------------------------------------ memory across reloads
 
   /**
-   * Brings back the sessions of the window's previous extension host (a reload, or VS Code restarted
-   * within RESTORE_WINDOW_MS): as disconnected sessions in their grace period, with the same label,
-   * badge, color and title, so their number is not given to another session while they reconnect.
-   * Older or ended ones are only remembered, to get their number back later if it is still free.
+   * Brings back the sessions of the window's previous extension host, with the same label, badge,
+   * color and title. After a reload, or VS Code restarted within RESTORE_WINDOW_MS, as disconnected
+   * sessions in their grace period, so their number is not given to another session while they
+   * reconnect; one whose agent does not reconnect then becomes away (`graceOver`). Sessions that
+   * were away already, or of a window closed for longer (with `holds`), come back away at once:
+   * their agents are not about to reconnect, but their terminals and tabs may still be there.
+   * Ended ones are only remembered, to get their number back later if it is still free.
    */
   private restore(remembered: readonly RememberedSession[]): void {
     const now = this.now();
@@ -265,7 +341,8 @@ export class SessionManager {
     for (const r of remembered) {
       if (!r || typeof r.id !== 'string' || !r.client || typeof r.number !== 'number') continue;
       const recent = now - r.seenAt < RESTORE_WINDOW_MS;
-      if (r.live && recent && grace > 0 && !this.sessions.has(r.id) && !this.numberTaken(r.client.kind, r.number)) {
+      const away = !!this.holds && (r.away === true || !recent);
+      if (r.live && (recent || away) && grace > 0 && !this.sessions.has(r.id) && !this.numberTaken(r.client.kind, r.number)) {
         const session = this.build({
           id: r.id,
           client: r.client,
@@ -279,7 +356,9 @@ export class SessionManager {
           matchedBy: undefined,
         });
         this.sessions.set(session.id, session);
-        this.startGrace(session.id, Math.max(grace, RESTORE_GRACE_MS));
+        this.restored.add(session.id);
+        if (away) session.away = true;
+        else this.startGrace(session.id, Math.max(grace, RESTORE_GRACE_MS));
       } else if (now - r.seenAt < ENDED_MEMORY_MS) {
         this.ended.set(r.id, { ...r, live: false });
       }
@@ -312,6 +391,7 @@ export class SessionManager {
       createdAt: s.createdAt,
       seenAt: this.now(),
       live: true,
+      ...(s.away ? { away: true } : {}),
     };
   }
 

@@ -1,5 +1,6 @@
 // Minimal symmetric JSON-RPC 2.0 peer over a byte stream, framed as one JSON object per line.
 // Used on both ends of the socket between the MCP server and the bridge.
+import { StringDecoder } from 'node:string_decoder';
 import { ErrorCodes, Methods } from './protocol';
 
 export interface RpcStream {
@@ -43,7 +44,13 @@ interface Pending {
 
 export class RpcPeer {
   private nextId = 1;
-  private buffer = '';
+  /**
+   * Decodes the stream's bytes: a socket delivers a long message in chunks (8 kB on macOS), and a
+   * character of several bytes cut by a chunk boundary must wait for its other bytes.
+   */
+  private readonly decoder = new StringDecoder('utf8');
+  /** The pieces received so far of the line whose newline has not arrived yet. */
+  private partial: string[] = [];
   private closed = false;
   private readonly pending = new Map<number, Pending>();
   private readonly running = new Map<number | string, AbortController>();
@@ -52,7 +59,7 @@ export class RpcPeer {
   private readonly closeListeners: Array<() => void> = [];
 
   constructor(private readonly stream: RpcStream) {
-    stream.on('data', chunk => this.onData(typeof chunk === 'string' ? chunk : chunk.toString('utf8')));
+    stream.on('data', chunk => this.onData(typeof chunk === 'string' ? chunk : this.decoder.write(chunk)));
     stream.on('close', () => this.handleClose());
     stream.on('error', () => this.handleClose());
     this.notificationHandlers.set(Methods.cancel, (p: { id?: number | string }) => {
@@ -130,11 +137,15 @@ export class RpcPeer {
   }
 
   private onData(text: string): void {
-    this.buffer += text;
+    // Only the new text is searched and the pieces of a line are joined once, so a long message
+    // (a screenshot) costs time in proportion to its size, however many chunks it arrives in.
+    let start = 0;
     let newline: number;
-    while ((newline = this.buffer.indexOf('\n')) >= 0) {
-      const line = this.buffer.slice(0, newline).trim();
-      this.buffer = this.buffer.slice(newline + 1);
+    while ((newline = text.indexOf('\n', start)) >= 0) {
+      const end = text.slice(start, newline);
+      const line = (this.partial.length ? this.partial.join('') + end : end).trim();
+      this.partial = [];
+      start = newline + 1;
       if (!line) continue;
       let message: any;
       try {
@@ -144,6 +155,7 @@ export class RpcPeer {
       }
       this.dispatch(message);
     }
+    if (start < text.length) this.partial.push(start ? text.slice(start) : text);
   }
 
   private dispatch(message: any): void {

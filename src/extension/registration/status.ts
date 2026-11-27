@@ -90,6 +90,8 @@ export interface StatusData {
     title: string | undefined;
     client: string;
     connected: boolean;
+    /** Kept from before a reload or restart; its agent has not reconnected. */
+    away?: boolean;
     matchedBy: InstanceMatch | undefined;
     pid: number | undefined;
     cwd: string | undefined;
@@ -233,7 +235,7 @@ export function renderStatus(d: StatusData): string {
   if (d.sessions.length === 0) line('- None connected. Start a new agent session after registering (a Claude Code or Copilot chat, or `claude`, `codex` or `copilot` in a terminal); running sessions do not reload their MCP servers.');
   for (const s of d.sessions) {
     const how = s.matchedBy ? MATCH[s.matchedBy] : 'unknown';
-    line(`- ${s.label}${s.title ? ` · ${s.title}` : ''} — ${s.client}, ${s.connected ? 'connected' : 'disconnected (grace period)'}; found this window: ${how}${s.pid ? `; pid ${s.pid}` : ''}${s.cwd ? `; cwd ${s.cwd}` : ''}`);
+    line(`- ${s.label}${s.title ? ` · ${s.title}` : ''} — ${s.client}, ${s.connected ? 'connected' : s.away ? 'away (from before a reload or restart; its agent has not reconnected)' : 'disconnected (grace period)'}; found this window: ${how}${s.pid ? `; pid ${s.pid}` : ''}${s.cwd ? `; cwd ${s.cwd}` : ''}`);
   }
   line();
 

@@ -1037,6 +1037,7 @@ class Registration {
         title: s.title,
         client: `${s.client.name}${s.client.version ? ` ${s.client.version}` : ''}`,
         connected: s.connected,
+        ...(s.away ? { away: true } : {}),
         matchedBy: s.matchedBy,
         pid: s.pid,
         cwd: s.cwd,

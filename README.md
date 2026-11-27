@@ -260,6 +260,11 @@ VS Code has no real tab groups for extensions, so this is built on pinned tabs:
 A session is identified by Claude Code's conversation id, so it keeps its identity when the window
 reloads (the server reconnects by itself and calls wait for the window to come back) and when you
 resume the conversation with `claude --resume`. Sub-agents of a conversation share its session.
+
+After a window reload or a restart of VS Code, a session whose agent has not reconnected yet is
+shown as **away** and keeps its tabs and terminals: a chat reconnects only when you continue it. It
+picks up where it was when its conversation goes on (same label, color, terminals, current tab). An
+away session ends when you end it (**End Session**) or close its tabs and terminals.
 Windows are independent: each has its own sessions, tabs and terminals.
 
 ### Codex
@@ -468,7 +473,7 @@ Copane's entries and nothing else, and Copane does not add them back until you r
 | `copane.browser.agentDownloads` | `ask` | Whether agents' actions may download files: `ask`, `allow`, `deny`. |
 | `copane.browser.certificateErrors` | `ask` | What to do for agents on a site with an untrusted certificate: `ask` or `block`. |
 | `copane.ui.collapsedTabSizing` | `ask` | Whether collapsing a session's tabs may set `workbench.editor.pinnedTabSizing` to `compact` (applies to all pinned tabs): `ask` once, `compact`, or `keep` your size. |
-| `copane.sessionGraceSeconds` | `20` | How long a disconnected session keeps its tabs and terminals, so it can reconnect after a reload. |
+| `copane.sessionGraceSeconds` | `20` | How long a disconnected session keeps its tabs and terminals, so it can reconnect after a reload. A session from before a reload or restart that still owns tabs or terminals stays after that, as away. `0` turns both off. |
 | `copane.tools.profile` | `full` | Which tools agents get. `core` keeps the everyday ones (pages, tabs, dialogs, hand-off, terminals) and leaves out the dev and test extras (`browser_emulate`, `browser_route`, `browser_audit`, `browser_check_change`, `browser_inspect`, `browser_export_test`, `browser_profiles`) and rarely used tools (`browser_hover`, `browser_drag`, `browser_upload_file`, `browser_downloads`, `session_info`): 28 instead of 40 tools, about a third less context in every conversation. Useful for agents that load every tool up front (Copilot, Codex) and for VS Code's limit of 128 tools per request. Connected agents get the new list at once. |
 | `copane.tools.disabled` | `[]` | Tool names agents do not get, on top of the profile, e.g. `["browser_route"]`. A call to one is refused with a message saying so. `window_status` and `window_select` always stay; unknown names are ignored. |
 | `copane.usageNotesInResults` | `true` | Give Copilot sessions Copane's usage notes with their first tool result (Copilot does not pass server instructions on). Turn it off if you start Copilot with `--allow-all-mcp-server-instructions`, so the notes do not arrive twice. |

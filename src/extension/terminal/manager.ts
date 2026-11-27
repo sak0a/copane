@@ -10,7 +10,7 @@ import { Emitter } from '../core/events';
 import type { BridgeServices, TerminalInfo, TerminalService, TerminalState } from '../core/services';
 import type { AgentSession } from '../core/sessions';
 import { decideAccess, labelPrefix, matchPersisted, renamedFor, type AccessDecision, parsePolicy, parseSessionEndPolicy, type PersistedTerminal } from './access';
-import { assessActivity, looksLikeShellPrompt, type Activity } from './activity';
+import { assessActivity, looksLikeShellPrompt, QUIET_MS, stoppedForInput, type Activity } from './activity';
 import { sameCommand, TerminalMirror, type LinesResult, type Mark, type MirrorFeed, type Region } from './mirror';
 import { shortCommand } from './render';
 import { TerminalTail } from './tail';
@@ -170,6 +170,8 @@ export class Tracked {
 }
 
 const STATE_KEY = 'copane.terminals.v1';
+/** How long a terminal found shortly after activation may take to get the name it had before a restart. */
+const REVIVED_NAME_WAIT_MS = 3000;
 const SHELL_INTEGRATION_WAIT_MS = 12_000;
 const FIRST_PROMPT_WAIT_MS = 2_000;
 /** How long a region of output may come before its execution and still be paired with it by order. */
@@ -557,6 +559,31 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
     });
   }
 
+  /**
+   * Whether `execution`, the terminal's running command, has stopped to be answered (a prompt, a
+   * menu, a still full-screen program), so that waiting longer for its end is pointless. Judged
+   * from the command's own output; flushes the mirror once the output has gone quiet.
+   */
+  async stoppedForInput(t: Tracked, execution: Execution): Promise<boolean> {
+    if (execution.ended || t.current !== execution || t.handoff || t.closed) return false;
+    const quiet = () => Date.now() - Math.max(t.mirror.lastWriteAt, execution.startedAt);
+    if (quiet() < QUIET_MS) return false;
+    await t.mirror.flush();
+    if (execution.ended || t.current !== execution) return false;
+    const { beforeCursor, afterCursor } = t.mirror.cursorLine();
+    const own = this.outputOf(t, execution).lines.filter(line => line.trim() !== '');
+    return stoppedForInput({
+      running: true,
+      quietMs: quiet(),
+      beforeCursor,
+      afterCursor,
+      tail: own.slice(-4),
+      alternate: t.mirror.alternate,
+      // By its output, not by the clock: `sudo` or `read` print their prompt the moment they start.
+      outputSinceStart: own.length > 0,
+    });
+  }
+
   /** What is degraded in this terminal, for tool results. Empty when everything works. */
   limitations(t: Tracked): string[] {
     const notes: string[] = [];
@@ -751,8 +778,22 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
   private async identify(t: Tracked): Promise<void> {
     const pid = await Promise.race([Promise.resolve(t.terminal.processId).catch(() => undefined), sleep(3000).then(() => undefined)]);
     t.pid = pid;
-    const claimed = new Set(this.all().map(x => x.id));
-    const record = matchPersisted(this.persisted, claimed, pid, t.terminal.name);
+    const unclaimed = () => {
+      const claimed = new Set(this.all().map(x => x.id));
+      return this.persisted.filter(r => !claimed.has(r.id));
+    };
+    const match = () => matchPersisted(this.persisted, new Set(this.all().map(x => x.id)), pid, t.terminal.name);
+    let record = match();
+    // After a restart of VS Code a revived terminal has a new process, so only its name says which
+    // one it was, and VS Code gives a revived terminal its name back a moment after it opens: while
+    // remembered terminals are still unaccounted for, shortly after activation, wait for the name.
+    const nameAtFirst = t.terminal.name;
+    const deadline = Date.now() + REVIVED_NAME_WAIT_MS;
+    while (!record && !t.closed && Date.now() < deadline && Date.now() - this.activatedAt < 60_000 && unclaimed().length > 0) {
+      await sleep(100);
+      record = match();
+    }
+    if (record && t.terminal.name !== nameAtFirst) this.services.log.info(`recognised ${record.id} once VS Code had named it "${t.terminal.name}" (it opened as "${nameAtFirst}")`);
     if (record) {
       t.id = record.id;
       t.origin = 'agent';

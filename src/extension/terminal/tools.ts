@@ -19,6 +19,9 @@ const maxCharsArg = z
   .optional()
   .describe(`Default ${DEFAULT_MAX_CHARS}. Longer output keeps its start and end and names the cut lines.`);
 
+/** How often a wait for a command looks whether it has stopped to be answered. */
+const STOP_CHECK_MS = 500;
+
 /** Per execution: what each session was already told about it while it ran (see statusOf). */
 const told = new WeakMap<Execution, Set<string>>();
 function toldOf(execution: Execution): Set<string> {
@@ -106,6 +109,34 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
 
   const readCall = (t: Tracked, fromLine: number) => `terminal_read {"terminal":"${t.id}","what":"command","from_line":${fromLine}}`;
 
+  /** One stop of the running command (it has printed nothing since), as a session is told of it. */
+  const stopKey = (t: Tracked, session: AgentSession) => `${session.id}\0stopped\0${t.mirror.lastWriteAt}`;
+
+  /**
+   * Whether the running command has stopped to be answered (a prompt, a menu, a still full-screen
+   * program) and this session has not been told of that stop yet. A wait ends early on it: the
+   * command would not end by itself. Once told, a session that waits anyway (for the user to
+   * answer in the terminal, say) waits its full time.
+   */
+  async function newlyStopped(t: Tracked, execution: Execution, session: AgentSession): Promise<boolean> {
+    if (toldOf(execution).has(stopKey(t, session))) return false;
+    return manager.stoppedForInput(t, execution);
+  }
+
+  /** Waits for the command to end, at most `ms`; also ends ('stopped') when it stops to be answered. */
+  async function waitForEnd(t: Tracked, execution: Execution, ms: number, ctx: ToolContext): Promise<'ended' | 'stopped' | 'timeout' | 'aborted'> {
+    const deadline = Date.now() + ms;
+    for (;;) {
+      const left = deadline - Date.now();
+      if (execution.ended) return 'ended';
+      if (left <= 0) return 'timeout';
+      const waited = await raceTimeout(execution.done, Math.min(left, STOP_CHECK_MS), ctx.signal);
+      if (waited === 'aborted') return 'aborted';
+      if (waited !== 'timeout') return 'ended';
+      if (await newlyStopped(t, execution, ctx.session)) return 'stopped';
+    }
+  }
+
   /**
    * What the running command is doing, in full the first time a session hears it for this execution
    * (and each time it changes kind, e.g. to a full-screen program), else in its brief form.
@@ -114,6 +145,8 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
     const activity = manager.activity(t);
     if (!session) return activity.summary;
     const heard = toldOf(execution);
+    // Told that the command waits for an answer: a later wait does not end early for the same stop.
+    if (activity.kind === 'waiting-for-input' || activity.kind === 'full-screen') heard.add(stopKey(t, session));
     const key = `${session.id}\0${activity.kind}`;
     if (heard.has(key)) return activity.brief;
     heard.add(key);
@@ -259,7 +292,8 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
         if (!execution) {
           return withNotes(t, [note, `Typed \`${shortCommand(args.command)}\` into ${t.id} and pressed Enter. Its result cannot be observed here; ask the user to look at the terminal if it matters.`], ctx.session);
         }
-        const waited = await raceTimeout(execution.done, (args.timeout_seconds ?? 60) * 1000, ctx.signal);
+        // Ends before the timeout when the command stops at a question: it would only sit there.
+        const waited = await waitForEnd(t, execution, (args.timeout_seconds ?? 60) * 1000, ctx);
         if (waited === 'aborted') throw new ToolError('cancelled', `Cancelled. The command keeps running in ${t.id}.`);
         await t.mirror.flush();
         const block = outputBlock(t, execution, args.max_chars);
@@ -338,6 +372,8 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
         }
         const mark = t.marks.get(ctx.session.id);
         let found = false;
+        let stopped = false;
+        let checkedStopAt = started;
         for (;;) {
           await t.mirror.flush();
           // A full-screen program draws on its own screen, not into the output: look there too.
@@ -348,6 +384,15 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
           }
           if (!pattern && (!execution || execution.ended)) break;
           if (t.closed || ctx.signal.aborted || Date.now() >= deadline) break;
+          // The command stopped at a question this session has not heard of: neither its end nor
+          // the text will come before someone answers.
+          if (execution && !execution.ended && Date.now() - checkedStopAt >= STOP_CHECK_MS) {
+            checkedStopAt = Date.now();
+            if (await newlyStopped(t, execution, ctx.session)) {
+              stopped = true;
+              break;
+            }
+          }
           await sleep(200);
         }
         if (ctx.signal.aborted) throw new ToolError('cancelled', 'Cancelled.');
@@ -356,6 +401,7 @@ export function terminalTools(services: BridgeServices, manager: TerminalManager
         if (found) headline = `"${args.for_text}" appeared in ${t.id} after ${took}.`;
         else if (t.closed) headline = `${t.id} was closed while waiting.`;
         else if (!pattern && execution?.ended) headline = finishedLine(t, execution, ctx.session);
+        else if (stopped) headline = `Stopped waiting after ${took}: the command needs an answer first.`;
         else if (pattern) headline = `"${args.for_text}" did not appear within ${took}.${t.current ? '' : ' (Nothing is running in the terminal.)'}`;
         else headline = `Still running after waiting ${took}.`;
         return withNotes(t, [headline, ...newOutputParts(t, ctx.session, 'New output:', args.max_chars), statusOf(t, ctx.session)], ctx.session);

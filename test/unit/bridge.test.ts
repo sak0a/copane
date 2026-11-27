@@ -156,6 +156,50 @@ describe('RpcPeer', () => {
     const peer = await connect();
     await expect(peer.request('nope')).rejects.toMatchObject({ code: ErrorCodes.methodNotFound });
   });
+
+  /** A stream whose incoming bytes the test delivers, in the chunks it chooses. */
+  function fakeStream() {
+    const listeners: Array<(chunk: Buffer | string) => void> = [];
+    const written: string[] = [];
+    return {
+      written,
+      deliver: (chunk: Buffer | string) => listeners.forEach(l => l(chunk)),
+      stream: {
+        write: (data: string) => written.push(data),
+        on: (event: string, listener: (...args: any[]) => void) => {
+          if (event === 'data') listeners.push(listener);
+        },
+        destroy: () => {},
+      },
+    };
+  }
+
+  it('keeps characters of several bytes whole when a chunk boundary cuts them', () => {
+    // A socket delivers a long message in chunks of bytes (8 kB on macOS), wherever they fall.
+    const text = 'größe 漢字 — € 🙂 '.repeat(40);
+    const bytes = Buffer.from(`${JSON.stringify({ jsonrpc: '2.0', method: 'note', params: { text } })}\n`);
+    for (const size of [1, 2, 3, 5, 7, 64]) {
+      const { stream, deliver } = fakeStream();
+      const received: string[] = [];
+      new RpcPeer(stream).onNotification('note', p => received.push(p.text));
+      for (let i = 0; i < bytes.length; i += size) deliver(bytes.subarray(i, i + size));
+      expect(received, `in chunks of ${size} bytes`).toEqual([text]);
+    }
+  });
+
+  it('reads several messages from one chunk and one message from many', () => {
+    const { stream, deliver } = fakeStream();
+    const received: number[] = [];
+    new RpcPeer(stream).onNotification('n', p => received.push(p.i));
+    const line = (i: number, pad = '') => `${JSON.stringify({ jsonrpc: '2.0', method: 'n', params: { i, pad } })}\n`;
+    deliver(Buffer.from(line(1) + line(2) + '\n' + line(3).slice(0, 10)));
+    expect(received).toEqual([1, 2]);
+    deliver(line(3).slice(10) + 'not json\n');
+    const long = line(4, 'x'.repeat(100_000));
+    for (let i = 0; i < long.length; i += 8192) deliver(Buffer.from(long.slice(i, i + 8192)));
+    deliver(line(5));
+    expect(received).toEqual([1, 2, 3, 4, 5]);
+  });
 });
 
 describe('usage notes for clients that drop server instructions', () => {

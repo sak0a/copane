@@ -16,6 +16,11 @@ session is using what, and can take over at any moment.
 - **MCP server** (`src/mcp/`): spawned by the agent, one per agent session. Finds its window
   (`discovery.ts`: terminal env var → extension-host ancestor → cwd inside a workspace folder → cwd in
   a git worktree whose main checkout is in a workspace folder → only window), connects to that window's socket, sends `hello`, then forwards `tools/list` and `tools/call`.
+  `initialize` (3 s) and a tool call (4 s) wait for a window only while one can be expected
+  (`BridgeClient.expectsWindow`): the session had one, the agent chose one, a matching window has not
+  answered yet, or the agent was started from VS Code (`COPANE_INSTANCE`, `TERM_PROGRAM=vscode`, any
+  `VSCODE_*` variable), whose window may still be starting. An agent started elsewhere with no window
+  to find is answered at once; a window that opens later is found by the background poll.
   Registered with agents under the name `copane`, so tools appear as `mcp__copane__browser_click`.
 - **VS Code chat conversations** (`src/mcp/conversations.ts`): VS Code's own MCP client runs one
   server process per window for all its chats and names the chat in each `tools/call` as
@@ -43,7 +48,9 @@ session is using what, and can take over at any moment.
   way to recover from a wrong window) and `debug_*` in a dev host. A new tool is in `core` unless it
   is added to `CORE_PROFILE_EXCLUDES`.
 - **Wire protocol** (`src/shared/protocol.ts`): JSON-RPC, one object per line. Tool definitions live only
-  in the extension, so the MCP server never needs to know them.
+  in the extension, so the MCP server never needs to know them. The peer (`src/shared/jsonrpc.ts`)
+  decodes the socket's bytes with a `StringDecoder`: a long message arrives in chunks (8 kB on macOS)
+  that can cut a character of several bytes in two.
 - **Sessions** (`core/sessions.ts`): each connection presents a `sessionKey`; reconnecting with the same
   key within the grace period resumes the session. A session has a label ("Claude 2"), a badge ("C2"),
   a color and an optional title the agent sets (`session_set_title`). These are what the user sees on
@@ -52,6 +59,20 @@ session is using what, and can take over at any moment.
   ones in their grace period (at least 30 s), so each gets its label, color and title back whatever
   order the agents reconnect in, and no new session takes their number meanwhile. An ended session
   that returns later gets its color and title back, and its number if it is still free.
+- **Away sessions**: an agent chat reconnects after a reload or restart only when the user continues
+  it, and a CLI agent that ran in a terminal is gone, so a restored session whose agent has not
+  reconnected after the grace period is not ended: it becomes *away* (`AgentSession.away`), with no
+  time limit, for as long as it owns something (`SessionManagerOptions.holds`, wired in
+  `extension.ts`: a tab it opened or an open terminal of its own). Its tabs and terminals stay its
+  own in the views, the marks and the access rules (another session needs the user's consent), and
+  its number stays taken. It ends when the user ends it or closes what it owns (`reviewAway`, on
+  every tab or terminal change), and `copane.terminal.onSessionEnd` applies only then. Sessions that
+  were away when the window closed, or of a window closed for longer than 10 minutes, come back
+  away at once. For the first minute after activation (`AWAY_SETTLE_MS`) none is ended for owning
+  nothing, because revived terminals and restored tabs turn up one by one; the views do not list
+  an away session that owns nothing. A session that connected in this run and disconnects ends
+  after the grace period as before. The browser keeps a session's current tab across its end while
+  that tab is its own and open, so a session that comes back goes on in it.
 - **Tools** (`core/tools.ts`): modules define tools with `defineTool` (zod input, handler) and register
   them. Handlers get `{ session, signal, log }`, return text or content blocks, and throw `ToolError`
   for expected failures. A call with an argument name the tool does not take is refused, naming the
@@ -252,6 +273,13 @@ argv.json editor. Not verified for real: Windows paths (`/c:/Users/...`), WSL it
   the text a person would see (control sequences interpreted, not just stripped).
 - A long-running command returns after a timeout with what it printed so far and stays running; the
   agent reads more, waits, sends input or interrupts.
+- A command that stops to be answered returns before the timeout (`stoppedForInput` in
+  `terminal/activity.ts`, checked every 500 ms by `terminal_run` and `terminal_wait`): a request for
+  a key, a choice, a login or a secret after 1.2 s of silence, a line that only reads like a question
+  after 3 s, a full-screen program with a still screen after 2.5 s. Judged from the command's own
+  output, and stricter than the wording of `assessActivity`: an answered question still on screen, a
+  progress line or a prompt character alone do not count. A session is told of each stop once; a
+  wait after that runs its full time (the user may be about to answer in the terminal).
 - **Hand-off**: `terminal_request_user_input` shows the terminal and tells the user what is needed
   (login, password, 2FA); the agent never sees what the user types beyond the terminal's own output,
   and resumes when the command finishes or the user says they are done.
@@ -265,6 +293,11 @@ argv.json editor. Not verified for real: Windows paths (`/c:/Users/...`), WSL it
   an agent used after 60 s, so a waiting tool can still report). The mirror feeds xterm.js a slice at
   a time; under a backlog it parses at most about a third of the time and skips lines that would
   scroll out of the scrollback anyway, keeping shell-integration markers and screen modes.
+- **After a restart of VS Code** a revived terminal has a new process, so it is matched to its
+  remembered record by name (`matchPersisted`), and VS Code gives a revived terminal its name a
+  moment after it opens (it opens as ""): while remembered terminals are unaccounted for, in the
+  first minute after activation, `identify` waits up to 3 s for the name before taking a terminal
+  for the user's own.
 - **Names**: an agent terminal is named after its session's label. Labels come back after a reload
   (see Sessions); when a session returns under another label, its terminals are renamed as soon as
   they are the active terminal (VS Code can rename only the active terminal, and cannot change a

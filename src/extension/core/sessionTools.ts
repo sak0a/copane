@@ -25,7 +25,7 @@ export function activateSessionTools(services: BridgeServices): void {
               otherSessions: sessions
                 .list()
                 .filter(s => s.id !== ctx.session.id)
-                .map(s => ({ label: sessionDisplayName(s), connected: s.connected })),
+                .map(s => ({ label: sessionDisplayName(s), connected: s.connected, ...(s.away ? { away: true } : {}) })),
             })),
           ],
       }),

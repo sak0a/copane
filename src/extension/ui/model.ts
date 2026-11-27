@@ -102,7 +102,13 @@ const DISABLED = 'disabledForeground';
 
 // ------------------------------------------------------------------------------------- building
 
-export function buildViewModel(input: UiInput): ViewModel {
+export function buildViewModel(given: UiInput): ViewModel {
+  // An away session that owns nothing is about to end (core/sessions.ts keeps it while the window
+  // is still starting, because its terminals may yet be revived): not listed, not counted.
+  const input: UiInput = {
+    ...given,
+    sessions: given.sessions.filter(s => !s.away || given.tabs.some(t => tabBelongsTo(t, s.id)) || given.terminals.some(t => terminalBelongsTo(t, s.id))),
+  };
   const sessionsById = new Map(input.sessions.map(s => [s.id, s]));
   const name = (id: string | undefined) => (id ? (sessionsById.get(id)?.label ?? 'an ended session') : undefined);
   const tabs = [...input.tabs].sort((a, b) => naturalCompare(a.id, b.id));
@@ -141,8 +147,7 @@ export function buildViewModel(input: UiInput): ViewModel {
     pausedCount ? plural(pausedCount, 'tab is', 'tabs are') + ' paused' : undefined,
   ].filter(isString);
 
-  const connected = input.sessions.filter(s => s.connected).length;
-  const disconnected = input.sessions.length - connected;
+  const { connected, reconnecting, away } = countSessions(input.sessions);
   return {
     roots,
     nodes,
@@ -151,10 +156,22 @@ export function buildViewModel(input: UiInput): ViewModel {
     status: buildStatus(input, attention, { terminals: waitingTerminals, tabs: waitingTabs }, pausedCount, sessionsById),
     badge: attention.length ? { value: attention.length, tooltip: badgeParts.join(', ') } : undefined,
     viewDescription: input.sessions.length
-      ? [connected ? `${connected} connected` : undefined, disconnected ? `${disconnected} reconnecting` : undefined].filter(isString).join(', ')
+      ? [connected ? `${connected} connected` : undefined, reconnecting ? `${reconnecting} reconnecting` : undefined, away ? `${away} away` : undefined].filter(isString).join(', ')
       : undefined,
   };
 }
+
+/** Connected, disconnected within the grace period, and away (kept until their agent comes back). */
+function countSessions(sessions: readonly AgentSession[]): { connected: number; reconnecting: number; away: number } {
+  const connected = sessions.filter(s => s.connected).length;
+  const away = sessions.filter(s => !s.connected && s.away).length;
+  return { connected, reconnecting: sessions.length - connected - away, away };
+}
+
+/** Explains an away session to the user, in a tooltip. */
+const AWAY_EXPLAINED =
+  'Away: its agent has not reconnected since this window was reloaded or VS Code restarted. It keeps its tabs and terminals, and reconnects when its conversation is continued. ' +
+  'It ends when you end it, or close its tabs and terminals.';
 
 /** The tree id of a session row. */
 export function sessionNodeId(sessionId: string, hasChildren: boolean): string {
@@ -202,13 +219,15 @@ function sessionNode(
   const waitingTabs = tabs.filter(t => t.request).length;
   const waiting = waitingTerminals + waitingTabs;
   const paused = tabs.filter(t => t.paused && !t.request).length;
-  const state = !session.connected ? 'disconnected' : waiting ? 'needs you' : undefined;
+  const state = session.away ? 'away' : !session.connected ? 'disconnected' : waiting ? 'needs you' : undefined;
   const contents = [tabs.length ? plural(tabs.length, 'tab') : undefined, terminals.length ? plural(terminals.length, 'terminal') : undefined]
     .filter(isString)
     .join(', ');
   const connection = session.connected
     ? 'Connected'
-    : `Disconnected. If it does not reconnect within ${graceSeconds} s (for example after a window reload), the session ends and its tabs and terminals are released.`;
+    : session.away
+      ? AWAY_EXPLAINED
+      : `Disconnected. If it does not reconnect within ${graceSeconds} s, the session ends and its tabs and terminals are released; one from before a window reload or restart is kept, as away, while it has tabs or terminals.`;
   const client = session.client.version ? `${session.client.name} ${session.client.version}` : session.client.name;
   const tooltip = [
     `$(${session.connected ? 'circle-filled' : 'circle-outline'}) **${md(session.label)}**${session.title ? ` · ${md(session.title)}` : ''}`,
@@ -235,6 +254,7 @@ function sessionNode(
   const flags = [
     'session',
     session.connected ? 'connected' : 'disconnected',
+    session.away ? 'away' : undefined,
     tabs.some(t => !t.paused) ? 'hasUnpausedTabs' : undefined,
     paused ? 'hasPausedTabs' : undefined,
     collapsed !== undefined ? 'collapsed' : tabs.length ? 'collapsible' : undefined,
@@ -255,7 +275,7 @@ function sessionNode(
     accessibilityLabel: [
       `${session.label} agent session`,
       session.title,
-      session.connected ? 'connected' : 'disconnected, waiting to reconnect',
+      session.connected ? 'connected' : session.away ? 'away, its agent has not reconnected' : 'disconnected, waiting to reconnect',
       waitingTerminals ? `${plural(waitingTerminals, 'terminal')} waiting for you` : undefined,
       waitingTabs ? `${plural(waitingTabs, 'tab')} waiting for you` : undefined,
       collapsed !== undefined ? `${collapsed ? plural(collapsed, 'tab') : 'tabs'} collapsed` : undefined,
@@ -475,8 +495,7 @@ function buildStatus(
 ): StatusModel {
   const waiting = waitingBy.terminals + waitingBy.tabs;
   const total = input.sessions.length;
-  const connected = input.sessions.filter(s => s.connected).length;
-  const disconnected = total - connected;
+  const { connected, reconnecting: disconnected, away } = countSessions(input.sessions);
   if (total === 0) {
     return { visible: false, text: '$(robot) 0', tooltip: '**Copane**\n\nNo agent session is connected to this window.', accessibilityLabel: 'Copane: no agent sessions', warning: false };
   }
@@ -495,7 +514,7 @@ function buildStatus(
   const sessionLines = input.sessions.map(s => {
     const parts = [
       s.title ? md(s.title) : undefined,
-      s.connected ? undefined : 'disconnected',
+      s.connected ? undefined : s.away ? 'away' : 'disconnected',
       ...(() => {
         const tabs = input.tabs.filter(t => tabBelongsTo(t, s.id)).length;
         const terms = input.terminals.filter(t => terminalBelongsTo(t, s.id)).length;
@@ -510,7 +529,7 @@ function buildStatus(
     attention.length ? `[Go to What Needs You](command:${Cmd.showAttention})` : undefined,
   ].filter(isString);
   const tooltip = [
-    `**Copane** · ${plural(connected, 'session')} connected${disconnected ? `, ${disconnected} reconnecting` : ''}`,
+    `**Copane** · ${plural(connected, 'session')} connected${disconnected ? `, ${disconnected} reconnecting` : ''}${away ? `, ${away} away` : ''}`,
     sessionLines.join('  \n'),
     attentionLines.length ? attentionLines.join('  \n') : undefined,
     links.join(' · '),
@@ -521,6 +540,7 @@ function buildStatus(
   const accessibilityLabel = [
     `Copane: ${plural(connected, 'agent session')} connected`,
     disconnected ? `${disconnected} reconnecting` : undefined,
+    away ? `${away} away` : undefined,
     waitingBy.terminals ? `${plural(waitingBy.terminals, 'terminal')} waiting for you` : undefined,
     waitingBy.tabs ? `${plural(waitingBy.tabs, 'tab')} waiting for you` : undefined,
     paused ? `${plural(paused, 'tab')} paused` : undefined,

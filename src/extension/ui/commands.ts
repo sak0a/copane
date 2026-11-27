@@ -119,7 +119,7 @@ export function registerUiCommands(services: BridgeServices, state: UiState, tre
     const picked = await vscode.window.showQuickPick(
       list.map(s => ({
         label: `$(${s.connected ? 'circle-filled' : 'circle-outline'}) ${s.label}`,
-        description: [s.title, s.connected ? undefined : 'disconnected'].filter(Boolean).join(' · '),
+        description: [s.title, s.connected ? undefined : s.away ? 'away' : 'disconnected'].filter(Boolean).join(' · '),
         detail: sessionContents(s),
         id: s.id,
       })),
