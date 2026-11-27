@@ -242,6 +242,17 @@ describe('usage notes for clients that drop server instructions', () => {
     expect(texts(await call(peer, 'shot'))).toEqual(['a picture']);
   });
 
+  it('keeps them for the next result when the first one is as large as Copilot takes', async () => {
+    await restart();
+    // A full page: with the notes it would pass the size above which Copilot hands its model a file.
+    tools.register([defineTool({ name: 'page', description: 'x', input: {}, handler: () => 'x'.repeat(19_800) })]);
+    const peer = await connect();
+    await peer.request(Methods.hello, copilotHello('cop-large'));
+    expect(texts(await call(peer, 'page'))).toEqual(['x'.repeat(19_800)]);
+    expect(texts(await call(peer, 'shot'))).toEqual(['a picture', `${USAGE_NOTES_HEADING}\nhi`]);
+    expect(texts(await call(peer, 'shot'))).toEqual(['a picture']);
+  });
+
   it('does not repeat them when the same session reconnects', async () => {
     await restart();
     const before = await connect();

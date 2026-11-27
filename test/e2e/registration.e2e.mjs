@@ -114,8 +114,9 @@ test('asks once, then registers with Claude Code, Codex and GitHub Copilot, keep
       type: 'local',
       command: launcher,
       args: [],
-      env: { COPANE_HOME: join(hostDir, 'home'), COPANE_INSTANCE: '${COPANE_INSTANCE:-}', COPANE_SESSION: '${COPANE_SESSION:-}' },
+      env: { COPANE_HOME: join(hostDir, 'home'), COPANE_INSTANCE: '${COPANE_INSTANCE:-}', COPANE_SESSION: '${COPANE_SESSION:-}', COPILOT_SESSION_CWD: '${COPILOT_SESSION_CWD:-}' },
       tools: ['*'],
+      timeout: 600000,
     });
     assert.deepEqual(copilot.mcpServers.other, { type: 'local', command: 'npx', args: ['other'], tools: ['*'] });
     assert.equal(copilot.unknownKey, 1);
@@ -154,6 +155,7 @@ test('the real copilot CLI lists the entry from the dev host\'s COPILOT_HOME', a
   const ours = listed.mcpServers.copane;
   assert.ok(ours, `copane is listed: ${JSON.stringify(Object.keys(listed.mcpServers))}`);
   assert.equal(ours.command, launcher);
+  assert.equal(ours.timeout, 600000);
   assert.equal(ours.enabled, true);
   assert.equal(ours.source, 'user');
   assert.ok(listed.mcpServers.other, 'the user\'s other server is still listed');

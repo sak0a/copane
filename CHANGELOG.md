@@ -11,6 +11,19 @@ VS Code 1.148:
 - With `copane.browser.loginPrompts` off, `browser_open` and `browser_navigate` say that the page
   may be waiting at VS Code's sign-in dialog, instead of "the browser did not answer".
 
+GitHub Copilot:
+
+- **Long calls are no longer cut off.** Copane's entry in Copilot's `mcp-config.json` now sets a
+  10-minute `timeout` (Copilot's default is 30 seconds by its documentation), and Copane reports
+  progress while a call runs to agents that ask for it. An existing entry gets the timeout added;
+  one you set yourself is kept.
+- **Results stay below the size at which Copilot hands its model a file** (20 KiB, counted in
+  bytes): page snapshots, console and request lists and command output are sized in bytes for
+  Copilot sessions, and the usage notes wait for a later result when the first is a full page.
+- **The right window.** Copane uses the folder the Copilot session works in
+  (`COPILOT_SESSION_CWD`, Copilot CLI 1.0.107 and later) to find its window when Copilot starts the
+  server from somewhere else.
+
 Everything else:
 
 - **Away sessions.** After a window reload or a restart of VS Code, a session whose agent has not

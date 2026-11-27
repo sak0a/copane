@@ -15,9 +15,18 @@
 // Local servers get only PATH from the environment (GitHub's docs), so the entry passes the variables
 // a terminal sets for finding the window as references, `${COPANE_INSTANCE:-}`: Copilot resolves them
 // from its own environment, and to an empty string when unset (which the MCP server treats as unset).
+// `COPILOT_SESSION_CWD` (Copilot CLI 1.0.107: "for launching and expanding LSP and local MCP server
+// configs") is passed the same way: the folder the Copilot session works in, which is how the server
+// finds the right window when Copilot does not start it from that folder (the Copilot harness in
+// VS Code starts servers from a host shared by all windows). Older CLIs resolve it to nothing.
+//
+// The entry sets `timeout`: Copilot stops a tool call after 30 s by its documentation (3 minutes
+// by its changelog) unless the server's entry says otherwise, and terminal commands, page waits
+// and hand-offs to the user take longer. A timeout the user chose is kept.
+//
 // Keys the user may change, or that Copilot adds, do not make the entry out of date and are kept on
-// update: `tools` (a filter of the tools the model sees), `timeout`, `cwd`, and the default part of
-// the two references.
+// update: `tools` (a filter of the tools the model sees), the value of `timeout`, `cwd`, and the
+// default part of the references.
 import * as path from 'node:path';
 import { applyEdits, modify, parse, type ParseError } from 'jsonc-parser';
 import { MCP_SERVER_NAME } from '../../shared/protocol';
@@ -39,8 +48,14 @@ export function copilotSettingsFile(env: NodeJS.ProcessEnv, home: string): strin
   return path.join(copilotHome(env, home), 'settings.json');
 }
 
-/** Variables Copilot must pass through so the server finds the window of the terminal it runs in. */
-export const PASS_THROUGH = ['COPANE_INSTANCE', 'COPANE_SESSION'] as const;
+/**
+ * Variables Copilot must pass through so the server finds its window: the window of the terminal it
+ * runs in, and the folder the Copilot session works in.
+ */
+export const PASS_THROUGH = ['COPANE_INSTANCE', 'COPANE_SESSION', 'COPILOT_SESSION_CWD'] as const;
+
+/** Per-call time limit in the entry, as for Codex (`tool_timeout_sec`): the longest default wait of a tool. */
+export const TOOL_TIMEOUT_MS = 600_000;
 
 const reference = (name: string) => `\${${name}:-}`;
 /** `${NAME}` or `${NAME:-default}`: the variable is passed through, whatever the default. */
@@ -52,12 +67,14 @@ export interface CopilotEntry {
   args?: string[];
   env?: Record<string, string>;
   tools?: string[];
+  /** Milliseconds, for tool discovery and tool calls. */
+  timeout?: number;
   [key: string]: unknown;
 }
 
 /** The entry Copane writes; `type: "local"` as `copilot mcp add` writes it. */
 export function copilotEntryFor(spec: ServerSpec): CopilotEntry {
-  return { type: 'local', command: spec.command, args: spec.args, env: envFor(spec, undefined), tools: ['*'] };
+  return { type: 'local', command: spec.command, args: spec.args, env: envFor(spec, undefined), tools: ['*'], timeout: TOOL_TIMEOUT_MS };
 }
 
 /** The spec's env plus the pass-through references, keeping the user's form of a reference. */
@@ -76,6 +93,7 @@ export function compareCopilotEntry(entry: CopilotEntry, spec: ServerSpec): { cu
   const compared = compareEntry({ command: entry.command, args: entry.args, env }, spec);
   if (!compared.current) return compared;
   if (missing.length) return { current: false, reason: `it does not pass ${missing.join(' and ')} through to the server` };
+  if (entry.timeout === undefined) return { current: false, reason: 'it sets no timeout, so Copilot stops a tool call after its default time limit' };
   return { current: true };
 }
 
@@ -134,7 +152,7 @@ const FORMAT = { formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' 
 
 /**
  * The document with the current entry: added when there is none; our own entry updated in place
- * (type, command, args and env only, so `tools`, `timeout` and other keys stay); someone else's
+ * (type, command, args and env, and a timeout where there is none; `tools`, the user's `timeout` and other keys stay); someone else's
  * replaced whole (only called for that after the user agreed).
  */
 export function upsertCopilotEntry(text: string, spec: ServerSpec): string {
@@ -151,6 +169,8 @@ export function upsertCopilotEntry(text: string, spec: ServerSpec): string {
     for (const [key, v] of [['type', type], ['command', spec.command], ['args', spec.args], ['env', env]] as const) {
       if (JSON.stringify(existing[key]) !== JSON.stringify(v)) next = applyEdits(next, modify(next, [...at, key], v, FORMAT));
     }
+    // Only where there is none: the user's own value stays.
+    if (existing.timeout === undefined) next = applyEdits(next, modify(next, [...at, 'timeout'], TOOL_TIMEOUT_MS, FORMAT));
   } else {
     next = applyEdits(base, modify(base, at, copilotEntryFor(spec), FORMAT));
   }

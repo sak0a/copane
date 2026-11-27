@@ -4,6 +4,7 @@
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as net from 'node:net';
+import * as path from 'node:path';
 import { RpcError, RpcPeer } from '../shared/jsonrpc';
 import {
   Env,
@@ -106,6 +107,18 @@ export function sessionKeyFrom(env: NodeJS.ProcessEnv, clientName?: string): str
 export function startedFromVsCode(env: NodeJS.ProcessEnv): boolean {
   if (env[Env.instance] || env.TERM_PROGRAM === 'vscode') return true;
   return Object.keys(env).some(name => name.startsWith('VSCODE_') && !!env[name]);
+}
+
+/**
+ * The folder the agent's session works in, when the agent tells its MCP servers: Copilot sets
+ * `COPILOT_SESSION_CWD` (CLI 1.0.107), and may start the server from another folder (the Copilot
+ * harness in VS Code runs in a host shared by all windows). As with the session id, only the
+ * connected agent's own variable counts: an agent started inside a Copilot session inherits it.
+ */
+export function sessionCwdFrom(env: NodeJS.ProcessEnv, clientName: string): string | undefined {
+  if (agentKind(clientName) !== 'copilot') return undefined;
+  const dir = env.COPILOT_SESSION_CWD?.trim();
+  return dir && path.isAbsolute(dir) ? dir : undefined;
 }
 
 export function agentKind(clientName: string): AgentKind {
@@ -327,6 +340,7 @@ export class BridgeClient {
       instances,
       env: this.options.env,
       cwd: this.options.cwd,
+      sessionCwd: sessionCwdFrom(this.options.env, this.client.name),
       ancestors: instances.length > 0 ? await this.ancestorList : [],
       explicit: this.explicit,
       previous: this.previous,

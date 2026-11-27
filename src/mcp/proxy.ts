@@ -50,6 +50,33 @@ export interface ProxyOptions {
   initWaitMs: number;
   /** One session per chat conversation for calls that name one (VS Code); without it, all share `bridge`. */
   conversations?: ConversationBridges;
+  /** How often a call that is still running reports progress to a client that asked for it. Default 10 s. */
+  progressMs?: number;
+}
+
+/**
+ * While a call runs, tells a client that asked for progress (`_meta.progressToken`) that it is
+ * still running. Agents put a time limit on a tool call (GitHub Copilot: 30 s by its documentation,
+ * 3 minutes by its changelog, unless the server's entry says otherwise) and count from the last
+ * progress report; waiting for a command, for a page or for the user takes longer than that.
+ * Returns what stops it.
+ */
+function reportProgress(
+  name: string,
+  token: unknown,
+  send: (notification: { method: 'notifications/progress'; params: { progressToken: string | number; progress: number; message: string } }) => Promise<void>,
+  everyMs: number,
+): () => void {
+  if (typeof token !== 'string' && typeof token !== 'number') return () => {};
+  const started = Date.now();
+  let reports = 0;
+  const timer = setInterval(() => {
+    const seconds = Math.round((Date.now() - started) / 1000);
+    // `progress` must grow with every report; the seconds are for whoever reads the message.
+    void send({ method: 'notifications/progress', params: { progressToken: token, progress: ++reports, message: `${name} is still running (${seconds} s)` } }).catch(() => {});
+  }, everyMs);
+  timer.unref?.();
+  return () => clearInterval(timer);
 }
 
 /** Usage guidance, fixed at `initialize`: from the window when connected by then, generic otherwise. */
@@ -102,18 +129,23 @@ export function createProxyServer(bridge: BridgeClient, options: ProxyOptions): 
   // conversation's session; every other call through the process's one session, as always.
   const conversations = options.conversations;
   server.setRequestHandler(CallToolRequestSchema, async (request, extra): Promise<any> => {
-    const conversationId = conversations ? conversationIdOf(request.params._meta) : undefined;
-    if (conversations && conversationId) {
-      return conversations.use(conversationId, async conversation => {
-        conversation.client = bridge.client;
-        const result = await handleCall(conversation, request.params, extra.signal);
-        if (request.params.name === 'window_select' && !result.isError) conversations.preferredWindow = conversation.current?.instance.id;
-        return result;
-      });
+    const stopProgress = reportProgress(request.params.name, request.params._meta?.progressToken, n => extra.sendNotification(n), options.progressMs ?? 10_000);
+    try {
+      const conversationId = conversations ? conversationIdOf(request.params._meta) : undefined;
+      if (conversations && conversationId) {
+        return await conversations.use(conversationId, async conversation => {
+          conversation.client = bridge.client;
+          const result = await handleCall(conversation, request.params, extra.signal);
+          if (request.params.name === 'window_select' && !result.isError) conversations.preferredWindow = conversation.current?.instance.id;
+          return result;
+        });
+      }
+      const result = await handleCall(bridge, request.params, extra.signal);
+      if (conversations && request.params.name === 'window_select' && !result.isError) conversations.preferredWindow = bridge.current?.instance.id;
+      return result;
+    } finally {
+      stopProgress();
     }
-    const result = await handleCall(bridge, request.params, extra.signal);
-    if (conversations && request.params.name === 'window_select' && !result.isError) conversations.preferredWindow = bridge.current?.instance.id;
-    return result;
   });
 
   return server;
