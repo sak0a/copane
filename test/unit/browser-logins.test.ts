@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AuthChallenge } from '../../src/extension/browser/interception';
-import { describeChallenge, displayHost, LoginBook, loginKey, sentInClear } from '../../src/extension/browser/logins';
+import { describeChallenge, displayHost, LoginBook, loginKey, sentInClear, vscodeAsksForLogins } from '../../src/extension/browser/logins';
 
 const site: AuthChallenge = { source: 'Server', origin: 'http://intranet.corp:80', scheme: 'basic', realm: 'Staff' };
 const proxy: AuthChallenge = { source: 'Proxy', origin: 'http://proxy.corp:8080', scheme: 'ntlm', realm: '' };
@@ -8,6 +8,11 @@ const alice = { username: 'alice', password: 'pw1' };
 const bob = { username: 'bob', password: 'pw2' };
 
 describe('login spaces', () => {
+  it('knows from which VS Code on the browser asks for logins itself', () => {
+    for (const v of ['1.148.0', '1.148.2', '1.149.0-insider', '1.200.0', '2.0.0']) expect(vscodeAsksForLogins(v), v).toBe(true);
+    for (const v of ['1.147.0', '1.147.9', '1.140.0', '1.99.3', '', 'unknown']) expect(vscodeAsksForLogins(v), v).toBe(false);
+  });
+
   it('keys by who asks, origin, scheme and realm', () => {
     expect(loginKey(site)).not.toBe(loginKey({ ...site, realm: 'Other' }));
     expect(loginKey(site)).not.toBe(loginKey({ ...site, source: 'Proxy' }));

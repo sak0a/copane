@@ -26,6 +26,8 @@ export function activateBrowser(services: BridgeServices): void {
   const interception = new FetchInterception(scopedLogger(services.log, 'fetch'));
   const routes = new RequestRoutes(services, browser, interception);
   const credentials = new CredentialPrompts(services, interception);
+  browser.loginAskedByVsCode = tabId => credentials.vscodeAsks(tabId);
+  browser.deferFirstLoad = url => (credentials.defersFirstLoad(url) ? tabId => credentials.loadWhenAttached(tabId, url) : undefined);
   browser.holdsRequests = tabId => interception.isActive(tabId);
   services.context.subscriptions.push(
     browser,

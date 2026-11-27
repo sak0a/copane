@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+VS Code 1.148:
+
+- **Logins.** VS Code 1.148 shows a sign-in dialog of its own when a page asks for a login. A tab
+  an agent opened straight onto such a page sat behind that dialog, and the agent's calls on it got
+  no answer. Copane now loads the page after it has attached to the new tab, so you are asked the
+  way Copane asks, in any tab an agent drives, and the agent is told what happened.
+- With `copane.browser.loginPrompts` off, `browser_open` and `browser_navigate` say that the page
+  may be waiting at VS Code's sign-in dialog, instead of "the browser did not answer".
+
+Everything else:
+
 - **Away sessions.** After a window reload or a restart of VS Code, a session whose agent has not
   reconnected is no longer ended after 30 seconds, which left its tabs and terminals belonging to
   nobody (an agent chat reconnects only when you continue it). It is shown as *away* and keeps its

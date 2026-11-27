@@ -26,6 +26,11 @@ async function fresh() {
   servers.push(s);
   return s;
 }
+/** VS Code 1.148 and later shows a sign-in dialog of its own for a login nothing else answers. */
+async function vscodeAsksItself(a) {
+  const [major, minor] = JSON.parse(await a.ok('debug_extension_eval', { code: 'return vscode.version' })).split('.').map(Number);
+  return major > 1 || minor >= 148;
+}
 const LOGIN = ['Log In…', 'alice', 'open sesame'];
 const SECRET = 'open sesame';
 const SECRET_B64 = Buffer.from(`alice:${SECRET}`).toString('base64');
@@ -243,7 +248,15 @@ test('the setting turns login prompts off', async () => {
       // Should a prompt appear anyway, it is answered at once instead of waiting for a person.
       await queue(a, ['Cancel']);
       const before = (await shown(a)).length;
-      assert.match(await a.ok('browser_navigate', { url: s.url('/basic/x') }), /HTTP 401/);
+      const result = await a.call('browser_navigate', { url: s.url('/basic/x'), timeout: 5 });
+      if (await vscodeAsksItself(a)) {
+        // VS Code 1.148 and later: its own sign-in dialog waits in the tab, and the agent is told so.
+        assert.ok(result.isError, result.text);
+        assert.match(result.text, /has not answered within 5 s\. If the site \(or a proxy\) asks for a login, VS Code is showing its sign-in dialog/);
+        assert.match(result.text, /do not navigate again/);
+      } else {
+        assert.match(result.text, /HTTP 401/);
+      }
       assert.equal((await shown(a)).length, before, 'no prompt');
       await queue(a, []);
     });

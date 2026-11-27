@@ -40,6 +40,19 @@ export function describeChallenge(c: AuthChallenge): string {
   return `the ${c.source === 'Proxy' ? 'proxy' : 'site'} ${displayHost(c.origin)}${details ? ` (${details})` : ''}`;
 }
 
+/**
+ * Whether this VS Code asks the user for a login itself, with a sign-in dialog over the page, when
+ * nothing else answers a site's or proxy's login challenge: 1.148 and later. Before that the browser
+ * cancelled every challenge and the page showed its 401. While that dialog waits the navigation
+ * stays pending: the tab keeps its blank document and `Page.navigate` gets no answer.
+ */
+export function vscodeAsksForLogins(version: string): boolean {
+  const match = /^(\d+)\.(\d+)/.exec(version);
+  if (!match) return false;
+  const [major, minor] = [Number(match[1]), Number(match[2])];
+  return major > 1 || (major === 1 && minor >= 148);
+}
+
 /** True when a password would travel unencrypted: Basic over plain HTTP to another machine. */
 export function sentInClear(c: AuthChallenge): boolean {
   if (c.scheme !== 'basic') return false;

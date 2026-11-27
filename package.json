@@ -419,7 +419,7 @@
         "copane.browser.loginPrompts": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "When a site or proxy asks for a login (HTTP authentication: Basic, Digest, NTLM) in a browser tab an agent session is driving, ask you for it in VS Code instead of letting the page fail. The agent never sees what you type. Logins are remembered until the window closes, or saved in VS Code's secret storage if you choose **Log In and Remember**; **Copane: Forget Saved Browser Logins** removes them. While a session drives a tab, every request of that tab passes through the bridge."
+          "markdownDescription": "When a site or proxy asks for a login (HTTP authentication: Basic, Digest, NTLM) in a browser tab an agent session is driving, ask you for it in VS Code and tell the agent what happened. The agent never sees what you type. When off, VS Code 1.148 and later shows its own sign-in dialog in the tab (older versions let the page fail), and the agent is only told that the page waits for you. Logins are remembered until the window closes, or saved in VS Code's secret storage if you choose **Log In and Remember**; **Copane: Forget Saved Browser Logins** removes them. While a session drives a tab, every request of that tab passes through the bridge."
         },
         "copane.browser.agentLoginStore": {
           "type": "string",
