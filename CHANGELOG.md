@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.4.2
+
+Works with VS Code 1.148, long calls and large results work with GitHub Copilot, sessions keep their
+tabs and terminals across a restart, and a command that stops at a question returns at once.
 
 VS Code 1.148:
 
