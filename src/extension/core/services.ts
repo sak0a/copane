@@ -212,6 +212,12 @@ export interface BrowserService {
    * setting forbids it), or undefined when no certificate error was refused for its host recently.
    */
   certificateRefusal?(url: string): string | undefined;
+  /**
+   * Whether a login challenge (HTTP authentication) in this tab would be asked about by VS Code
+   * itself, with a sign-in dialog over the page that holds the navigation until the user answers
+   * (VS Code 1.148 and later, where the bridge's own login prompts do not cover the tab).
+   */
+  loginAskedByVsCode?(tabId: string): boolean;
   /** Fires once per new tab, after it is attributed (agent tab, popup of an agent tab, or user tab). */
   readonly onDidOpenTab?: Event<BrowserTabInfo>;
   /** The user shares one of their tabs with a session (as if they had answered "Allow"). */

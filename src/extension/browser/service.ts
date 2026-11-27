@@ -106,6 +106,13 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
   private readonly tabInfoProviders: Array<(tabId: string) => Partial<BrowserTabInfo>> = [];
   private readonly releaseHooks: Array<(sessionId: string, tabIds: string[]) => string | undefined> = [];
 
+  /** Set by the login prompts (see `BrowserService.loginAskedByVsCode`). */
+  loginAskedByVsCode: ((tabId: string) => boolean) | undefined;
+  /**
+   * Set by the login prompts (credentials.ts `defersFirstLoad`): when a tab a session opens on `url`
+   * must start blank, what takes the tab's id and loads the URL once the bridge is attached to it.
+   */
+  deferFirstLoad: ((url: string) => ((tabId: string) => void) | undefined) | undefined;
   /** Set by the certificate gate (see `BrowserService.certificateRefusal`). */
   certificateRefusal: ((url: string) => string | undefined) | undefined;
   /**
@@ -224,13 +231,17 @@ export class BrowserServiceImpl implements BrowserService, vscode.Disposable {
     this.openingCount++;
     let record: TabRecord;
     try {
-      const tab = (await this.opener?.(session, url, options)) ?? (await vscode.window.openBrowserTab(url, { background: options.background ?? false, preserveFocus: true }));
+      const loadLater = this.deferFirstLoad?.(url);
+      const first = loadLater ? 'about:blank' : url;
+      const tab = (await this.opener?.(session, first, options)) ?? (await vscode.window.openBrowserTab(first, { background: options.background ?? false, preserveFocus: true }));
       record = this.records.get(tab) ?? this.track(tab, this.freshId());
       this.unannounced.delete(record);
       record.origin = 'agent';
       record.openedBy = session.id;
       this.setCurrent(session.id, record.id);
       this.services.tabLeases.acquire(record.id, session.id, { force: true });
+      // Before the bridge attaches (below), which is when the URL is loaded.
+      loadLater?.(record.id);
       this.announce(record);
       // Saved at once, not after the usual delay: a window reload right now must not turn the tab into one "opened by the user".
       this.persistNow();
