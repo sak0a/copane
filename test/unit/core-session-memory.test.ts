@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AWAY_SETTLE_MS, RESTORE_GRACE_MS, SessionManager, type RememberedSession, type SessionChange, type SessionMemory } from '../../src/extension/core/sessions';
+import { AWAY_SETTLE_MS, normalizeSessionName, RESTORE_GRACE_MS, SessionManager, sessionDisplayName, type RememberedSession, type SessionChange, type SessionMemory } from '../../src/extension/core/sessions';
 
 const claude = { name: 'claude-code', kind: 'claude-code' as const };
 
@@ -23,7 +23,7 @@ describe('SessionManager memory across window reloads', () => {
     const a = before.connect({ sessionKey: 'a', client: claude });
     const b = before.connect({ sessionKey: 'b', client: claude });
     before.setTitle('b', 'dev server');
-    expect([a.label, b.label]).toEqual(['Claude 1', 'Claude 2']);
+    expect([a.label, b.label, b.autoLabel]).toEqual(['Claude 1', 'dev server', 'Claude 2']);
     before.dispose(); // the reload: the extension host goes away without disconnecting anyone
 
     now += 5_000;
@@ -31,13 +31,13 @@ describe('SessionManager memory across window reloads', () => {
     // Restored, waiting for their agents: their numbers are not handed to anyone else meanwhile.
     expect(after.list().map(s => [s.label, s.connected])).toEqual([
       ['Claude 1', false],
-      ['Claude 2', false],
+      ['dev server', false],
     ]);
     const newcomer = after.connect({ sessionKey: 'c', client: claude });
     expect(newcomer.label).toBe('Claude 3');
     const b2 = after.connect({ sessionKey: 'b', client: claude });
     const a2 = after.connect({ sessionKey: 'a', client: claude });
-    expect([a2.label, a2.color.id, b2.label, b2.color.id, b2.title]).toEqual(['Claude 1', a.color.id, 'Claude 2', b.color.id, 'dev server']);
+    expect([a2.label, a2.color.id, b2.autoLabel, b2.color.id, b2.label, b2.titleBy]).toEqual(['Claude 1', a.color.id, 'Claude 2', b.color.id, 'dev server', 'agent']);
     expect(b2.connected).toBe(true);
     after.dispose();
   });
@@ -105,10 +105,10 @@ describe('away sessions: restored sessions that still own tabs or terminals', ()
     const owned = new Set(['a']);
     const changes: string[] = [];
     const after = new SessionManager({ memory, holds: id => owned.has(id) });
-    after.onDidChange((c: SessionChange) => changes.push(`${c.type} ${c.session.label}${c.session.away ? ' away' : ''}`));
+    after.onDidChange((c: SessionChange) => changes.push(`${c.type} ${c.session.autoLabel}${c.session.away ? ' away' : ''}`));
     return { memory, after, owned, changes, colorOfA: a.color.id };
   }
-  const states = (m: SessionManager) => m.list().map(s => `${s.label}${s.connected ? ' connected' : s.away ? ' away' : ' disconnected'}`);
+  const states = (m: SessionManager) => m.list().map(s => `${s.autoLabel}${s.connected ? ' connected' : s.away ? ' away' : ' disconnected'}`);
 
   it('keeps a restored session whose agent has not come back, for as long as it owns something', () => {
     const { after, owned, changes } = reloaded();
@@ -135,7 +135,7 @@ describe('away sessions: restored sessions that still own tabs or terminals', ()
     const { after, colorOfA } = reloaded();
     vi.advanceTimersByTime(RESTORE_GRACE_MS + AWAY_SETTLE_MS);
     const back = after.connect({ sessionKey: 'a', client: claude });
-    expect([back.label, back.title, back.color.id, back.connected, back.away]).toEqual(['Claude 1', 'dev server', colorOfA, true, undefined]);
+    expect([back.autoLabel, back.label, back.color.id, back.connected, back.away]).toEqual(['Claude 1', 'dev server', colorOfA, true, undefined]);
     // Its agent exits: the session ends after the usual grace period, whatever it still owns.
     after.disconnect('a');
     vi.advanceTimersByTime(20_100);
@@ -183,5 +183,103 @@ describe('away sessions: restored sessions that still own tabs or terminals', ()
     const noGrace = new SessionManager({ memory, graceMs: () => 0, holds: () => true });
     expect(noGrace.list()).toEqual([]);
     noGrace.dispose();
+  });
+});
+
+describe('session names', () => {
+  const codex = { name: 'codex-mcp-client', kind: 'codex' as const };
+
+  it('shows a name instead of the automatic label, and the automatic label again without one', () => {
+    const m = new SessionManager();
+    const a = m.connect({ sessionKey: 'a', client: claude });
+    const changes: string[] = [];
+    m.onDidChange(c => changes.push(`${c.type} ${c.session.label}`));
+    expect(m.setTitle('a', '  checkout\n tests ')).toBeUndefined();
+    expect([a.label, a.autoLabel, a.title, a.titleBy, a.badge]).toEqual(['checkout tests', 'Claude 1', 'checkout tests', 'agent', 'C1']);
+    expect(sessionDisplayName(a)).toBe('checkout tests (Claude 1)');
+    m.setTitle('a', 'checkout tests'); // unchanged: no event
+    m.setTitle('a', 'claude 1'); // its own automatic label: no name
+    expect([a.label, a.title, a.titleBy]).toEqual(['Claude 1', undefined, undefined]);
+    expect(sessionDisplayName(a)).toBe('Claude 1');
+    m.setTitle('a', 'deploy');
+    m.setTitle('a', '');
+    expect(a.label).toBe('Claude 1');
+    expect(changes).toEqual(['updated checkout tests', 'updated Claude 1', 'updated deploy', 'updated Claude 1']);
+    m.dispose();
+  });
+
+  it('keeps the name the user gave: the agent cannot change or clear it, the user can', () => {
+    const m = new SessionManager();
+    const a = m.connect({ sessionKey: 'a', client: claude });
+    m.setTitle('a', 'tests');
+    expect(m.setTitle('a', 'OpenShift Pod Disruption Inspection', 'user')).toBeUndefined();
+    expect([a.label, a.titleBy]).toEqual(['OpenShift Pod Disruption Inspection', 'user']);
+    expect(m.setTitle('a', 'something else')).toEqual({ reason: 'named-by-user', name: 'OpenShift Pod Disruption Inspection' });
+    expect(m.setTitle('a', '')).toEqual({ reason: 'named-by-user', name: 'OpenShift Pod Disruption Inspection' });
+    expect(a.label).toBe('OpenShift Pod Disruption Inspection');
+    // The agent's own name, taken over by the user, is the user's from then on.
+    m.setTitle('a', 'PDB check', 'user');
+    m.setTitle('a', '', 'user');
+    expect([a.label, a.titleBy]).toEqual(['Claude 1', undefined]);
+    expect(m.setTitle('a', 'tests')).toBeUndefined();
+    expect([a.label, a.titleBy]).toEqual(['tests', 'agent']);
+    m.setTitle('a', 'tests', 'user');
+    expect(a.titleBy).toBe('user');
+    m.dispose();
+  });
+
+  it('keeps names unique in the window and never like another session\'s automatic label', () => {
+    const m = new SessionManager();
+    m.connect({ sessionKey: 'a', client: claude });
+    const b = m.connect({ sessionKey: 'b', client: claude });
+    m.connect({ sessionKey: 'c', client: codex });
+    m.setTitle('a', 'Tests');
+    expect(m.setTitle('b', 'tests')).toMatchObject({ reason: 'taken', by: { id: 'a' } });
+    m.setTitle('c', 'api');
+    expect(m.setTitle('b', 'API', 'user')).toMatchObject({ reason: 'taken', by: { id: 'c' } });
+    for (const name of ['Claude 1', 'claude  7', 'Codex 1', 'Copilot 3', 'Agent 2']) expect(m.setTitle('b', name, 'user'), name).toEqual({ reason: 'automatic' });
+    expect(b.label).toBe('Claude 2');
+    expect(m.setTitle('b', 'Claude 2 tests')).toBeUndefined();
+    expect(b.label).toBe('Claude 2 tests');
+    m.dispose();
+  });
+
+  it('makes names one line, without control characters or direction overrides, of at most 60 characters', () => {
+    expect(normalizeSessionName('a\tb\r\nc\u0007d')).toBe('a b c d');
+    expect(normalizeSessionName('safe\u202Etxt.exe\u202C')).toBe('safetxt.exe');
+    expect(normalizeSessionName('   ')).toBeUndefined();
+    expect(normalizeSessionName('x'.repeat(80))).toHaveLength(60);
+    expect(normalizeSessionName('👩‍💻 dev')).toBe('👩‍💻 dev');
+  });
+
+  it('remembers who gave a name across a reload, and drops a remembered name another session took meanwhile', () => {
+    const memory = store();
+    let now = 1_000_000;
+    const before = new SessionManager({ memory, now: () => now });
+    before.connect({ sessionKey: 'a', client: claude });
+    before.connect({ sessionKey: 'b', client: claude });
+    before.setTitle('a', 'PDB check', 'user');
+    before.setTitle('b', 'api tests');
+    before.dispose();
+
+    now += 5_000;
+    const after = new SessionManager({ memory, now: () => now });
+    expect(after.list().map(s => [s.label, s.titleBy])).toEqual([
+      ['PDB check', 'user'],
+      ['api tests', 'agent'],
+    ]);
+    expect(after.setTitle('a', 'mine now')).toEqual({ reason: 'named-by-user', name: 'PDB check' });
+    after.remove('b'); // ended, its name remembered
+    after.setTitle('a', 'api tests', 'user');
+    const back = after.connect({ sessionKey: 'b', client: claude });
+    expect([back.label, back.title]).toEqual(['Claude 2', undefined]);
+    after.dispose();
+  });
+
+  it('does not restore a name that reads like an automatic label (titles of older versions)', () => {
+    const remembered: RememberedSession[] = [{ id: 'z', client: claude, number: 2, colorId: 'blue', title: 'Claude 5', createdAt: 1, seenAt: 1_000_000, live: true }];
+    const m = new SessionManager({ memory: { load: () => remembered, save: () => undefined }, now: () => 1_000_100 });
+    expect(m.get('z')?.label).toBe('Claude 2');
+    m.dispose();
   });
 });

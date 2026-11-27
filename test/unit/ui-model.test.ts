@@ -10,6 +10,7 @@ function session(n: number, extra: Partial<AgentSession> = {}): AgentSession {
     client: { name: 'claude-code', version: '2.1.0', kind: 'claude-code' },
     number: n,
     label: `Claude ${n}`,
+    autoLabel: `Claude ${n}`,
     badge: `C${n}`,
     color: SESSION_COLORS[(n - 1) % SESSION_COLORS.length]!,
     title: undefined,
@@ -19,6 +20,8 @@ function session(n: number, extra: Partial<AgentSession> = {}): AgentSession {
     lastActivityAt: n,
     connected: true,
     ...extra,
+    // As SessionManager labels it: by its name, when it has one.
+    ...(extra.title ? { label: extra.label ?? extra.title, titleBy: extra.titleBy ?? 'agent' } : {}),
   };
 }
 
@@ -89,7 +92,8 @@ describe('away sessions (kept from before a reload or restart)', () => {
     const away = session(2, { connected: false, away: true, title: 'dev server' });
     const model = buildViewModel(input({ sessions: [session(1), away], tabs: [tab('tab-1', { openedBy: 's2' })], terminals: [terminal('term-1', { ownedBy: 's2' })] }));
     const node = row(model, 'session:s2');
-    expect(node.description).toBe('dev server · away');
+    expect(node.label).toBe('dev server');
+    expect(node.description).toBe('Claude 2 · away');
     expect(node.children.map(c => c.kind)).toEqual(['tab', 'terminal']);
     expect(node.tooltip).toContain('Away: its agent has not reconnected');
     expect(node.tooltip).not.toContain('within 20 s');
@@ -110,15 +114,21 @@ describe('away sessions (kept from before a reload or restart)', () => {
 });
 
 describe('session rows', () => {
-  it('shows label, title, color and connection state', () => {
+  it('shows the name, the automatic label, color and connection state', () => {
     const model = buildViewModel(input({ sessions: [session(1, { title: 'fixing login' }), session(2, { connected: false })] }));
     const a = row(model, 'session:s1#empty');
-    expect(a.label).toBe('Claude 1');
-    expect(a.description).toBe('fixing login');
+    expect(a.label).toBe('fixing login');
+    expect(a.description).toBe('Claude 1');
+    expect(a.tooltip).toContain('**fixing login** · Claude 1');
+    expect(a.tooltip).toContain('Named by the agent; its automatic name is Claude 1.');
+    expect(a.accessibilityLabel).toMatch(/^fixing login agent session, Claude 1, connected/);
     expect(a.icon).toEqual({ id: 'circle-filled', color: 'terminal.ansiBlue' });
     expect(a.contextValue.split(' ')).toContain('connected');
     const b = row(model, 'session:s2#empty');
-    expect(b.description).toBe('disconnected');
+    expect([b.label, b.description]).toEqual(['Claude 2', 'disconnected']);
+    expect(b.tooltip).toContain('Rename it (the pencil)');
+    const named = row(buildViewModel(input({ sessions: [session(1, { title: 'PDB check', titleBy: 'user' })] })), 'session:s1#empty');
+    expect(named.tooltip).toContain('Named by you;');
     expect(b.icon).toEqual({ id: 'circle-outline', color: 'terminal.ansiMagenta' });
     expect(b.tooltip).toContain('within 20 s');
     expect(b.accessibilityLabel).toContain('waiting to reconnect');
@@ -132,7 +142,7 @@ describe('session rows', () => {
 
   it('says "needs you" on the session when one of its terminals waits for the user', () => {
     const model = buildViewModel(input({ sessions: [session(1, { title: 'deploy' })], terminals: [terminal('term-1', { ownedBy: 's1', state: 'waiting-for-user' })] }));
-    expect(row(model, 'session:s1').description).toBe('deploy · needs you');
+    expect(row(model, 'session:s1').description).toBe('Claude 1 · needs you');
   });
 
   it('escapes agent-provided text in tooltips', () => {
@@ -304,7 +314,7 @@ describe('attention, badge and status bar', () => {
       ['tab', 'tab-1'],
     ]);
     expect(model.attention[0]).toMatchObject({ label: 'Claude 2 is waiting for you', description: 'zsh', detail: 'Enter the 2FA code', sessionIds: ['s2'] });
-    expect(model.attention[1]).toMatchObject({ label: '"Login" is paused', description: 'Claude 1 cannot use it until you resume it' });
+    expect(model.attention[1]).toMatchObject({ label: '"Login" is paused', description: 'deploy cannot use it until you resume it' });
     expect(model.badge).toEqual({ value: 2, tooltip: '1 terminal is waiting for you, 1 tab is paused' });
     expect(model.status.accessibilityLabel).toBe('Copane: 2 agent sessions connected, 1 terminal waiting for you, 1 tab paused');
     expect(model.status.tooltip).toContain(`command:${Cmd.showAttention}`);
@@ -330,7 +340,7 @@ describe('attention, badge and status bar', () => {
   it('a tab shared by two sessions is one attention item naming both', () => {
     const model = buildViewModel(input({ sessions: [s1, s2], tabs: [tab('tab-1', { openedBy: 's1', allowedSessions: ['s1', 's2'], paused: true })] }));
     expect(model.attention).toHaveLength(1);
-    expect(model.attention[0]!.description).toBe('Claude 1 and Claude 2 cannot use it until you resume it');
+    expect(model.attention[0]!.description).toBe('deploy and Claude 2 cannot use it until you resume it');
   });
 
   it('ignores paused tabs and waiting terminals no current session uses', () => {
@@ -388,7 +398,7 @@ describe('updates', () => {
 describe('helpers', () => {
   it('renders the tree as text', () => {
     const model = buildViewModel(input({ sessions: [session(1, { title: 'x' })], tabs: [tab('tab-1', { openedBy: 's1', controlledBy: 's1' })] }));
-    expect(treeAsText(model)).toBe('Claude 1 — x  [circle-filled:terminal.ansiBlue]\n  Login — controlling · localhost:3000  [globe:terminal.ansiBlue]');
+    expect(treeAsText(model)).toBe('x — Claude 1  [circle-filled:terminal.ansiBlue]\n  Login — controlling · localhost:3000  [globe:terminal.ansiBlue]');
   });
 
   it('extracts hosts', () => {

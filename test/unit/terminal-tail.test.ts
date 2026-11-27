@@ -90,5 +90,11 @@ describe('terminal names after a label change', () => {
     expect(renamedFor('Claude 2 (2)', 'Claude 2', 'Claude 1')).toBe('Claude 1 (2)');
     expect(renamedFor('Claude 2', 'Claude 2', 'Claude 2')).toBeUndefined();
     expect(renamedFor('my server', 'Claude 2', 'Claude 3')).toBeUndefined();
+    // Names the user or agent gave the session, in both directions.
+    expect(renamedFor('Claude 2: dev server', 'Claude 2', 'PDB check')).toBe('PDB check: dev server');
+    expect(renamedFor('PDB check (2)', 'PDB check', 'Claude 2')).toBe('Claude 2 (2)');
+    expect(renamedFor('PDB check', 'PDB check', 'OpenShift PDB')).toBe('OpenShift PDB');
+    expect(renamedFor('PDB checker', 'PDB check', 'x'), 'another name that merely starts the same').toBeUndefined();
+    expect(renamedFor('PDB check (old)', 'PDB check', 'x')).toBeUndefined();
   });
 });

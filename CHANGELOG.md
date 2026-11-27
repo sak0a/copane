@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Session names.** A session can have a name in place of "Claude 2" on its terminals and in the
+  Sessions and Agent Tabs views; the indicator on its browser tabs and Copane's questions to you
+  show it as "checkout tests (Claude 2)". Rename a session yourself (pencil on its row in Sessions, the right-click menu of its tabs,
+  or *Copane: Rename Agent Session...*); the agent cannot change a name you gave, and an empty name
+  gives "Claude 2" back. Agents are asked to name themselves after their task in 2-3 words with
+  `session_set_title` (at most 24 characters, since it labels terminal tabs; it used to be a title
+  shown next to the label). "Claude 2" stays visible next to the name in the views and in
+  questions, names are unique in a window, and a name that reads like another session's
+  ("Claude 3") is refused.
+
 ## 0.4.2
 
 Works with VS Code 1.148, long calls and large results work with GitHub Copilot, sessions keep their

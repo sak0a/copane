@@ -74,7 +74,10 @@ export interface HelloResult {
 
 export interface SessionDescriptor {
   id: string;
-  /** Human-readable, unique within the window, e.g. "Claude 2". */
+  /**
+   * Human-readable, unique within the window, e.g. "Claude 2", or the name the user or the agent gave
+   * the session ("checkout tests"). As of the hello; it can change later in the session.
+   */
   label: string;
   /** At most two characters, e.g. "C2". Used for tab badges. */
   badge: string;

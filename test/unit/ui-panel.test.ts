@@ -11,6 +11,7 @@ function session(n: number, extra: Partial<AgentSession> = {}): AgentSession {
     client: { name: 'claude-code', version: '2.1.0', kind: 'claude-code' },
     number: n,
     label: `Claude ${n}`,
+    autoLabel: `Claude ${n}`,
     badge: `C${n}`,
     color: SESSION_COLORS[(n - 1) % SESSION_COLORS.length]!,
     title: undefined,
@@ -20,6 +21,8 @@ function session(n: number, extra: Partial<AgentSession> = {}): AgentSession {
     lastActivityAt: n,
     connected: true,
     ...extra,
+    // As SessionManager labels it: by its name, when it has one.
+    ...(extra.title ? { label: extra.label ?? extra.title, titleBy: extra.titleBy ?? 'agent' } : {}),
   };
 }
 
@@ -114,15 +117,16 @@ describe('rows', () => {
     );
     expect(panelAsText(model)).toBe(
       [
-        'Checkout — Claude 1 · fixing login · controlling · localhost:3000  [circle-large-filled:terminal.ansiBlue]',
-        'localhost:3000 — Claude 1 · paused by you  [debug-pause:terminal.ansiBlue]',
+        'Checkout — fixing login · Claude 1 · controlling · localhost:3000  [circle-large-filled:terminal.ansiBlue]',
+        'localhost:3000 — fixing login · paused by you  [debug-pause:terminal.ansiBlue]',
         'Docs — Claude 2 · idle · example.com  [circle-large-outline:terminal.ansiMagenta]',
       ].join('\n'),
     );
     expect(row(model, 'tab-1').command).toEqual({ command: Cmd.revealTab, title: 'Show Tab', args: ['tab-1'] });
-    expect(row(model, 'tab-1').accessibilityLabel).toBe('Browser tab Checkout, Claude 1 (fixing login), controlling, localhost:3000');
-    // The title is on the first row of a session only; screen readers get it on every row.
-    expect(row(model, 'tab-3').accessibilityLabel).toBe('Browser tab localhost:3000, Claude 1 (fixing login), paused by you');
+    expect(row(model, 'tab-1').accessibilityLabel).toBe('Browser tab Checkout, fixing login (Claude 1), controlling, localhost:3000');
+    // The automatic label is on the first row of a named session only; screen readers get it on every row.
+    expect(row(model, 'tab-3').accessibilityLabel).toBe('Browser tab localhost:3000, fixing login (Claude 1), paused by you');
+    expect(row(model, 'tab-1').tooltip).toContain('fixing login · Claude 1');
   });
 
   it('keeps the session color while paused, and says who else is involved', () => {
@@ -135,8 +139,8 @@ describe('rows', () => {
         ],
       }),
     );
-    expect(row(model, 'tab-1').description).toBe('Claude 2 · controlling · opened by Claude 1 · shared with Claude 1 · localhost:3000');
-    expect(row(model, 'tab-2').description).toBe('Claude 1 · fixing login · paused by you · your tab · shared with Claude 2 · localhost:3000');
+    expect(row(model, 'tab-1').description).toBe('Claude 2 · controlling · opened by fixing login · shared with fixing login · localhost:3000');
+    expect(row(model, 'tab-2').description).toBe('fixing login · Claude 1 · paused by you · your tab · shared with Claude 2 · localhost:3000');
     expect(row(model, 'tab-2').icon).toEqual({ id: 'debug-pause', color: s1.color.themeColor });
   });
 

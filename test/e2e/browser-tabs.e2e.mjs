@@ -76,7 +76,7 @@ test('an agent tab shows the indicator and editor badge while controlled; releas
   const url = fresh(`/titled?t=${encodeURIComponent(title)}`);
   try {
     await a.ok('session_set_title', { title: 'marking check' });
-    const me = await label(a);
+    const me = JSON.parse(await a.ok('session_info')).you;
     const opened = await a.ok('browser_open', { url });
     const id = /Opened (tab-\d+)/.exec(opened)?.[1];
     assert.match(await a.ok('browser_list_tabs'), new RegExp(`${id} .*opened by you, controlled by you`));
@@ -84,7 +84,7 @@ test('an agent tab shows the indicator and editor badge while controlled; releas
     try {
       const shown = await until(async () => {
         const i = await page.indicator();
-        return i.count === 1 && i.text.includes(`${me} · marking check`) ? i : undefined;
+        return i.count === 1 && i.text.includes(`marking check (${me.automaticLabel})`) ? i : undefined;
       }, 'the indicator with the session label');
       assert.match(shown.text, /Take over/);
       await until(() => editorTabs().find(t => t.label === title)?.badge, 'a badge on the editor tab');

@@ -54,7 +54,7 @@ export interface PersistedTerminal {
   name: string;
   ownerKey: string | undefined;
   createdAt: number;
-  /** The owning session's label the name was made from ("Claude 2"); absent in records of older versions. */
+  /** The owning session's label the name was made from ("Claude 2", or the session's name); absent in records of older versions. */
   label?: string;
 }
 
@@ -64,12 +64,15 @@ export function labelPrefix(name: string): string | undefined {
 }
 
 /**
- * The name a terminal should have now that its owner is labelled `current`, or undefined when it is
- * right (or was renamed away from the label by the user, which is theirs to keep).
+ * The name a terminal should have now that its owner is labelled `current` (another number after a
+ * reload, or a name the user or agent gave the session), or undefined when it is right, or when it
+ * was renamed away from the label by the user, which is theirs to keep. A name made from a label is
+ * the label, "<label>: <terminal name>" or "<label> (<n>)".
  */
 export function renamedFor(name: string, madeFrom: string | undefined, current: string): string | undefined {
-  if (!madeFrom || madeFrom === current || labelPrefix(name) !== madeFrom) return undefined;
-  return current + name.slice(madeFrom.length);
+  if (!madeFrom || madeFrom === current || !name.startsWith(madeFrom)) return undefined;
+  const rest = name.slice(madeFrom.length);
+  return rest === '' || rest.startsWith(': ') || /^ \(\d+\)$/.test(rest) ? current + rest : undefined;
 }
 
 /**

@@ -23,6 +23,7 @@ import { Env } from '../../shared/protocol';
 import { Emitter } from '../core/events';
 import { scopedLogger, type Logger } from '../core/log';
 import type { BridgeServices } from '../core/services';
+import { sessionDisplayName } from '../core/sessions';
 import { applyTextEdits, argvJsonPath, argvState, enableProposedApiEdits, newArgvJson, type ArgvState } from './argv';
 import { enableInUiArgv, uiArgvState } from './remoteArgv';
 import {
@@ -1033,8 +1034,7 @@ class Registration {
       titles: this.titles,
       history: readHistory(this.historyFile).slice(-12),
       sessions: services.sessions.list().map(s => ({
-        label: s.label,
-        title: s.title,
+        label: sessionDisplayName(s),
         client: `${s.client.name}${s.client.version ? ` ${s.client.version}` : ''}`,
         connected: s.connected,
         ...(s.away ? { away: true } : {}),

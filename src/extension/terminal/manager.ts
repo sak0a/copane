@@ -8,7 +8,7 @@ import * as vscode from 'vscode';
 import { ToolError } from '../core/errors';
 import { Emitter } from '../core/events';
 import type { BridgeServices, TerminalInfo, TerminalService, TerminalState } from '../core/services';
-import type { AgentSession } from '../core/sessions';
+import { sessionDisplayName, type AgentSession } from '../core/sessions';
 import { decideAccess, labelPrefix, matchPersisted, renamedFor, type AccessDecision, parsePolicy, parseSessionEndPolicy, type PersistedTerminal } from './access';
 import { assessActivity, looksLikeShellPrompt, QUIET_MS, stoppedForInput, type Activity } from './activity';
 import { sameCommand, TerminalMirror, type LinesResult, type Mark, type MirrorFeed, type Region } from './mirror';
@@ -360,8 +360,8 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
       const owner = t.ownerKey ? this.services.sessions.get(t.ownerKey) : undefined;
       const message =
         decision.reason === 'user-terminal'
-          ? `${session.label} wants to read and type in your terminal "${t.name}".`
-          : `${session.label} wants to read and type in the terminal "${t.name}" of ${owner?.label ?? 'another agent session'}.`;
+          ? `${sessionDisplayName(session)} wants to read and type in your terminal "${t.name}".`
+          : `${sessionDisplayName(session)} wants to read and type in the terminal "${t.name}" of ${owner ? sessionDisplayName(owner) : 'another agent session'}.`;
       pending = this.services.prompts
         .ask({ message, choices: ['Allow', 'Deny'], signal })
         .then(answer => {
@@ -639,7 +639,7 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
       const where = `the terminal "${t.name}"`;
       let choices = ['Show Terminal', 'Done', "Won't Do"];
       for (;;) {
-        const answer = await this.services.prompts.ask({ message: `${session.label} needs you in ${where}: ${options.message}`, choices, signal: promptAbort.signal, autoClose: true });
+        const answer = await this.services.prompts.ask({ message: `${sessionDisplayName(session)} needs you in ${where}: ${options.message}`, choices, signal: promptAbort.signal, autoClose: true });
         if (promptAbort.signal.aborted) return;
         if (answer === 'Show Terminal') {
           t.terminal.show(false);
@@ -922,31 +922,36 @@ export class TerminalManager implements TerminalService, vscode.Disposable {
   }
 
   /**
-   * An agent terminal is named after its session ("Claude 2: dev server"). Sessions get their label back
-   * when they reconnect after a reload (core/sessions.ts), but one that returns after its number was
-   * given to another session gets a new label, and its terminals would show the wrong owner. VS Code can
-   * rename only the active terminal (and cannot recolor one at all), so a stale name is fixed when the
-   * terminal is active: right away if it is, otherwise as soon as the user switches to it.
+   * An agent terminal is named after its session's label ("Claude 2: dev server"), which changes when
+   * the user or the agent names the session ("checkout tests: dev server"), and when a session returns
+   * after a reload under another number. VS Code can rename only the active terminal (and cannot
+   * recolor one at all), so a stale name is fixed when the terminal is active: right away if it is,
+   * otherwise as soon as the user switches to it.
    */
   private renameStale(): void {
     const t = this.forTerminal(vscode.window.activeTerminal);
     if (!t || t.closed || t.origin !== 'agent' || !t.ownerKey || this.renaming) return;
     const owner = this.services.sessions.get(t.ownerKey);
-    const name = owner ? renamedFor(t.name, t.label, owner.label) : undefined;
-    if (!owner || !name) return;
+    const label = owner?.label;
+    const name = label ? renamedFor(t.name, t.label, label) : undefined;
+    if (!label || !name) return;
     this.renaming = true;
     void Promise.resolve(vscode.commands.executeCommand('workbench.action.terminal.renameWithArg', { name }))
       .then(async () => {
         for (let i = 0; i < 20 && t.terminal.name !== name; i++) await sleep(50);
         if (t.terminal.name === name) {
-          t.label = owner.label;
-          this.services.log.info(`renamed ${t.id} to "${name}" (its session is now ${owner.label})`);
+          t.label = label;
+          this.services.log.info(`renamed ${t.id} to "${name}" (its session is now ${label})`);
           this.persist();
           this.changed();
         }
       })
       .catch(err => this.services.log.warn(`could not rename ${t.id}: ${err instanceof Error ? err.message : String(err)}`))
-      .finally(() => (this.renaming = false));
+      .finally(() => {
+        this.renaming = false;
+        // The session may have been named again meanwhile.
+        if (owner && owner.label !== label && t.label === label) this.renameStale();
+      });
   }
 
   private persist(): void {

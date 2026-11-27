@@ -52,9 +52,14 @@ session is using what, and can take over at any moment.
   decodes the socket's bytes with a `StringDecoder`: a long message arrives in chunks (8 kB on macOS)
   that can cut a character of several bytes in two.
 - **Sessions** (`core/sessions.ts`): each connection presents a `sessionKey`; reconnecting with the same
-  key within the grace period resumes the session. A session has a label ("Claude 2"), a badge ("C2"),
-  a color and an optional title the agent sets (`session_set_title`). These are what the user sees on
-  tabs, terminals and in the Sessions view. Sessions are remembered in the window's workspace state:
+  key within the grace period resumes the session. A session has an automatic label (`autoLabel`,
+  "Claude 2"), a badge ("C2"), a color and an optional name (`title`) that the agent gives itself
+  (`session_set_title`, at most 24 characters) or the user gives it (`copane.ui.renameSession`;
+  `titleBy` "user" wins, the agent cannot change or clear it). `label` is the name when there is one,
+  else the automatic label: what terminal names and the views show. Names are unique in the window
+  and never read like an automatic label, so `label` stays unique. Sentences (questions to the user,
+  messages to agents) and the page indicator use `sessionDisplayName`: "checkout tests (Claude 2)",
+  so an agent cannot pass itself off as something else in a question by its name. Sessions are remembered in the window's workspace state:
   after a reload (or a restart within 10 minutes) the window's sessions are restored as disconnected
   ones in their grace period (at least 30 s), so each gets its label, color and title back whatever
   order the agents reconnect in, and no new session takes their number meanwhile. An ended session
@@ -298,10 +303,11 @@ argv.json editor. Not verified for real: Windows paths (`/c:/Users/...`), WSL it
   moment after it opens (it opens as ""): while remembered terminals are unaccounted for, in the
   first minute after activation, `identify` waits up to 3 s for the name before taking a terminal
   for the user's own.
-- **Names**: an agent terminal is named after its session's label. Labels come back after a reload
-  (see Sessions); when a session returns under another label, its terminals are renamed as soon as
-  they are the active terminal (VS Code can rename only the active terminal, and cannot change a
-  terminal's color after creation).
+- **Names**: an agent terminal is named after its session's label ("Claude 2", "Claude 2: dev
+  server", "Claude 2 (2)"), and remembers the label it was made from. Labels come back after a reload
+  (see Sessions); when a session is named or renamed, or returns under another label, its terminals
+  are renamed as soon as they are the active terminal (VS Code can rename only the active terminal,
+  and cannot change a terminal's color after creation). A terminal the user renamed is left alone.
 
 ## Layout
 

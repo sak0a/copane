@@ -26,7 +26,7 @@ function data(over: Partial<StatusData> = {}): StatusData {
         notes: ['PROBLEM: Copilot has the "copane" server turned off: run `copilot mcp enable copane`.'],
       },
     ],
-    sessions: [{ label: 'Claude 1', title: 'checkout', client: 'claude-code 2.1.323', connected: true, matchedBy: 'ancestor', pid: 7, cwd: '/w/shop' }],
+    sessions: [{ label: 'checkout (Claude 1)', client: 'claude-code 2.1.323', connected: true, matchedBy: 'ancestor', pid: 7, cwd: '/w/shop' }],
     ...over,
   };
 }
@@ -45,7 +45,7 @@ describe('renderStatus', () => {
     expect(text).toContain('- PROBLEM: Copilot has the "copane" server turned off: run `copilot mcp enable copane`.');
     expect(text).toMatch(/In Claude Code and the Copilot CLI, `\/mcp` lists the "copane" server/);
     expect(text).toContain('Self-test (started the way an agent would, from this window): ok ✓');
-    expect(text).toContain('Claude 1 · checkout — claude-code 2.1.323, connected; found this window: started by an extension in this window');
+    expect(text).toContain('checkout (Claude 1) — claude-code 2.1.323, connected; found this window: started by an extension in this window');
   });
 
   it('says what to do when nothing is connected or broken', () => {
