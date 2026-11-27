@@ -132,6 +132,22 @@ argv.json editor. Not verified for real: Windows paths (`/c:/Users/...`), WSL it
   `page/frameSnapshot.ts`), refs remember their frame and its document, and input still goes to the
   page target at coordinates mapped out through each `<iframe>` (`page/frameTargets.ts`). The page
   indicator and certificate handling stay on the page target only.
+- **Logins** (`browser/credentials.ts`, HTTP authentication): the bridge answers a site's or proxy's
+  login challenge in a tab a session drives by asking the user (`services.prompts`). What VS Code
+  does with a challenge nobody answers changed: until 1.147 it cancelled it (the page shows its
+  401); since 1.148 it shows a sign-in dialog of its own over the page, the navigation stays
+  pending, `Page.navigate` gets no answer, and a tab *opened* straight onto such a page answers no
+  CDP command at all until the user has dealt with the dialog. So where VS Code asks itself
+  (`vscodeAsksForLogins`) and login prompts are on, a tab a session opens starts on `about:blank`
+  and loads its URL once the bridge is attached and interception is in effect (`defersFirstLoad`,
+  `BrowserServiceImpl.deferFirstLoad`): the first request is already the bridge's, and it is in the
+  network log. The blank document leaves no history entry. With login prompts off the dialog is
+  VS Code's and the user's; `browser_open` and `browser_navigate` then say that the page may be
+  waiting there (`BrowserService.loginAskedByVsCode`) instead of a bare timeout. Popups opened by
+  a page are not covered.
+- **"Leave this page?"**: until VS Code 1.147 a page with a `beforeunload` handler opens that dialog
+  when it is navigated away from, and the bridge confirms it for a navigation the agent asked for;
+  since 1.148 the browser leaves without asking and no dialog is reported.
 - **Request interception**: CDP `Fetch` of a tab has one owner, `browser/interception.ts`. Anything
   that holds, answers or changes requests (login prompts in `credentials.ts`, request mocking in
   `routes.ts`) is a `FetchClient` registered there; never call `Fetch.*` directly. `Fetch` is enabled

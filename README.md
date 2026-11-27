@@ -119,7 +119,9 @@ authentication: Basic, Digest, NTLM), you are asked in VS Code and type it into 
 agent never sees it, only whether you logged in. Each site or proxy is asked once; a rejected login
 is asked once more, then the agent is told to stop. *Log In and Remember* saves the login in VS
 Code's secret storage; **Copane: Forget Saved Browser Logins** removes saved logins. Turn this off
-with `copane.browser.loginPrompts`. Not possible: Windows single sign-on (Kerberos or Negotiate
+with `copane.browser.loginPrompts`: VS Code 1.148 and later then shows its own sign-in dialog in
+the tab, and the agent is told that the page waits for you there (older versions show the site's
+error page). Not possible: Windows single sign-on (Kerberos or Negotiate
 without typing anything) cannot be provided by an extension.
 
 **Handing a tab to you.** When a page needs you (single sign-on, MFA, a captcha, a consent screen,
