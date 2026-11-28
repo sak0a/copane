@@ -1,16 +1,21 @@
 # Changelog
 
-## Unreleased
+## 0.4.3
 
-- **Session names.** A session can have a name in place of "Claude 2" on its terminals and in the
+Sessions can have names, so you can tell "Claude 1", "Claude 2" and "Claude 3" apart.
+
+- **Session names.** A session's name takes the place of "Claude 2" on its terminals and in the
   Sessions and Agent Tabs views; the indicator on its browser tabs and Copane's questions to you
-  show it as "checkout tests (Claude 2)". Rename a session yourself (pencil on its row in Sessions, the right-click menu of its tabs,
-  or *Copane: Rename Agent Session...*); the agent cannot change a name you gave, and an empty name
-  gives "Claude 2" back. Agents are asked to name themselves after their task in 2-3 words with
-  `session_set_title` (at most 24 characters, since it labels terminal tabs; it used to be a title
-  shown next to the label). "Claude 2" stays visible next to the name in the views and in
-  questions, names are unique in a window, and a name that reads like another session's
-  ("Claude 3") is refused.
+  show it as "checkout tests (Claude 2)". "Claude 2" stays visible next to the name in the views.
+- **Rename a session yourself** with the pencil on its row in Sessions, the right-click menu of its
+  tabs (in Agent Tabs or the editor tab bar), or *Copane: Rename Agent Session...*. The agent cannot
+  change a name you gave; an empty name gives "Claude 2" back.
+- **Agents name themselves** after their task in 2-3 words with `session_set_title`, which they are
+  now asked to call when they start a task. The name is at most 24 characters, since it labels
+  terminal tabs; it used to be a title shown next to the label.
+- Names are unique in a window, and a name that reads like another session's ("Claude 3") is
+  refused. VS Code renames only the terminal in front, so a session's other terminals take a new
+  name when you switch to them.
 
 ## 0.4.2
 
