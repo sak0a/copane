@@ -22,6 +22,7 @@ export function buildInstructions(services: BridgeServices, enabled: (tool: stri
     browser
       ? 'These tools work in the VS Code window you run in: its integrated browser tabs and terminals, which the user sees and can take over at any time.'
       : 'These tools work in the VS Code window you run in: its integrated terminals, which the user sees and can take over at any time.',
+    paragraph('', ['When you start a task, name your session with session_set_title so the user can tell your terminals and tabs apart.']),
   ];
   if (browser) {
     lines.push(

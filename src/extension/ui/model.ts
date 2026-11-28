@@ -230,8 +230,11 @@ function sessionNode(
       : `Disconnected. If it does not reconnect within ${graceSeconds} s, the session ends and its tabs and terminals are released; one from before a window reload or restart is kept, as away, while it has tabs or terminals.`;
   const client = session.client.version ? `${session.client.name} ${session.client.version}` : session.client.name;
   const tooltip = [
-    `$(${session.connected ? 'circle-filled' : 'circle-outline'}) **${md(session.label)}**${session.title ? ` · ${md(session.title)}` : ''}`,
+    `$(${session.connected ? 'circle-filled' : 'circle-outline'}) **${md(session.label)}**${session.title ? ` · ${md(session.autoLabel)}` : ''}`,
     `${connection}  \n${md(client)}${session.pid ? ` · pid ${session.pid}` : ''}`,
+    session.title
+      ? `Named ${session.titleBy === 'user' ? 'by you' : 'by the agent'}; its automatic name is ${md(session.autoLabel)}.`
+      : 'Rename it (the pencil) to tell it apart on its terminals and tabs.',
     session.cwd ? code(session.cwd) : undefined,
     [
       contents || 'No tabs or terminals yet.',
@@ -266,7 +269,7 @@ function sessionNode(
     kind: 'session',
     label: session.label,
     description:
-      [session.title, state, collapsed !== undefined ? (collapsed ? `${plural(collapsed, 'tab')} collapsed` : 'tabs collapsed') : undefined, profile ? `profile ${profile.label}` : undefined]
+      [session.title ? session.autoLabel : undefined, state, collapsed !== undefined ? (collapsed ? `${plural(collapsed, 'tab')} collapsed` : 'tabs collapsed') : undefined, profile ? `profile ${profile.label}` : undefined]
         .filter(isString)
         .join(' · ') || undefined,
     tooltip,
@@ -274,7 +277,7 @@ function sessionNode(
     contextValue: flags.filter(isString).join(' '),
     accessibilityLabel: [
       `${session.label} agent session`,
-      session.title,
+      session.title ? session.autoLabel : undefined,
       session.connected ? 'connected' : session.away ? 'away, its agent has not reconnected' : 'disconnected, waiting to reconnect',
       waitingTerminals ? `${plural(waitingTerminals, 'terminal')} waiting for you` : undefined,
       waitingTabs ? `${plural(waitingTabs, 'tab')} waiting for you` : undefined,
@@ -513,7 +516,7 @@ function buildStatus(
 
   const sessionLines = input.sessions.map(s => {
     const parts = [
-      s.title ? md(s.title) : undefined,
+      s.title ? md(s.autoLabel) : undefined,
       s.connected ? undefined : s.away ? 'away' : 'disconnected',
       ...(() => {
         const tabs = input.tabs.filter(t => tabBelongsTo(t, s.id)).length;

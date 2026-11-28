@@ -100,6 +100,7 @@
     { "command": "copane.ui.interruptTerminal", "title": "Interrupt Terminal Command (Ctrl+C)", "category": "Copane", "icon": "$(debug-stop)" },
     { "command": "copane.ui.closeTerminal", "title": "Close Agent Terminal", "category": "Copane", "icon": "$(trash)" },
     { "command": "copane.ui.endSession", "title": "End Agent Session...", "category": "Copane", "icon": "$(close)" },
+    { "command": "copane.ui.renameSession", "title": "Rename Agent Session...", "category": "Copane", "icon": "$(edit)" },
     { "command": "copane.ui.pauseSessionTabs", "title": "Pause Agent on All Its Tabs", "category": "Copane", "icon": "$(debug-pause)" },
     { "command": "copane.ui.resumeSessionTabs", "title": "Resume Agent on All Its Tabs", "category": "Copane", "icon": "$(debug-continue)" },
     { "command": "copane.ui.showSession", "title": "Show Agent Session", "icon": "$(robot)" },
@@ -122,6 +123,7 @@
       { "command": "copane.ui.interruptTerminal", "when": "copane.ui.hasSessions" },
       { "command": "copane.ui.closeTerminal", "when": "copane.ui.hasSessions" },
       { "command": "copane.ui.endSession", "when": "copane.ui.hasSessions" },
+      { "command": "copane.ui.renameSession", "when": "copane.ui.hasSessions" },
       { "command": "copane.ui.pauseSessionTabs", "when": "copane.ui.hasSessions && !copane.ui.browserUnavailable" },
       { "command": "copane.ui.resumeSessionTabs", "when": "copane.ui.hasSessions && !copane.ui.browserUnavailable" },
       { "command": "copane.ui.showSession", "when": "copane.ui.hasSessions" },
@@ -136,7 +138,9 @@
       { "command": "copane.ui.collapseSessionTabs", "when": "resourceScheme == vscode-browser && resourceFilename in copane.ui.collapsibleTabs", "group": "copane@1" },
       { "command": "copane.ui.expandSessionTabs", "when": "resourceScheme == vscode-browser && resourceFilename in copane.ui.collapsedTabs", "group": "copane@1" },
       { "command": "copane.ui.collapseOtherSessions", "when": "resourceScheme == vscode-browser && resourceFilename in copane.ui.collapsibleTabs", "group": "copane@2" },
-      { "command": "copane.ui.collapseOtherSessions", "when": "resourceScheme == vscode-browser && resourceFilename in copane.ui.collapsedTabs", "group": "copane@2" }
+      { "command": "copane.ui.collapseOtherSessions", "when": "resourceScheme == vscode-browser && resourceFilename in copane.ui.collapsedTabs", "group": "copane@2" },
+      { "command": "copane.ui.renameSession", "when": "resourceScheme == vscode-browser && resourceFilename in copane.ui.collapsibleTabs", "group": "copane@3" },
+      { "command": "copane.ui.renameSession", "when": "resourceScheme == vscode-browser && resourceFilename in copane.ui.collapsedTabs", "group": "copane@3" }
     ],
     "view/title": [
       { "command": "copane.ui.groupTabsBySession", "when": "view == copane.sessions && copane.ui.hasSessions && !copane.ui.browserUnavailable", "group": "3_tabs@1" },
@@ -164,7 +168,9 @@
 
       { "command": "copane.ui.collapseSessionTabs", "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/ && viewItem =~ /\\bcollapsible\\b/", "group": "inline@8" },
       { "command": "copane.ui.expandSessionTabs", "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/ && viewItem =~ /\\bcollapsed\\b/", "group": "inline@8" },
+      { "command": "copane.ui.renameSession", "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/", "group": "inline@7" },
       { "command": "copane.ui.endSession", "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/", "group": "inline@9" },
+      { "command": "copane.ui.renameSession", "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/", "group": "1_name@1" },
       { "command": "copane.ui.pauseSessionTabs", "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/ && viewItem =~ /\\bhasUnpausedTabs\\b/", "group": "2_control@1" },
       { "command": "copane.ui.resumeSessionTabs", "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/ && viewItem =~ /\\bhasPausedTabs\\b/", "group": "2_control@2" },
       { "command": "copane.ui.collapseSessionTabs", "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/ && viewItem =~ /\\bcollapsible\\b/", "group": "3_tabs@1" },
@@ -180,6 +186,7 @@
       { "command": "copane.ui.revealTab", "when": "view == copane.tabs && viewItem =~ /\\btab\\b/", "group": "1_show@1" },
       { "command": "copane.ui.showSession", "when": "view == copane.tabs && viewItem =~ /\\btab\\b/", "group": "1_show@2" },
       { "command": "copane.ui.showSessionInView", "when": "view == copane.tabs && viewItem =~ /\\btab\\b/", "group": "1_show@3" },
+      { "command": "copane.ui.renameSession", "when": "view == copane.tabs && viewItem =~ /\\btab\\b/", "group": "4_session@1" },
       { "command": "copane.ui.pauseTab", "when": "view == copane.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bnotPaused\\b/", "group": "2_control@1" },
       { "command": "copane.ui.resumeTab", "when": "view == copane.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\bpaused\\b/", "group": "2_control@1" },
       { "command": "copane.ui.releaseTab", "when": "view == copane.tabs && viewItem =~ /\\btab\\b/ && viewItem =~ /\\breleasable\\b/", "group": "2_control@2" },

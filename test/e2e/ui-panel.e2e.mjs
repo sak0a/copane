@@ -78,9 +78,9 @@ test("each agent's tabs are listed in its color, sorted by session, with the tit
   const a2 = panelRow(s, tabs.a2);
   const b1 = panelRow(s, tabs.b1);
   assert.equal(a1.label, 'Panel Alpha One');
-  assert.match(a1.description, new RegExp(`^${alphaInfo.label} · panel alpha · controlling · 127\\.0\\.0\\.1:\\d+$`));
-  assert.match(a2.description, new RegExp(`^${alphaInfo.label} · controlling · `), 'the title is on the first row of a session only');
-  assert.match(b1.description, new RegExp(`^${betaInfo.label} · panel beta · controlling`));
+  assert.match(a1.description, new RegExp(`^panel alpha · ${alphaInfo.automaticLabel} · controlling · 127\\.0\\.0\\.1:\\d+$`));
+  assert.match(a2.description, /^panel alpha · controlling · /, 'the automatic label is on the first row of a session only');
+  assert.match(b1.description, new RegExp(`^panel beta · ${betaInfo.automaticLabel} · controlling`));
   assert.deepEqual(a1.icon.id, 'circle-large-filled');
   assert.equal(a1.icon.color, a2.icon.color);
   assert.notEqual(a1.icon.color, b1.icon.color, 'two sessions, two colors');
@@ -90,7 +90,7 @@ test("each agent's tabs are listed in its color, sorted by session, with the tit
 
   const w = await until(async () => {
     const w = await workbench();
-    return w.rows?.some(r => r.aria.startsWith(`Browser tab Panel Alpha One, ${alphaInfo.label} (panel alpha), controlling`)) && w;
+    return w.rows?.some(r => r.aria.startsWith(`Browser tab Panel Alpha One, panel alpha (${alphaInfo.automaticLabel}), controlling`)) && w;
   }, 'the rows in the workbench');
   const row = w.rows.find(r => r.aria.startsWith('Browser tab Panel Alpha One'));
   assert.deepEqual(row.actions, ['Show Agent Session', 'Pause Agents on Browser Tab', 'Release Browser Tab from Agent', 'Close Browser Tab']);

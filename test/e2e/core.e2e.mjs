@@ -65,7 +65,7 @@ test('an unknown argument is refused, naming it and the valid ones', async () =>
     assert.ok(result.isError);
     assert.match(result.text, /^session_set_title has no argument "titel"; nothing was done\. Its arguments are "title"\./);
     const info = JSON.parse(await a.ok('session_info'));
-    assert.equal(info.you.title, null, 'the refused call did nothing');
+    assert.equal(info.you.namedBy, undefined, 'the refused call did nothing');
   } finally {
     await a.close();
   }

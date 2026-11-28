@@ -2,7 +2,7 @@
 // `debug_vscode_command` passes it), or asks with a quick pick when run from the Command Palette.
 import * as vscode from 'vscode';
 import type { BridgeServices, BrowserTabInfo, TerminalInfo } from '../core/services';
-import type { AgentSession } from '../core/sessions';
+import { MAX_SESSION_NAME, sessionDisplayName, type AgentSession } from '../core/sessions';
 import { findTerminalRunning } from './agentTerminal';
 import { Cmd } from './ids';
 import { hostOf, plural, sessionNodeId, tabTitle, tabBelongsTo, tabState, terminalBelongsTo, type AttentionItem, type ViewNode } from './model';
@@ -119,7 +119,7 @@ export function registerUiCommands(services: BridgeServices, state: UiState, tre
     const picked = await vscode.window.showQuickPick(
       list.map(s => ({
         label: `$(${s.connected ? 'circle-filled' : 'circle-outline'}) ${s.label}`,
-        description: [s.title, s.connected ? undefined : s.away ? 'away' : 'disconnected'].filter(Boolean).join(' · '),
+        description: [s.title ? s.autoLabel : undefined, s.connected ? undefined : s.away ? 'away' : 'disconnected'].filter(Boolean).join(' · '),
         detail: sessionContents(s),
         id: s.id,
       })),
@@ -174,7 +174,7 @@ export function registerUiCommands(services: BridgeServices, state: UiState, tre
     const end = 'End Session';
     const endAndClose = `End and Close Its ${[ownTabs.length ? 'Tabs' : undefined, ownTerminals.length ? 'Terminals' : undefined].filter(Boolean).join(' and ')}`;
     const answer = await services.prompts.ask({
-      message: `End ${session.label}${session.title ? ` (${session.title})` : ''}?`,
+      message: `End ${sessionDisplayName(session)}?`,
       detail: [
         `${session.label} will be disconnected from this window and lose control of every tab and terminal it uses.`,
         contents ? `Its ${contents} stay open unless you choose to close them.` : undefined,
@@ -196,6 +196,61 @@ export function registerUiCommands(services: BridgeServices, state: UiState, tre
         }
       }
       for (const t of ownTabs) await services.browser.closeTab(t.id).catch(err => services.log.warn(`UI: could not close ${t.id}: ${String(err)}`));
+    }
+  }
+
+  /**
+   * Asks the user for a name for the session, shown instead of "Claude 2" on its terminals and tabs
+   * and in the views; an agent cannot change it. Empty gives the session its automatic name back.
+   */
+  async function renameSession(sessionId: string): Promise<string | undefined> {
+    const ask = services.prompts.input?.bind(services.prompts);
+    if (!ask) return undefined;
+    let session = sessions.get(sessionId);
+    if (!session) throw new TargetGone();
+    let value = session.title ?? '';
+    let problem: string | undefined;
+    for (;;) {
+      const auto = session.autoLabel;
+      const answer = await ask({
+        title: `Rename ${session.label}`,
+        prompt:
+          problem ??
+          `Shown instead of "${auto}" on its terminals and browser tabs; the agent cannot change it. Leave empty for "${auto}" (its agent may then name it).`,
+        value,
+        placeholder: 'e.g. OpenShift PDB check',
+      });
+      if (answer === undefined) return undefined;
+      session = sessions.get(sessionId);
+      if (!session) throw new TargetGone();
+      value = answer;
+      if (answer.trim().length > MAX_SESSION_NAME) {
+        problem = `At most ${MAX_SESSION_NAME} characters, and shorter names fit better on terminal tabs. Shorten it.`;
+        continue;
+      }
+      const before = session.label;
+      const refusal = sessions.setTitle(sessionId, answer, 'user');
+      if (refusal?.reason === 'taken') {
+        problem = `Another session is already called "${refusal.by.label}". Choose another name.`;
+        continue;
+      }
+      if (refusal) {
+        problem = `"${answer.trim()}" reads like the automatic name of another session. Choose another name.`;
+        continue;
+      }
+      const after = session.label;
+      if (after === before) return after;
+      services.log.info(`UI: the user renamed ${before} to "${after}"`);
+      // VS Code renames only the terminal in front; the terminal module renames the others when they come to it.
+      await new Promise(resolve => setTimeout(resolve, 600));
+      const madeFrom = (name: string) => name === before || name.startsWith(`${before}: `) || name.startsWith(`${before} (`);
+      const own = terminals().filter(t => t.origin === 'agent' && t.ownedBy === sessionId && t.state !== 'closed');
+      const stale = own.filter(t => madeFrom(t.name)).length;
+      const done = session.title ? `${auto} is now called "${after}".` : `${before} has its automatic name "${after}" again.`;
+      const which = own.length === 1 ? 'Its terminal takes' : stale === 1 ? `1 of its ${own.length} terminals takes` : `${stale} of its terminals take`;
+      const note = stale ? ` ${which} the new name when you switch to ${stale === 1 ? 'it' : 'them'}: VS Code can rename only the terminal in front.` : '';
+      vscode.window.setStatusBarMessage(`$(edit) ${done}${note}`, note ? 10_000 : 5000);
+      return after;
     }
   }
 
@@ -398,6 +453,19 @@ export function registerUiCommands(services: BridgeServices, state: UiState, tre
     command(Cmd.endSession, async (arg?: unknown) => {
       const id = refOf(arg)?.sessionId ?? (await pickSession('End which agent session?'));
       if (id) await endSession(id);
+    }),
+    command(Cmd.renameSession, async (arg?: unknown) => {
+      let id: string | undefined;
+      if (arg instanceof vscode.Uri) {
+        // A browser editor's tab (its context menu): the session that has the tab.
+        const found = grouping.ownerOfResource(arg);
+        if (!found) throw new TargetGone();
+        if (!found.sessionId) throw new Error('No agent session uses this tab, so there is no session to rename.');
+        id = found.sessionId;
+      } else {
+        id = refOf(arg)?.sessionId ?? (await pickSession('Rename which agent session? The name is shown on its terminals and browser tabs.'));
+      }
+      return id ? renameSession(id) : undefined;
     }),
     command(Cmd.pauseSessionTabs, async (arg?: unknown) => {
       const id = refOf(arg)?.sessionId ?? (await pickSession('Pause every tab of which agent session?'));

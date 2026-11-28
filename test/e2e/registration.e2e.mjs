@@ -200,7 +200,7 @@ test('the status report covers this window, the browser, every agent and the ses
     assert.match(report, /### Codex[\s\S]*registered ✓/);
     assert.match(report, /### GitHub Copilot[\s\S]*Config: .*copilot.mcp-config\.json[\s\S]*registered ✓/);
     assert.match(report, /Self-test .*: ok ✓/);
-    assert.match(report, /Claude \d+ · status check — claude-code/);
+    assert.match(report, /status check \(Claude \d+\) — claude-code/);
   } finally {
     await a.close();
   }

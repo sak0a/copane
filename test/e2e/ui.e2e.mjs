@@ -44,30 +44,85 @@ const command = (name, ...args) => user.ok('debug_vscode_command', { command: na
 const row = (s, id) => s.rows.find(r => r.id === id);
 
 let alpha; // the agent under test
-let alphaLabel;
+let alphaLabel; // what the user sees it called: the name it gave itself, later the name the user gave it
+let alphaAuto; // "Claude N"
 let tabId;
 
 test('a connecting session appears in the view and in the status bar', async () => {
   await command('workbench.view.extension.copane');
   alpha = await agent({ session: ALPHA });
   await alpha.ok('session_set_title', { title: 'ui e2e alpha' });
-  alphaLabel = JSON.parse(await alpha.ok('session_info')).you.label;
+  const you = JSON.parse(await alpha.ok('session_info')).you;
+  alphaLabel = you.label;
+  alphaAuto = you.automaticLabel;
+  assert.equal(alphaLabel, 'ui e2e alpha');
+  assert.match(alphaAuto, /^Claude \d+$/);
+  assert.equal(you.namedBy, 'you');
 
   const s = await until(async () => {
     const s = await state();
-    return row(s, `session:${ALPHA}#empty`)?.description === 'ui e2e alpha' && s;
+    return row(s, `session:${ALPHA}#empty`)?.label === 'ui e2e alpha' && s;
   }, 'the session row');
-  assert.equal(row(s, `session:${ALPHA}#empty`).label, alphaLabel);
+  assert.equal(row(s, `session:${ALPHA}#empty`).description, alphaAuto);
   assert.equal(row(s, `session:${ALPHA}#empty`).icon.id, 'circle-filled');
   assert.match(s.status.shown.text, /^\$\(robot\) \d+/);
   assert.equal(s.badge, null);
 
   const w = await until(async () => {
     const w = await workbench();
-    return w.rows?.some(r => r.startsWith(`${alphaLabel} agent session, ui e2e alpha, connected`)) && w.status && w;
+    return w.rows?.some(r => r.startsWith(`ui e2e alpha agent session, ${alphaAuto}, connected`)) && w.status && w;
   }, 'the session row and status bar item in the workbench');
   assert.match(w.status.aria, /agent sessions? connected/);
   assert.equal(w.status.warning, false);
+});
+
+test('the user renames the session: its row and active terminal follow, and the agent cannot change it', async () => {
+  const created = await alpha.ok('terminal_create', { name: 'shell' });
+  const termId = /term-\d+/.exec(created)?.[0];
+  assert.ok(termId, `no terminal id in: ${created}`);
+  try {
+    await until(async () => (await state()).activeTerminal?.name === 'ui e2e alpha: shell', 'the new terminal, named after the session, in front');
+
+    // A name like another session's automatic one is refused and asked again; then the real one.
+    await user.ok('debug_answer_prompts', { answers: ['Claude 99', 'Pod Disruption Check'], clear: true });
+    await command('copane.ui.renameSession', ALPHA);
+    const asked = JSON.parse(await user.ok('debug_answer_prompts', {})).shown.slice(-2);
+    assert.deepEqual(asked.map(p => p.message), ['Rename ui e2e alpha', 'Rename ui e2e alpha']);
+    assert.equal(asked[0].input.value, 'ui e2e alpha');
+    assert.match(asked[0].input.prompt, new RegExp(`instead of "${alphaAuto}" on its terminals and browser tabs; the agent cannot change it`));
+    assert.match(asked[1].input.prompt, /"Claude 99" reads like the automatic name of another session/);
+    alphaLabel = 'Pod Disruption Check';
+
+    const you = JSON.parse(await alpha.ok('session_info')).you;
+    assert.deepEqual([you.label, you.automaticLabel, you.namedBy], [alphaLabel, alphaAuto, 'the user']);
+    // The row has its terminal under it, hence no "#empty" in its id.
+    const s = await until(async () => {
+      const s = await state();
+      return row(s, `session:${ALPHA}`)?.label === alphaLabel && s;
+    }, 'the renamed session row');
+    assert.equal(row(s, `session:${ALPHA}`).description, alphaAuto);
+    assert.equal(row(s, `session:${ALPHA}/terminal:${termId}`)?.label, 'shell', 'the terminal row drops the session name');
+    // VS Code renames only the terminal in front: this one is.
+    await until(async () => (await state()).activeTerminal?.name === `${alphaLabel}: shell`, 'the active terminal renamed');
+    await until(async () => (await workbench()).rows?.some(r => r.startsWith(`${alphaLabel} agent session, ${alphaAuto}`)), 'the renamed row in the workbench');
+
+    const refused = await alpha.ok('session_set_title', { title: 'my own name' });
+    assert.match(refused, /The user named this session "Pod Disruption Check", so that name stays/);
+    assert.equal(JSON.parse(await alpha.ok('session_info')).you.label, alphaLabel);
+    const tooLong = await alpha.call('session_set_title', { title: 'a title far too long for a terminal tab' });
+    assert.ok(tooLong.isError && /At most 24 characters/.test(tooLong.text), tooLong.text);
+
+    // Empty gives the automatic name back, and the agent may name itself again.
+    await user.ok('debug_answer_prompts', { answers: [''], clear: true });
+    await command('copane.ui.renameSession', ALPHA);
+    assert.equal(JSON.parse(await alpha.ok('session_info')).you.label, alphaAuto);
+    await until(async () => (await state()).activeTerminal?.name === `${alphaAuto}: shell`, 'the active terminal back on the automatic name');
+    assert.match(await alpha.ok('session_set_title', { title: 'ui e2e alpha' }), /now sees this session as "ui e2e alpha"/);
+    alphaLabel = 'ui e2e alpha';
+    await until(async () => (await state()).activeTerminal?.name === 'ui e2e alpha: shell', 'the active terminal named by the agent again');
+  } finally {
+    await alpha.call('terminal_close', { terminal: termId });
+  }
 });
 
 test('a tab the agent opens is listed under it as controlling', async () => {
@@ -197,7 +252,7 @@ test('a terminal waiting for the user turns the status bar into a warning until 
   }, 'the warning status');
   assert.equal(s.status.shown.text, `$(bell-dot) ${alphaLabel} needs you`);
   assert.equal(s.status.shown.backgroundColor, 'statusBarItem.warningBackground');
-  assert.equal(row(s, `session:${ALPHA}`).description, 'ui e2e alpha · needs you');
+  assert.equal(row(s, `session:${ALPHA}`).description, `${alphaAuto} · needs you`);
   assert.equal(row(s, `session:${ALPHA}/terminal:fx-e2e`).description, 'waiting for you: Log in to npm');
 
   const w = await until(async () => {
@@ -221,7 +276,7 @@ test('ending the session asks first, then removes it and releases its tab', asyn
   await command('copane.ui.endSession', ALPHA);
   const prompts = JSON.parse(await user.ok('debug_answer_prompts', {})).shown;
   const prompt = prompts.at(-1);
-  assert.equal(prompt.message, `End ${alphaLabel} (ui e2e alpha)?`);
+  assert.equal(prompt.message, `End ${alphaLabel} (${alphaAuto})?`);
   assert.deepEqual(prompt.choices, ['End Session', 'End and Close Its Tabs']);
   assert.equal(prompt.answer, 'End Session');
 

@@ -34,13 +34,24 @@ export interface AgentSession {
   readonly client: SessionClient;
   /** 1-based, unique among live sessions of the same agent kind in this window. */
   readonly number: number;
-  /** "Claude 2" */
-  readonly label: string;
+  /**
+   * What the user sees the session called, on its terminals and tabs and in the views: its name
+   * (`title`) when it has one, else `autoLabel`. Unique in the window. Changes when the session is
+   * named (`SessionManager.setTitle`), so read it when needed rather than keeping a copy.
+   */
+  label: string;
+  /** "Claude 2": agent kind and number, never changes. What `label` is while the session has no name. */
+  readonly autoLabel: string;
   /** "C2" */
   readonly badge: string;
   readonly color: SessionColor;
-  /** Short task summary the agent set for itself via `session_set_title`, shown next to the label. */
+  /**
+   * The session's name, e.g. "checkout tests": given by the user ("Rename Agent Session") or by the
+   * agent (`session_set_title`), shown instead of `autoLabel`. Undefined: no name.
+   */
   title: string | undefined;
+  /** Who gave the name. A name the user gave is never replaced by the agent. */
+  titleBy?: 'user' | 'agent';
   readonly pid: number | undefined;
   readonly cwd: string | undefined;
   readonly createdAt: number;
@@ -72,6 +83,31 @@ export type SessionChange =
   | { type: 'removed'; session: AgentSession };
 
 const KIND_NAMES: Record<AgentKind, string> = { 'claude-code': 'Claude', codex: 'Codex', copilot: 'Copilot', other: 'Agent' };
+/** Names that read like an automatic label ("Claude 3"): given to a session, they would be mistaken for another one. */
+const AUTOMATIC_LABEL = new RegExp(`^(?:${Object.values(KIND_NAMES).join('|')})\\s+\\d+$`, 'i');
+/** Longest session name, in characters. Agents are asked for much shorter ones (`session_set_title`). */
+export const MAX_SESSION_NAME = 60;
+
+/** Why a name was not given to a session (`SessionManager.setTitle`). */
+export type NameRefusal =
+  /** The user named the session, and the agent tried to change it. */
+  | { reason: 'named-by-user'; name: string }
+  /** Another session of the window is called that. */
+  | { reason: 'taken'; by: AgentSession }
+  /** It reads like the automatic label of another session ("Claude 3"). */
+  | { reason: 'automatic' };
+
+/**
+ * One line, no control characters and no bidirectional overrides (which could make a name in a prompt
+ * read differently from what it is), at most MAX_SESSION_NAME characters; undefined when nothing is left.
+ */
+export function normalizeSessionName(value: string | undefined): string | undefined {
+  const line = (value ?? '')
+    .replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, '')
+    .replace(/[\p{Cc}\s]+/gu, ' ')
+    .trim();
+  return Array.from(line).slice(0, MAX_SESSION_NAME).join('').trim() || undefined;
+}
 /**
  * The badge letter where it is not the name's first letter. Badges are at most two characters (VS Code
  * file decorations), so Claude, Codex and Copilot cannot all be told apart by their name: Copilot is
@@ -107,6 +143,8 @@ export interface RememberedSession {
   number: number;
   colorId: string;
   title?: string;
+  /** Who gave `title`; absent in records of older versions (where only agents gave titles). */
+  titleBy?: 'user' | 'agent';
   pid?: number;
   cwd?: string;
   createdAt: number;
@@ -202,6 +240,7 @@ export class SessionManager {
       number,
       color: (known && SESSION_COLORS.find(c => c.id === known.colorId)) || this.freeColor(),
       title: known?.title,
+      titleBy: known?.titleBy,
       pid: info.pid,
       cwd: info.cwd,
       createdAt: this.now(),
@@ -298,14 +337,35 @@ export class SessionManager {
     return [...this.sessions.values()].sort((a, b) => a.createdAt - b.createdAt);
   }
 
-  setTitle(id: string, title: string | undefined): void {
+  /**
+   * Names a session (`by` the user or its agent), or takes its name away (empty or undefined, or its
+   * own automatic label). Returns why not when the name is refused: the agent cannot change a name the
+   * user gave, and names are unique in the window and never read like another session's automatic
+   * label. The session's `label` follows; terminals named after it are renamed by the terminal module.
+   */
+  setTitle(id: string, title: string | undefined, by: 'user' | 'agent' = 'agent'): NameRefusal | undefined {
     const session = this.sessions.get(id);
-    if (!session) return;
-    const next = title?.trim().slice(0, 60) || undefined;
-    if (next === session.title) return;
-    session.title = next;
+    if (!session) return undefined;
+    if (by === 'agent' && session.titleBy === 'user' && session.title) return { reason: 'named-by-user', name: session.title };
+    let next = normalizeSessionName(title);
+    if (next && next.toLowerCase() === session.autoLabel.toLowerCase()) next = undefined;
+    if (next) {
+      const refusal = this.nameRefusal(next, id);
+      if (refusal) return refusal;
+    }
+    const nextBy = next ? by : undefined;
+    if (next === session.title && nextBy === session.titleBy) return undefined;
+    applyTitle(session, next, nextBy);
     this.changeEmitter.fire({ type: 'updated', session });
     this.save();
+    return undefined;
+  }
+
+  private nameRefusal(name: string, sessionId: string): NameRefusal | undefined {
+    if (AUTOMATIC_LABEL.test(name)) return { reason: 'automatic' };
+    const key = name.toLowerCase();
+    const holder = [...this.sessions.values()].find(s => s.id !== sessionId && s.label.toLowerCase() === key);
+    return holder ? { reason: 'taken', by: holder } : undefined;
   }
 
   /** Records agent activity (used for idle detection and "last active" in the UI). Does not fire. */
@@ -349,6 +409,7 @@ export class SessionManager {
           number: r.number,
           color: SESSION_COLORS.find(c => c.id === r.colorId) ?? this.freeColor(),
           title: r.title,
+          titleBy: r.titleBy,
           pid: r.pid,
           cwd: r.cwd,
           createdAt: r.createdAt,
@@ -367,16 +428,33 @@ export class SessionManager {
     this.save();
   }
 
-  private build(fields: Omit<AgentSession, 'label' | 'badge' | 'lastActivityAt' | 'matchedBy'> & { matchedBy: InstanceMatch | undefined }): AgentSession {
+  /**
+   * A session with its labels. A remembered name it cannot have any more (another session took it
+   * meanwhile) is dropped: the session goes back to its automatic label.
+   */
+  private build(
+    fields: Omit<AgentSession, 'label' | 'autoLabel' | 'badge' | 'title' | 'titleBy' | 'lastActivityAt' | 'matchedBy'> & {
+      title: string | undefined;
+      titleBy: 'user' | 'agent' | undefined;
+      matchedBy: InstanceMatch | undefined;
+    },
+  ): AgentSession {
     const name = KIND_NAMES[fields.client.kind];
-    const { matchedBy, ...rest } = fields;
-    return {
+    const { matchedBy, title: wanted, titleBy, ...rest } = fields;
+    const autoLabel = `${name} ${fields.number}`;
+    const normalized = normalizeSessionName(wanted);
+    const title = normalized && normalized.toLowerCase() !== autoLabel.toLowerCase() && !this.nameRefusal(normalized, fields.id) ? normalized : undefined;
+    const session: AgentSession = {
       ...rest,
-      label: `${name} ${fields.number}`,
+      label: autoLabel,
+      autoLabel,
       badge: `${BADGE_LETTERS[fields.client.kind] ?? name.charAt(0)}${fields.number > 9 ? '+' : fields.number}`,
+      title: undefined,
       lastActivityAt: this.now(),
       ...(matchedBy ? { matchedBy } : {}),
     };
+    applyTitle(session, title, title ? (titleBy ?? 'agent') : undefined);
+    return session;
   }
 
   private remember(s: AgentSession): RememberedSession {
@@ -385,7 +463,7 @@ export class SessionManager {
       client: s.client,
       number: s.number,
       colorId: s.color.id,
-      ...(s.title ? { title: s.title } : {}),
+      ...(s.title ? { title: s.title, titleBy: s.titleBy ?? 'agent' } : {}),
       ...(s.pid !== undefined ? { pid: s.pid } : {}),
       ...(s.cwd !== undefined ? { cwd: s.cwd } : {}),
       createdAt: s.createdAt,
@@ -440,9 +518,20 @@ export class SessionManager {
   }
 }
 
-/** "Claude 2" or "Claude 2 · fixing login" */
+function applyTitle(session: AgentSession, title: string | undefined, by: 'user' | 'agent' | undefined): void {
+  session.title = title;
+  if (title && by) session.titleBy = by;
+  else delete session.titleBy;
+  session.label = title ?? session.autoLabel;
+}
+
+/**
+ * How sentences name a session, in prompts to the user and messages to agents: "Claude 2", or
+ * "checkout tests (Claude 2)" once it has a name. The automatic label stays in sentences so an agent
+ * cannot pass itself off as something else in a question to the user by the name it gives itself.
+ */
 export function sessionDisplayName(session: AgentSession): string {
-  return session.title ? `${session.label} · ${session.title}` : session.label;
+  return session.title ? `${session.label} (${session.autoLabel})` : session.label;
 }
 
 export function describeSession(session: AgentSession): SessionDescriptor {

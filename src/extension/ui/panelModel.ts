@@ -88,7 +88,7 @@ function tabRow(tab: BrowserTabInfo, owner: AgentSession, sessions: readonly Age
   const relation = tab.origin === 'user' ? 'your tab' : opener ? `opened by ${opener.label}` : undefined;
   const description = [
     owner.label,
-    firstOfSession ? owner.title : undefined,
+    firstOfSession && owner.title ? owner.autoLabel : undefined,
     owner.connected ? undefined : owner.away ? 'away' : 'reconnecting',
     state === 'waiting' ? `${STATE_TEXT[state]}: ${truncate(tab.request!.message, 60)}` : STATE_TEXT[state],
     profileMark(tab, owner.id),
@@ -117,7 +117,7 @@ function tabRow(tab: BrowserTabInfo, owner: AgentSession, sessions: readonly Age
   const tooltip = [
     `$(globe) **${md(label)}**`,
     md(tab.url),
-    `$(circle-large-filled) ${md(owner.label)}${owner.title ? ` · ${md(owner.title)}` : ''}${owner.connected ? '' : owner.away ? ' (away)' : ' (reconnecting)'}`,
+    `$(circle-large-filled) ${md(owner.label)}${owner.title ? ` · ${md(owner.autoLabel)}` : ''}${owner.connected ? '' : owner.away ? ' (away)' : ' (reconnecting)'}`,
     `${control} ${opened}${others.length ? ` Also used by ${md(others.map(s => s.label).join(', '))}.` : ''}`,
     tab.profile ? `$(account) ${md(tab.profile.description)}` : undefined,
     'Click to show the tab.',
@@ -136,7 +136,7 @@ function tabRow(tab: BrowserTabInfo, owner: AgentSession, sessions: readonly Age
     contextValue: flags.filter(isString).join(' '),
     accessibilityLabel: [
       `Browser tab ${label}`,
-      `${owner.label}${owner.title ? ` (${owner.title})` : ''}`,
+      `${owner.label}${owner.title ? ` (${owner.autoLabel})` : ''}`,
       owner.connected ? undefined : owner.away ? 'away' : 'reconnecting',
       STATE_TEXT[state],
       profileMark(tab, owner.id),

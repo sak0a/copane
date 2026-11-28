@@ -163,6 +163,7 @@ describe('a tab waiting for the user in the views', () => {
     client: { name: 'claude-code', version: '2.1.0', kind: 'claude-code' },
     number: n,
     label: `Claude ${n}`,
+    autoLabel: `Claude ${n}`,
     badge: `C${n}`,
     color: SESSION_COLORS[n - 1]!,
     title: undefined,

@@ -24,6 +24,8 @@ export const Cmd = {
   interruptTerminal: 'copane.ui.interruptTerminal',
   closeTerminal: 'copane.ui.closeTerminal',
   endSession: 'copane.ui.endSession',
+  /** Give a session a name of the user's choosing, shown instead of "Claude 2" on its terminals and tabs. */
+  renameSession: 'copane.ui.renameSession',
   pauseSessionTabs: 'copane.ui.pauseSessionTabs',
   resumeSessionTabs: 'copane.ui.resumeSessionTabs',
   /** The agent's own terminal when it runs in one of this window (a `claude` CLI), else its row in the Sessions view. */

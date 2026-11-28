@@ -249,6 +249,12 @@
         "icon": "$(close)"
       },
       {
+        "command": "copane.ui.renameSession",
+        "title": "Rename Agent Session...",
+        "category": "Copane",
+        "icon": "$(edit)"
+      },
+      {
         "command": "copane.ui.pauseSessionTabs",
         "title": "Pause Agent on All Its Tabs",
         "category": "Copane",
@@ -637,6 +643,10 @@
           "when": "copane.ui.hasSessions"
         },
         {
+          "command": "copane.ui.renameSession",
+          "when": "copane.ui.hasSessions"
+        },
+        {
           "command": "copane.ui.pauseSessionTabs",
           "when": "copane.ui.hasSessions && !copane.ui.browserUnavailable"
         },
@@ -774,9 +784,19 @@
           "group": "inline@8"
         },
         {
+          "command": "copane.ui.renameSession",
+          "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/",
+          "group": "inline@7"
+        },
+        {
           "command": "copane.ui.endSession",
           "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/",
           "group": "inline@9"
+        },
+        {
+          "command": "copane.ui.renameSession",
+          "when": "view == copane.sessions && viewItem =~ /\\bsession\\b/",
+          "group": "1_name@1"
         },
         {
           "command": "copane.ui.pauseSessionTabs",
@@ -847,6 +867,11 @@
           "command": "copane.ui.showSessionInView",
           "when": "view == copane.tabs && viewItem =~ /\\btab\\b/",
           "group": "1_show@3"
+        },
+        {
+          "command": "copane.ui.renameSession",
+          "when": "view == copane.tabs && viewItem =~ /\\btab\\b/",
+          "group": "4_session@1"
         },
         {
           "command": "copane.ui.pauseTab",
@@ -941,6 +966,16 @@
           "command": "copane.ui.collapseOtherSessions",
           "when": "resourceScheme == vscode-browser && resourceFilename in copane.ui.collapsedTabs",
           "group": "copane@2"
+        },
+        {
+          "command": "copane.ui.renameSession",
+          "when": "resourceScheme == vscode-browser && resourceFilename in copane.ui.collapsibleTabs",
+          "group": "copane@3"
+        },
+        {
+          "command": "copane.ui.renameSession",
+          "when": "resourceScheme == vscode-browser && resourceFilename in copane.ui.collapsedTabs",
+          "group": "copane@3"
         }
       ]
     },

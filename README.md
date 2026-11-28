@@ -28,7 +28,8 @@ any moment.
   command needs you (a password, a 2FA code, a browser login), it hands the terminal to you instead
   of asking for secrets in chat.
 - Several agent sessions can work in one window, in several windows at once, each with its own
-  label and color ("Claude 1", "Claude 2") on the tabs and terminals it uses.
+  name and color on the tabs and terminals it uses: the agent names itself after its task
+  ("checkout tests"), or you rename it, instead of "Claude 1", "Claude 2".
 
 It works with the **Claude Code extension for VS Code** (its chat sessions), with the **`claude`
 CLI** in the integrated terminal, with **Codex** (`codex` CLI and extension), and with **GitHub
@@ -76,8 +77,8 @@ The agent sees the tools as `mcp__copane__<tool>`:
   text, console, network); click, type, fill forms, evaluate scripts; screenshots.
 - **`terminal_*`**: create terminals, run commands and read their output and exit codes, send
   input, wait, interrupt, and hand a terminal to you when it needs a person.
-- **`session_info`**, **`session_set_title`**: who the agent is in this window, and a short title
-  for its task that you see next to its label.
+- **`session_info`**, **`session_set_title`**: who the agent is in this window, and a short name
+  for its task (2-3 words) that you see instead of "Claude 2" on its tabs and terminals.
 - **`window_status`**, **`window_select`**: which VS Code window the session uses and why, and
   switching to another one. These two work even when no window is reachable, so an agent can
   always explain why the other tools are missing.
@@ -222,7 +223,13 @@ the open windows, and connects with `window_select`.
 ### Several sessions, several windows
 
 Each session gets a label and a color in its window ("Claude 2", blue) shown on the tabs and
-terminals it uses. A session may freely use the tabs and terminals it opened. Using a tab or
+terminals it uses. Agents are asked to name their session after their task in a few words
+("checkout tests"), which then replaces "Claude 2" on its terminals and in the views ("checkout
+tests (Claude 2)" in the indicator on its browser tabs and in Copane's questions to you). To choose the name yourself, use **Rename** (the pencil on the
+session's row in Sessions, the right-click menu of one of its tabs in Agent Tabs or in the editor tab
+bar, or *Copane: Rename Agent Session...*); the agent cannot change a name you gave, and an empty name
+gives back "Claude 2". VS Code can rename only the terminal in front, so its other terminals take the
+new name when you switch to them. A session may freely use the tabs and terminals it opened. Using a tab or
 terminal *you* opened needs your permission. When two sessions want the same tab, one controls
 it and the other can still read it.
 

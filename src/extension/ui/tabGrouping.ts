@@ -214,7 +214,7 @@ export class TabGrouping implements vscode.Disposable {
     if (!tab || !this.state.pinnedByUs.includes(tab.tabId)) return undefined;
     const session = tab?.ownerId ? this.services.sessions.get(tab.ownerId) : undefined;
     if (!session) return undefined;
-    return new vscode.FileDecoration(undefined, `Collapsed with ${session.label}${session.title ? ` (${session.title})` : ''}'s tabs`);
+    return new vscode.FileDecoration(undefined, `Collapsed with ${session.label}'s tabs`);
   }
 
   // ----------------------------------------------------------------------------- running
